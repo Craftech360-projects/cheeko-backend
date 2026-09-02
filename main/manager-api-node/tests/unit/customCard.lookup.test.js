@@ -29,7 +29,7 @@ const KID_ID = BigInt(42);
 
 const PACK = {
   id: BigInt(77),
-  pack_code: 'CUSTOM_KID_42',
+  pack_code: 'CK000042',
   name: 'Aarav — Custom Card',
   content_type: 'rfidcontent',
   version: '3',
@@ -76,10 +76,10 @@ describe('custom card lookup', () => {
     // Derived from the child, not the toy — the upload path builds the same
     // code, and a mismatch here means silent playback of nothing.
     expect(mockPrisma.rfid_content_pack.findFirst).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { pack_code: 'CUSTOM_KID_42', active: true } })
+      expect.objectContaining({ where: { pack_code: 'CK000042', active: true } })
     );
     expect(result.contentType).toBe('rfidcontent');
-    expect(result.packCode).toBe('CUSTOM_KID_42');
+    expect(result.packCode).toBe('CK000042');
     expect(result.version).toBe('3');
     expect(result.items).toEqual([
       expect.objectContaining({ sequence: 1, audioUrl: ITEM.audio_url })

@@ -513,7 +513,7 @@ describe('device pairing to a child', () => {
     });
   });
 
-  // A custom card pack is keyed on the child (CUSTOM_KID_<id>), so it needs no
+  // A custom card pack is keyed on the child (CK<id padded to 6>), so it needs no
   // handover: the recordings follow the child to the new toy by construction.
   // These assertions are the guarantee that rests on — the day something starts
   // moving packs on pairing is the day the binding quietly reverts to the toy.

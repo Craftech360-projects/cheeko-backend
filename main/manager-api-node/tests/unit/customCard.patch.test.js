@@ -127,7 +127,7 @@ beforeEach(() => {
   freshKeys = 1;
   pack = {
     id: BigInt(7),
-    pack_code: 'CUSTOM_KID_42',
+    pack_code: 'CK000042',
     name: 'Custom Card',
     version: '4',
     content_hash: 'hash-before',

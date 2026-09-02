@@ -3,7 +3,7 @@
 /**
  * Deleting a child takes their custom card with them.
  *
- * The pack is keyed by pack_code (CUSTOM_KID_<id>), not by a foreign key, so
+ * The pack is keyed by pack_code (CK<id padded to 6>), not by a foreign key, so
  * nothing cascades: without this cleanup the pack, its content_items and every
  * S3 object behind them outlive the child forever. An FK would not have solved
  * it either — ON DELETE CASCADE cannot reach S3, so this code has to exist
@@ -106,7 +106,7 @@ describe('deleteKid', () => {
     const result = await mobileService.deleteKid(UID, KID_ID);
 
     expect(mockTx.rfid_content_pack.findFirst).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { pack_code: 'CUSTOM_KID_42' } })
+      expect.objectContaining({ where: { pack_code: 'CK000042' } })
     );
     expect(mockTx.content_item.deleteMany).toHaveBeenCalledWith({ where: { content_pack_id: PACK.id } });
     expect(mockTx.rfid_content_pack.delete).toHaveBeenCalledWith({ where: { id: PACK.id } });
@@ -210,9 +210,9 @@ describe('deleteUserAccount', () => {
     const result = await mobileService.deleteUserAccount(UID);
 
     expect(mockTx.rfid_content_pack.findFirst).toHaveBeenNthCalledWith(1,
-      expect.objectContaining({ where: { pack_code: 'CUSTOM_KID_42' } }));
+      expect.objectContaining({ where: { pack_code: 'CK000042' } }));
     expect(mockTx.rfid_content_pack.findFirst).toHaveBeenNthCalledWith(2,
-      expect.objectContaining({ where: { pack_code: 'CUSTOM_KID_43' } }));
+      expect.objectContaining({ where: { pack_code: 'CK000043' } }));
 
     // Two children, three URLs each — one pack's worth per child.
     expect(result.retired).toHaveLength(6);

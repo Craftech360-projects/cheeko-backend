@@ -11,7 +11,7 @@
  * parent proves ownership of the child, never of the card.
  *
  * Storage model: the audio is a normal `rfid_content_pack` (pack_code
- * CUSTOM_KID_<kidId>) holding a single `content_item`, so the tap handshake, the
+ * CK<kidId padded to 6>) holding a single `content_item`, so the tap handshake, the
  * download manifest and the ESP32 download path are the stock content-card ones
  * — there is no second content path to maintain.
  */

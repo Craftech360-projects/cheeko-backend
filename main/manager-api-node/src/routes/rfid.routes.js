@@ -891,7 +891,7 @@ router.post('/card/delete',
 // =============================================
 // Custom Card Routes
 // custom_card is the allowlist of issued custom-card UIDs; the recording lives
-// in a per-child rfid_content_pack (CUSTOM_KID_<kidId>).
+// in a per-child rfid_content_pack (CK<kidId padded to 6>).
 // =============================================
 
 /**

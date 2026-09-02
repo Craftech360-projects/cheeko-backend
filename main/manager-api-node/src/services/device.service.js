@@ -310,7 +310,7 @@ const releaseKidFromOtherDevices = async (tx, macAddress, kidId, at = new Date()
  */
 const pairDeviceToKid = async (tx, macAddress, kidId, at = new Date()) => {
   // Custom-card packs are deliberately absent from the handover set: they are
-  // keyed on the child (CUSTOM_KID_<id>), so they follow the child to the new
+  // keyed on the child (CK<id padded to 6>), so they follow the child to the new
   // toy on their own. That is the point of the binding, not an omission.
   const released = await releaseKidFromOtherDevices(tx, macAddress, kidId, at);
   if (released.length) {
