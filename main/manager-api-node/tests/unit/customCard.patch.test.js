@@ -245,14 +245,18 @@ describe('a title-only edit', () => {
 });
 
 describe('an audio-only edit', () => {
-  it('overwrites the recording in place, so fileUrl is unchanged', async () => {
+  it('takes a fresh key, so the URL itself carries the change', async () => {
     const before = itemOne().audio_url;
 
     const card = await patch({ audioFile: MP3() });
 
-    expect(itemOne().audio_url).toBe(before);
-    expect(card.contentPack.items[0].fileUrl).toBe(before);
-    expect(mockUpload.uploadCustomCardAudio.mock.calls[0][4]).toEqual({ reuseKey: AUDIO_KEY });
+    // A stable URL was the bug: same pack, same item, same URL gave no client
+    // any way to tell the recording had changed.
+    expect(itemOne().audio_url).not.toBe(before);
+    expect(card.contentPack.items[0].fileUrl).toBe(itemOne().audio_url);
+    expect(mockUpload.uploadCustomCardAudio.mock.calls[0][4]).toBeUndefined();
+    // Swept post-commit, so fresh keys do not leak an object on every edit.
+    expect(mockUpload.deleteCustomCardObject).toHaveBeenCalledWith(AUDIO_KEY);
   });
 
   it('records the new size and leaves the title alone', async () => {
@@ -280,16 +284,16 @@ describe('an audio-only edit', () => {
 });
 
 describe('an image-only edit', () => {
-  it('overwrites the picture in place, so imageUrl is unchanged', async () => {
+  it('takes a fresh key, so the URL itself carries the change', async () => {
     const before = itemOne().image_url;
 
     const card = await patch({ imageFile: rawFrame() });
 
-    expect(itemOne().image_url).toBe(before);
-    expect(card.contentPack.items[0].imageUrl).toBe(before);
-    expect(mockUpload.uploadCustomCardImage.mock.calls[0][2]).toEqual({ reuseKey: IMAGE_KEY });
-    // Nothing to sweep: the object it replaced is the object it wrote.
-    expect(mockUpload.deleteCustomCardObject).not.toHaveBeenCalled();
+    expect(itemOne().image_url).not.toBe(before);
+    expect(card.contentPack.items[0].imageUrl).toBe(itemOne().image_url);
+    expect(mockUpload.uploadCustomCardImage.mock.calls[0][2]).toBeUndefined();
+    // The object it replaced is now a different object, so it is swept.
+    expect(mockUpload.deleteCustomCardObject).toHaveBeenCalledWith(IMAGE_KEY);
   });
 
   it('takes a new key for a recording that had no picture', async () => {
@@ -299,19 +303,20 @@ describe('an image-only edit', () => {
     expect(card.contentPack.items[1].imageUrl).toBe(`${CDN}/customcard_kid42/image-2.bin`);
   });
 
-  it('moves the content hash even though every URL stayed the same', async () => {
-    // This is the trap the stable-URL decision sets. Two edits to the same
-    // recording write different pixels to the same key, so every field the hash
-    // used to be built from — item number, audio url, image url, title — is
-    // byte-identical across them. Hashing those alone would answer
-    // card_up_to_date for a card whose picture had just changed, and the toy
-    // would keep showing the old one for ever.
+  it('moves both the URL and the content hash on every edit', async () => {
+    // Reusing the key used to set a trap: two edits wrote different pixels to
+    // the same key, so item number, audio url, image url and title were all
+    // byte-identical across them, and the hash had to fold in the image bytes
+    // or the toy would answer card_up_to_date for a picture that had just
+    // changed. A fresh key per edit moves the URL on its own, and the hash
+    // moves with it — the same guarantee without depending on that detail.
     await patch({ imageFile: rawFrame(0x01) });
+    const firstUrl = items[0].image_url;
     const first = pack.content_hash;
 
     await patch({ imageFile: rawFrame(0x02) });
 
-    expect(items[0].image_url).toBe(`${CDN}/${IMAGE_KEY}`);
+    expect(items[0].image_url).not.toBe(firstUrl);
     expect(pack.content_hash).not.toBe(first);
   });
 });

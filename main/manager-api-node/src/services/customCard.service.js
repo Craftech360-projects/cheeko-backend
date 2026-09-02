@@ -330,10 +330,24 @@ const toDeviceImage = async (file, validated) => {
  * frame and the toy hold a manifest across one. A legacy URL that is not a
  * custom-card object resolves to null and simply gets a fresh key.
  */
-const uploadDeviceImage = async (bin, kidId, replacing = null) => {
-  const { url } = await uploadService.uploadCustomCardImage(bin, kidId, {
-    reuseKey: uploadService.customCardKeyFromUrl(replacing)
-  });
+/**
+ * Every edit writes a NEW key rather than overwriting the old one.
+ *
+ * Reusing the key kept the URL stable across an edit, which meant nothing
+ * downstream could tell the picture had changed: same pack, same item, same
+ * URL. A client holding a decoded frame had no reason to re-fetch, so the app
+ * and the dashboard both kept showing the previous image — observed on
+ * 2026-09-02, where the object's ETag changed under a URL the database never
+ * updated. Cache-Control: no-cache only asks a client to revalidate; it cannot
+ * help one that never makes the request.
+ *
+ * A fresh key makes the URL itself the version, so staleness is structurally
+ * impossible instead of being a header everyone has to honour. The old object
+ * is not orphaned: patchCustomCardItem sweeps the previous URL after the commit
+ * lands, precisely because the new URL now differs from it.
+ */
+const uploadDeviceImage = async (bin, kidId) => {
+  const { url } = await uploadService.uploadCustomCardImage(bin, kidId);
   return url;
 };
 
@@ -728,10 +742,9 @@ const replaceCustomCardItem = async (userId, kidId, itemNumber, file, { title, i
     file.buffer,
     kid.id,
     file.originalname || `recording${ext}`,
-    mimeType,
-    { reuseKey: uploadService.customCardKeyFromUrl(target.audio_url) }
+    mimeType
   );
-  const imageUrl = imageBin ? await uploadDeviceImage(imageBin, kid.id, target.image_url) : null;
+  const imageUrl = imageBin ? await uploadDeviceImage(imageBin, kid.id) : null;
 
   const items = existing.map((item) => (
     item.item_number === Number(itemNumber)
@@ -762,9 +775,7 @@ const setCustomCardItemImage = async (userId, kidId, itemNumber, file) => {
   const { kid, pack, existing, target } = await loadTargetItem(userId, kidId, itemNumber);
   const imageInfo = validateImageUpload(file);
 
-  const imageUrl = await uploadDeviceImage(
-    await toDeviceImage(file, imageInfo), kid.id, target.image_url
-  );
+  const imageUrl = await uploadDeviceImage(await toDeviceImage(file, imageInfo), kid.id);
 
   const items = existing.map((item) => (
     item.item_number === Number(itemNumber)
@@ -916,14 +927,13 @@ const patchCustomCardItem = async (userId, kidId, itemNumber, {
       audioFile.buffer,
       kid.id,
       audioFile.originalname || `recording${audioInfo.ext}`,
-      audioInfo.mimeType,
-      { reuseKey: uploadService.customCardKeyFromUrl(target.audio_url) }
+      audioInfo.mimeType
     );
     data.audio_url = url;
     data.audio_size_bytes = BigInt(audioFile.buffer.length);
   }
   if (frameInfo) {
-    data.image_url = await uploadDeviceImage(frameInfo.frame, kid.id, target.image_url);
+    data.image_url = await uploadDeviceImage(frameInfo.frame, kid.id);
   }
   if (clearImage) {
     // null, never '': an empty string reaches the app as a url and renders as a
@@ -991,8 +1001,14 @@ const patchCustomCardItem = async (userId, kidId, itemNumber, {
   }
 
   // Post-commit, so a failed write never leaves a row pointing at an object that
-  // is gone. Only a picture can be orphaned: audio either overwrites its own key
-  // or changes format, and a format change retires the old recording here too.
+  // is gone — the 500 path above deliberately leaves the new object in place
+  // instead, because a row pointing at nothing is worse than an unreferenced
+  // object.
+  //
+  // Both a picture and a recording retire their predecessor now that neither
+  // reuses its key: the new URL always differs from the old one, so the filter
+  // below keeps it and this loop deletes it. That is what stops the switch to
+  // fresh keys from leaking an object on every edit.
   const retired = [
     clearImage || frameInfo ? target.image_url : null,
     data.audio_url && data.audio_url !== target.audio_url ? target.audio_url : null
