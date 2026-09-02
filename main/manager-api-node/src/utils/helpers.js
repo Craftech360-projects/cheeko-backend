@@ -202,7 +202,17 @@ const sleep = (ms) => {
 };
 
 /**
- * Content pack code for a child's custom card: CUSTOM_KID_<kidId>.
+ * Content pack code for a child's custom card: CK<kidId padded to 6>.
+ *
+ * Exactly 8 characters, because the code is written to the RFID card and the
+ * card's field is 8 bytes. The previous CUSTOM_KID_<kidId> form was 13-14 and
+ * did not fit. Fixed width rather than `CK29`, so the length never depends on
+ * how many children exist and the card layout is the same for every kid.
+ *
+ * Six digits caps this at kid id 999999; PACK_CODE_MAX_KID_ID guards it rather
+ * than letting a larger id silently produce a 9-character code the card would
+ * truncate — a truncated code still looks valid and would resolve to the wrong
+ * child, so it must fail loudly instead.
  *
  * Lives here rather than in customCard.service because rfid.service needs it too,
  * and a service-to-service import in both directions would be a require cycle.
@@ -214,9 +224,19 @@ const sleep = (ms) => {
  * to no pack.
  *
  * @param {bigint|number|string} kidId
- * @returns {string}
+ * @returns {string} 8 characters, e.g. kid 29 -> "CK000029"
  */
-const packCodeForKid = (kidId) => `CUSTOM_KID_${BigInt(kidId)}`;
+const PACK_CODE_MAX_KID_ID = 999999n;
+
+const packCodeForKid = (kidId) => {
+  const id = BigInt(kidId);
+  if (id < 0n || id > PACK_CODE_MAX_KID_ID) {
+    throw new Error(
+      `kid id ${id} cannot fit an 8-character RFID pack code (max ${PACK_CODE_MAX_KID_ID})`
+    );
+  }
+  return `CK${id.toString().padStart(6, '0')}`;
+};
 
 /**
  * Who owns a device's workspace and durable memory.

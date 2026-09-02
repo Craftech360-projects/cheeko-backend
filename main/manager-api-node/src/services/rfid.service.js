@@ -1016,7 +1016,7 @@ const lookupCardByUid = async (rfidUid, mac) => {
       const pack = await resolveCustomCardPack(normalizedUid, mac);
 
       if (pack) {
-        // packCode carries the child the toy is paired to: CUSTOM_KID_<kidId>.
+        // packCode carries the child the toy is paired to: CK<kidId padded to 6>.
         logger.info(`[RFID-LOOKUP] Custom card resolved: uid=${normalizedUid}, mac=${mac}, packCode=${pack.pack_code}`);
         return buildContentPackResponse(pack, normalizedUid);
       }
@@ -2868,7 +2868,7 @@ const recordCardTap = async (payload = {}) => {
   let updateAvailable = false;
   let updateReason = null;
   // Custom cards no longer need special-casing here: they resolve to a real
-  // rfid_content_pack (CUSTOM_KID_<kidId>), which the packCode fallback above already
+  // rfid_content_pack (CK<kidId padded to 6>), which the packCode fallback above already
   // picks up, so they get the same version/hash handshake as any content card.
   if (cardType === 'content' && contentPack) {
     if (latestContentHash) {
@@ -4675,7 +4675,7 @@ const deleteCategories = async (ids) => {
 // =============================================
 // Custom Card Admin Methods
 // custom_card is a flat allowlist of issued UIDs; the content lives in
-// rfid_content_pack CUSTOM_KID_<kidId>, one per child.
+// rfid_content_pack CK<kidId padded to 6>, one per child.
 // =============================================
 
 /**
@@ -4750,9 +4750,9 @@ const getCustomPackList = async () => {
   // trusting a LIKE to have already done so.
   const rows = await prisma.$queryRaw`
     WITH custom AS MATERIALIZED (
-      SELECT p.*, SUBSTRING(p.pack_code FROM '^CUSTOM_KID_([0-9]+)$')::bigint AS owner_kid_id
+      SELECT p.*, SUBSTRING(p.pack_code FROM '^CK([0-9]{6})$')::bigint AS owner_kid_id
       FROM rfid_content_pack p
-      WHERE p.pack_code ~ '^CUSTOM_KID_[0-9]+$'
+      WHERE p.pack_code ~ '^CK[0-9]{6}$'
     )
     SELECT
       p.id,

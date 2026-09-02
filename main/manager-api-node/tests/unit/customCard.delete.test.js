@@ -45,7 +45,7 @@ const customCardService = require('../../src/services/customCard.service');
 
 const USER_ID = 7;
 const KID_ID = 42;
-const PACK = { id: BigInt(7), pack_code: 'CUSTOM_KID_42', name: 'Aarav — Custom Card', version: '1' };
+const PACK = { id: BigInt(7), pack_code: 'CK000042', name: 'Aarav — Custom Card', version: '1' };
 
 const AUDIO = (n) => `https://cdn.test/customcard_kid42/audio${n}.mp3`;
 

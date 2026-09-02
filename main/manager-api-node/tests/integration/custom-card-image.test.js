@@ -15,7 +15,7 @@
 const MAC = 'AA:BB:CC:DD:EE:FF';
 const KID_ID = 42;
 const USER_ID = 7;
-const PACK = { id: BigInt(7), pack_code: 'CUSTOM_KID_42', name: 'Custom Card', version: '1' };
+const PACK = { id: BigInt(7), pack_code: 'CK000042', name: 'Custom Card', version: '1' };
 
 jest.mock('../../src/middleware/firebaseAuth', () => ({
   requireFirebaseAuth: (req, res, next) => {
