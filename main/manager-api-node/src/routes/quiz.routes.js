@@ -238,13 +238,15 @@ router.post('/wonder',
   asyncHandler(async (req, res) => {
     const deviceMac = String(req.body.device_mac || '').trim();
     const question = String(req.body.question || '').trim();
+    // Optional: present when the child answered before the session ended.
+    const answer = String(req.body.answer || '').trim();
     if (!deviceMac) return badRequest(res, 'device_mac is required');
     if (!question) return badRequest(res, 'question is required');
 
-    const saved = await quizService.recordWonderQuestion(deviceMac, question);
+    const saved = await quizService.recordWonderQuestion(deviceMac, question, answer);
     // The question itself is not logged: it is the child's, and a log line is a
     // second place it would have to be protected.
-    logger.info(`[QUIZ] POST /quiz/wonder device=${deviceMac} saved=${saved.id} chars=${question.length}`);
+    logger.info(`[QUIZ] POST /quiz/wonder device=${deviceMac} saved=${saved.id} chars=${question.length} answered=${saved.answered === true}`);
     return created(res, saved, 'Wonder question saved');
   })
 );

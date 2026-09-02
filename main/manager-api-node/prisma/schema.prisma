@@ -1695,6 +1695,10 @@ model kid_wonder_question {
   /// recalled once and then retires. Without it the newest row was recalled at
   /// the start of every session until a different one happened to be stored.
   recalled_at DateTime? @db.Timestamptz(6)
+  /// What the child said, when they answered before the session ended. Null
+  /// means the question was left open. Decides which recall the next session
+  /// gets: a callback to their own idea, or the question asked again.
+  answer_text String?
 
   @@index([kid_id, asked_at(sort: Desc)], map: "idx_kid_wonder_kid_time")
   @@index([device_mac, asked_at(sort: Desc)], map: "idx_kid_wonder_device_time")
