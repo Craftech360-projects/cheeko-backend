@@ -2736,3 +2736,137 @@ describe('mobile.service homepage recommendations', () => {
     expect(result.items.some(item => item.itemType === 'ai')).toBe(false);
   });
 });
+
+/**
+ * The card description a parent reads when they tap a card on the home screen.
+ *
+ * It lives in `rfid_content_pack.description`, an admin writes it in the
+ * dashboard, and neither home-screen endpoint used to put it on the wire — so
+ * the parent app carried a hardcoded copy of these very strings, keyed by card
+ * title, and showed a generic sentence for anything not in that list.
+ */
+describe('mobile.service card descriptions reach the home screen', () => {
+  const PACK = {
+    id: 63n,
+    pack_code: 'sty_edu',
+    name: 'Educational Stories',
+    description: 'A story card pack that teaches values, ideas, and useful lessons through engaging narration.',
+    content_type: 'rfidcontent',
+    category: 'Story',
+    thumbnail_url: 'https://cdn.test/bedtime.png',
+    total_items: 6,
+    language: 'en',
+    active: true,
+    status: 'active',
+    create_date: new Date('2026-04-02T06:18:53.771Z')
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prisma.sys_user.findUnique.mockResolvedValue({ id: 1n, firebase_uid: 'firebase-user-1' });
+    prisma.kid_profile.findFirst.mockResolvedValue({ id: 10n, user_id: 1n, name: 'Aditi' });
+    prisma.ai_device.findMany.mockResolvedValue([
+      { id: 'device-1', mac_address: 'AA:BB:CC:DD:EE:FF', agent_id: 'agent-1', kid_id: 10n }
+    ]);
+    prisma.analytics_media_playback.findMany.mockResolvedValue([]);
+    prisma.analytics_game_sessions.findMany.mockResolvedValue([]);
+    prisma.voice_session_messages.findMany.mockResolvedValue([]);
+    prisma.voice_session_messages.count.mockResolvedValue(0);
+    prisma.rfid_card_tap_log.findMany.mockResolvedValue([]);
+    prisma.rfid_card_mapping.findMany.mockResolvedValue([]);
+    prisma.content_library.findMany.mockResolvedValue([]);
+    prisma.rfid_content_pack.findMany.mockResolvedValue([]);
+    prisma.device_analytics_event.findMany.mockResolvedValue([]);
+    prisma.device_analytics_event.findFirst.mockResolvedValue(null);
+    prisma.device_usage_daily.findMany.mockResolvedValue([]);
+    prisma.device_card_taps_daily.findMany.mockResolvedValue([]);
+    prisma.device_ai_interactions_daily.findMany.mockResolvedValue([]);
+    prisma.device_games_played.findMany.mockResolvedValue([]);
+    prisma.device_games_played.count.mockResolvedValue(0);
+    prisma.device_radio_played.findMany.mockResolvedValue([]);
+    prisma.device_radio_played.count.mockResolvedValue(0);
+  });
+
+  describe('the "Made for <kid>" rail', () => {
+    it('sends the pack description alongside the recommendation reason', async () => {
+      prisma.rfid_content_pack.findMany.mockResolvedValue([PACK]);
+
+      const result = await mobileService.getHomepageRecommendations('firebase-user-1', {
+        kidId: '10',
+        limit: 4
+      });
+
+      const item = result.items.find(candidate => candidate.id === '63');
+      expect(item.description).toBe(PACK.description);
+      // `subtitle` is why *this* child is being shown the card. The two are
+      // different sentences, and the detail sheet wants the description.
+      expect(item.subtitle).not.toBe(item.description);
+    });
+
+    it('sends null for a pack nobody has described', async () => {
+      // Three catalogue packs are in this state today — Nature, Space and
+      // Animal Facts. The app says so rather than inventing a sentence.
+      prisma.rfid_content_pack.findMany.mockResolvedValue([{ ...PACK, description: null }]);
+
+      const result = await mobileService.getHomepageRecommendations('firebase-user-1', {
+        kidId: '10',
+        limit: 4
+      });
+
+      expect(result.items.find(candidate => candidate.id === '63').description).toBeNull();
+    });
+  });
+
+  describe('the recent-activity rail', () => {
+    const TAP = {
+      id: 501n,
+      mac_address: 'AA:BB:CC:DD:EE:FF',
+      event_timestamp: new Date('2026-09-01T10:00:00.000Z'),
+      server_received_at: new Date('2026-09-01T10:00:01.000Z'),
+      rfid_uid: 'ABC123',
+      content_id: 63n,
+      content_type: 'rfidcontent',
+      data: { content_pack_name: 'Educational Stories' }
+    };
+
+    const mappingWith = (description) => ({
+      rfid_uid: 'ABC123',
+      card_type: 'content',
+      thumbnail_url: null,
+      action_data: {},
+      rfid_content_pack: { name: PACK.name, description, thumbnail_url: PACK.thumbnail_url },
+      rfid_question: null,
+      rfid_pack: null
+    });
+
+    it('fills the description from the pack behind the tapped card', async () => {
+      // The analytics row is a tap record, not a catalogue row, so the only
+      // place a description can come from is the pack the card maps to.
+      prisma.device_analytics_event.findMany.mockResolvedValue([TAP]);
+      prisma.rfid_card_mapping.findMany.mockResolvedValue([mappingWith(PACK.description)]);
+
+      const activity = await mobileService.getHomepageActivity('firebase-user-1', {
+        mac: 'AA:BB:CC:DD:EE:FF'
+      });
+
+      expect(activity.recentActivities[0]).toMatchObject({
+        rfidUid: 'ABC123',
+        contentPackName: 'Educational Stories',
+        description: PACK.description
+      });
+    });
+
+    it('leaves the description null when the pack has none', async () => {
+      prisma.device_analytics_event.findMany.mockResolvedValue([TAP]);
+      prisma.rfid_card_mapping.findMany.mockResolvedValue([mappingWith(null)]);
+
+      const activity = await mobileService.getHomepageActivity('firebase-user-1', {
+        mac: 'AA:BB:CC:DD:EE:FF'
+      });
+
+      // The key is always present, so the app can tell "nobody described this"
+      // from "this build of the server does not send descriptions at all".
+      expect(activity.recentActivities[0]).toHaveProperty('description', null);
+    });
+  });
+});
