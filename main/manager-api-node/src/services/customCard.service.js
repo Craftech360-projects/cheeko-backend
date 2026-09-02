@@ -21,7 +21,7 @@ const { prisma } = require('../config/database');
 const uploadService = require('./upload.service');
 const rfidService = require('./rfid.service');
 const { packCodeForKid } = require('../utils/helpers');
-const { toLvglRgb565Bin } = require('../utils/lvglImage');
+const { toLvglRgb565Bin, toDeviceFrame, RAW_FRAME_BYTES, LVGL_FRAME_BYTES } = require('../utils/lvglImage');
 const { ApiError } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
 
@@ -41,6 +41,9 @@ const MAX_IMAGE_PIXELS = 40 * 1000 * 1000;
 
 // Same ceiling as a catalogue content pack.
 const MAX_ITEMS = 10;
+
+// A title is a line under a picture on a phone, and the column is VARCHAR(255).
+const MAX_TITLE_CHARS = 80;
 
 // Extension -> the MIME type we persist. The client sends audio/mpeg for .mp3 and
 // audio/wav for .wav, but the header is attacker-controlled so extension and
@@ -218,7 +221,16 @@ const validateImageUpload = (file) => {
   }
 
   const sniffed = sniffImageExtension(file.buffer);
+
+  // A current app build fits the picture to the panel itself and uploads the
+  // packed frame, so there is nothing here to decode, sniff or name-check: the
+  // length is the whole test. Deliberately tried only after the PNG/JPEG sniff,
+  // so a photograph that happens to be exactly frame-length is still read as a
+  // photograph. `.bin` needs no place on the extension allowlist because the
+  // extension is never consulted on this branch (spec §12.3).
   if (!sniffed) {
+    const frame = toDeviceFrame(file.buffer);
+    if (frame) return { kind: 'frame', frame, ext: '.bin', mimeType: 'application/octet-stream' };
     throw new ApiError('Only PNG and JPEG pictures are supported.', 400);
   }
 
@@ -242,7 +254,43 @@ const validateImageUpload = (file) => {
     );
   }
 
-  return { ext: sniffed, mimeType: ALLOWED_IMAGE[sniffed] };
+  return { kind: 'photo', ext: sniffed, mimeType: ALLOWED_IMAGE[sniffed] };
+};
+
+/**
+ * The picture part of PATCH, which is the one place the client is guaranteed to
+ * be a build that packs the frame itself. Nothing but a panel frame is accepted
+ * here — a photograph would have to be fitted server-side, and the crop is the
+ * parent's decision, made in the editor.
+ *
+ * The legacy upload paths keep taking PNG and JPEG for ever (spec §13.2); this
+ * strictness is scoped to PATCH alone.
+ */
+const validateFrameUpload = (file) => {
+  if (!file || !file.buffer || file.buffer.length === 0) {
+    throw new ApiError('That picture is empty. Please choose a different one.', 400);
+  }
+  const frame = toDeviceFrame(file.buffer);
+  if (!frame) {
+    throw new ApiError('That picture is not the right size for the toy\'s screen. Please choose it again.', 400);
+  }
+  return { kind: 'frame', frame, ext: '.bin', mimeType: 'application/octet-stream' };
+};
+
+/**
+ * What a title change means.
+ *
+ * Empty is clear-to-fallback rather than a validation error, because that is
+ * what the detail screen does when a parent wipes the field. There is no
+ * separate filename column, so the fallback is the name of whatever recording
+ * the same request carries, and failing that the item's position.
+ */
+const resolveTitle = (raw, { audioFile, itemNumber }) => {
+  const trimmed = String(raw ?? '').trim();
+  if (trimmed.length > MAX_TITLE_CHARS) {
+    throw new ApiError(`That name is too long. Please keep it under ${MAX_TITLE_CHARS} characters.`, 400);
+  }
+  return trimmed || audioFile?.originalname || `Recording ${itemNumber}`;
 };
 
 /**
@@ -257,7 +305,12 @@ const validateImageUpload = (file) => {
  * it is a 400 in the same words as an unsupported type; anything else (ffmpeg
  * missing, timing out) is ours and stays a 500.
  */
-const toDeviceImage = async (file) => {
+const toDeviceImage = async (file, validated) => {
+  // Already the bytes the toy renders. Converting it would mean decoding a raw
+  // framebuffer as if it were a picture file, which is exactly the corruption
+  // the "no server-side processing" rule exists to prevent.
+  if (validated?.kind === 'frame') return validated.frame;
+
   try {
     return await toLvglRgb565Bin(file.buffer);
   } catch (error) {
@@ -269,9 +322,18 @@ const toDeviceImage = async (file) => {
   }
 };
 
-/** Store a converted picture and return the public URL to hang on the item. */
-const uploadDeviceImage = async (bin, kidId) => {
-  const { url } = await uploadService.uploadCustomCardImage(bin, kidId);
+/**
+ * Store a picture and return the public URL to hang on the item.
+ *
+ * `replacing` is the URL of the picture this one supersedes. Its key is reused
+ * so `imageUrl` survives an edit unchanged, which is what lets the app cache a
+ * frame and the toy hold a manifest across one. A legacy URL that is not a
+ * custom-card object resolves to null and simply gets a fresh key.
+ */
+const uploadDeviceImage = async (bin, kidId, replacing = null) => {
+  const { url } = await uploadService.uploadCustomCardImage(bin, kidId, {
+    reuseKey: uploadService.customCardKeyFromUrl(replacing)
+  });
   return url;
 };
 
@@ -420,9 +482,6 @@ const loadPackItems = (packId) =>
     select: CONTENT_ITEM_FIELDS
   });
 
-// The stored URL is <publicBase>/<key>; strip scheme + host to recover the key.
-const keyFromUrl = (url) => (url ? String(url).split('/').slice(3).join('/') : null);
-
 /**
  * Delete storage objects for items that are no longer in the pack.
  *
@@ -439,7 +498,7 @@ const deleteOrphanedObjects = async (before, keptUrls) => {
   for (const item of before) {
     for (const url of [item.audio_url, item.image_url]) {
       if (url && !keptUrls.has(url)) {
-        await uploadService.deleteCustomCardObject(keyFromUrl(url));
+        await uploadService.deleteCustomCardObject(uploadService.customCardKeyFromUrl(url));
       }
     }
   }
@@ -479,6 +538,26 @@ const ensurePackForKid = async (kid, userId) => {
   });
 };
 
+/** The next pack version: a monotonic integer, +1 per write, stored as a string. */
+const nextPackVersion = (pack) => String(Number(pack.version || 0) + 1);
+
+/**
+ * The freshness token the toy compares before it re-downloads a card.
+ *
+ * The version is part of the input, and has to be: since an edit now overwrites
+ * the bytes at the existing S3 key, a replaced picture or recording leaves every
+ * URL exactly where it was. Hashing the URLs alone would answer
+ * card_up_to_date for a card whose contents had just changed, and the toy would
+ * keep playing its cached copy for ever. Titles are in it for the same reason —
+ * they are the one field with no object behind it at all.
+ */
+const packContentHash = (items, version) => createHash('sha256')
+  .update([
+    String(version),
+    ...items.map((item) => `${item.itemNumber}:${item.audioUrl}:${item.imageUrl || ''}:${item.title || ''}`)
+  ].join('|'))
+  .digest('hex');
+
 /**
  * Write a new item set for the child's pack, then clean up storage.
  *
@@ -492,14 +571,8 @@ const ensurePackForKid = async (kid, userId) => {
  */
 const writePackItems = async (kid, pack, items, userId) => {
   const before = await loadPackItems(pack.id);
-  const nextVersion = String(Number(pack.version || 0) + 1);
-  // Hash covers the whole set, so adding, removing or reordering all register as
-  // a change — not just a different first recording. The picture is part of it:
-  // without it, changing only the artwork leaves the hash where it was, the tap
-  // handshake answers card_up_to_date, and the toy never fetches the new file.
-  const contentHash = createHash('sha256')
-    .update(items.map((item) => `${item.itemNumber}:${item.audioUrl}:${item.imageUrl || ''}`).join('|'))
-    .digest('hex');
+  const nextVersion = nextPackVersion(pack);
+  const contentHash = packContentHash(items, nextVersion);
 
   await rfidService.updateContentPack({
     id: Number(pack.id),
@@ -583,7 +656,7 @@ const addCustomCardContent = async (userId, kidId, files, { title, images = [] }
     ...validateAudioUpload(file, title)
   }));
   for (const entry of validated) {
-    if (entry.image) validateImageUpload(entry.image);
+    if (entry.image) entry.imageInfo = validateImageUpload(entry.image);
   }
 
   const pack = await ensurePackForKid(kid, userId);
@@ -599,7 +672,7 @@ const addCustomCardContent = async (userId, kidId, files, { title, images = [] }
   // Decode before any upload, for the same all-or-nothing reason as validation:
   // ffmpeg failing on the third picture must not leave two in the bucket.
   for (const entry of validated) {
-    if (entry.image) entry.imageBin = await toDeviceImage(entry.image);
+    if (entry.image) entry.imageBin = await toDeviceImage(entry.image, entry.imageInfo);
   }
 
   const appended = [];
@@ -641,20 +714,24 @@ const replaceCustomCardItem = async (userId, kidId, itemNumber, file, { title, i
     throw new ApiError('Please choose a recording to upload.', 400);
   }
 
-  const { kid, pack, existing } = await loadTargetItem(userId, kidId, itemNumber);
+  const { kid, pack, existing, target } = await loadTargetItem(userId, kidId, itemNumber);
 
   const { ext, mimeType } = validateAudioUpload(file, title);
-  if (image) validateImageUpload(image);
+  const imageInfo = image ? validateImageUpload(image) : null;
 
-  const imageBin = image ? await toDeviceImage(image) : null;
+  const imageBin = image ? await toDeviceImage(image, imageInfo) : null;
 
+  // Both objects overwrite the ones they replace, so fileUrl and imageUrl come
+  // back from an edit unchanged — see uploadCustomCardAudio for the one case
+  // that cannot be honoured (a recording changing format).
   const { url } = await uploadService.uploadCustomCardAudio(
     file.buffer,
     kid.id,
     file.originalname || `recording${ext}`,
-    mimeType
+    mimeType,
+    { reuseKey: uploadService.customCardKeyFromUrl(target.audio_url) }
   );
-  const imageUrl = imageBin ? await uploadDeviceImage(imageBin, kid.id) : null;
+  const imageUrl = imageBin ? await uploadDeviceImage(imageBin, kid.id, target.image_url) : null;
 
   const items = existing.map((item) => (
     item.item_number === Number(itemNumber)
@@ -682,10 +759,12 @@ const setCustomCardItemImage = async (userId, kidId, itemNumber, file) => {
     throw new ApiError('Please choose a picture to upload.', 400);
   }
 
-  const { kid, pack, existing } = await loadTargetItem(userId, kidId, itemNumber);
-  validateImageUpload(file);
+  const { kid, pack, existing, target } = await loadTargetItem(userId, kidId, itemNumber);
+  const imageInfo = validateImageUpload(file);
 
-  const imageUrl = await uploadDeviceImage(await toDeviceImage(file), kid.id);
+  const imageUrl = await uploadDeviceImage(
+    await toDeviceImage(file, imageInfo), kid.id, target.image_url
+  );
 
   const items = existing.map((item) => (
     item.item_number === Number(itemNumber)
@@ -731,9 +810,210 @@ const deleteCustomCardItem = async (userId, kidId, itemNumber) => {
   return writePackItems(kid, pack, items, userId);
 };
 
+// ── editing one recording in place ──────────────────────────────────────────
+
+/**
+ * The version a client claims to have seen, from an `If-Match` header.
+ *
+ * Quoting and the weak prefix are the header's syntax, not part of the value, so
+ * both are stripped before comparing. `*` is HTTP's "any current representation"
+ * and matches whatever the pack is on. A missing header returns null, which is
+ * an unconditional write and last-write-wins — required rather than tolerated,
+ * because the legacy endpoints live for ever and none of them sends one.
+ */
+const parseIfMatch = (header) => {
+  const raw = String(header ?? '').trim();
+  if (!raw) return null;
+  if (raw === '*') return '*';
+  return raw.replace(/^W\//i, '').replace(/^"|"$/g, '');
+};
+
+const versionMatches = (packVersion, ifMatch) =>
+  ifMatch === null || ifMatch === '*' || String(packVersion ?? '0') === ifMatch;
+
+/**
+ * The tag GET offers for `If-None-Match`: a hash of the serialized card, not
+ * the pack version. `deviceMac` and `kidName` are in the body and change
+ * without any card write, so a version-keyed 304 kept answering "no toy paired"
+ * after a toy was paired, until the next edit happened to bump the version.
+ * `If-Match` on PATCH is still the version — that fences a write against the
+ * pack, which is the thing being written.
+ */
+const cardETag = (card) => createHash('sha256').update(JSON.stringify(card)).digest('hex').slice(0, 32);
+
+const STALE_CARD_MESSAGE = 'Someone else updated this card. Here is the latest version.';
+
+/** The whole card as GET would answer it. */
+const cardFor = async (kid, pack) => {
+  const items = pack ? await loadPackItems(pack.id) : [];
+  return serializePack(kid, pack, items, await currentDeviceMacForKid(kid.id));
+};
+
+/**
+ * A 412 that carries the card the caller is behind on, so the app can repaint
+ * from what actually happened rather than showing a generic failure.
+ */
+const staleVersionError = async (kid, pack) => {
+  const error = new ApiError(STALE_CARD_MESSAGE, 412);
+  error.stale = true;
+  error.data = await cardFor(kid, pack);
+  return error;
+};
+
+/**
+ * Change the picture, title and audio of one recording, in one atomic request.
+ *
+ * Three properties this endpoint has that the legacy ones do not:
+ *
+ * - **Identity survives.** The row is updated by its own id, so `id`,
+ *   `item_number` and the pack's `create_date` are untouched and nothing
+ *   renumbers. The legacy paths rewrite the whole item set through
+ *   rfidService.updateContentPack, which deletes and reinserts.
+ * - **Ordering is storage first, database last.** Every validation runs before a
+ *   single byte reaches S3, because the write is destructive: an object
+ *   overwritten in place has taken the parent's previous picture with it, and no
+ *   rollback brings it back.
+ * - **`If-Match` is compared inside the write transaction.** Checking first and
+ *   writing second reopens the race it exists to close; the pre-check further up
+ *   is only there to fail before S3.
+ *
+ * @param {{title?: string, audioFile?: Object, imageFile?: Object,
+ *          clearImage?: boolean, ifMatch?: string|null}} changes
+ */
+const patchCustomCardItem = async (userId, kidId, itemNumber, {
+  title, audioFile = null, imageFile = null, clearImage = false, ifMatch = null
+} = {}) => {
+  if (clearImage && imageFile) {
+    throw new ApiError('Send either a new picture or a request to remove it, not both.', 400);
+  }
+
+  const { kid, pack, target } = await loadTargetItem(userId, kidId, itemNumber);
+  const number = Number(itemNumber);
+
+  // ── everything that can fail, before anything is written ──────────────────
+  const nextTitle = title === undefined
+    ? undefined
+    : resolveTitle(title, { audioFile, itemNumber: number });
+  const audioInfo = audioFile ? validateAudioUpload(audioFile, title) : null;
+  const frameInfo = imageFile ? validateFrameUpload(imageFile) : null;
+
+  if (nextTitle === undefined && !audioInfo && !frameInfo && !clearImage) {
+    // A request that writes nothing. Left alone deliberately: a bump here would
+    // send every toy holding this card off to re-download it for no change.
+    return cardFor(kid, pack);
+  }
+
+  if (!versionMatches(pack.version, ifMatch)) {
+    throw await staleVersionError(kid, pack);
+  }
+
+  // ── storage ───────────────────────────────────────────────────────────────
+  const data = { updater: BigInt(userId), update_date: new Date() };
+  if (nextTitle !== undefined) data.title = nextTitle;
+
+  if (audioInfo) {
+    const { url } = await uploadService.uploadCustomCardAudio(
+      audioFile.buffer,
+      kid.id,
+      audioFile.originalname || `recording${audioInfo.ext}`,
+      audioInfo.mimeType,
+      { reuseKey: uploadService.customCardKeyFromUrl(target.audio_url) }
+    );
+    data.audio_url = url;
+    data.audio_size_bytes = BigInt(audioFile.buffer.length);
+  }
+  if (frameInfo) {
+    data.image_url = await uploadDeviceImage(frameInfo.frame, kid.id, target.image_url);
+  }
+  if (clearImage) {
+    // null, never '': an empty string reaches the app as a url and renders as a
+    // broken picture on a recording that deliberately has none.
+    data.image_url = null;
+  }
+
+  // ── database ──────────────────────────────────────────────────────────────
+  const commit = () => prisma.$transaction(async (tx) => {
+    const current = await tx.rfid_content_pack.findUnique({
+      where: { id: pack.id },
+      select: { version: true }
+    });
+    if (!versionMatches(current?.version, ifMatch)) {
+      const conflict = new Error('stale');
+      conflict.staleVersion = true;
+      throw conflict;
+    }
+
+    const version = nextPackVersion(current || pack);
+    await tx.content_item.update({ where: { id: target.id }, data });
+
+    const items = await tx.content_item.findMany({
+      where: { content_pack_id: pack.id },
+      orderBy: { item_number: 'asc' },
+      select: CONTENT_ITEM_FIELDS
+    });
+
+    // The updated row, not the one read at the top: the response's `updatedAt`
+    // and `version` both come from it, and echoing the stale copy would have the
+    // app show a save timestamp from before the save.
+    return tx.rfid_content_pack.update({
+      where: { id: pack.id },
+      data: {
+        version,
+        content_hash: packContentHash(items.map(toItemPayload), version),
+        total_items: items.length,
+        updater: BigInt(userId),
+        update_date: new Date()
+      }
+    });
+  });
+
+  let saved;
+  try {
+    saved = await commit();
+  } catch (error) {
+    if (error.staleVersion) throw await staleVersionError(kid, pack);
+
+    // The bytes are already new and the row is not. Retry once; the URLs are
+    // unchanged either way, so the worst surviving state is the new picture
+    // under the old version — which the version bump below at least makes the
+    // toy fetch. Neither is allowed to swallow the failure.
+    logger.warn(`[CUSTOM-CARD] Commit failed for kid=${kid.id} item=${number}, retrying: ${error.message}`);
+    try {
+      saved = await commit();
+    } catch (retryError) {
+      if (retryError.staleVersion) throw await staleVersionError(kid, pack);
+      await prisma.rfid_content_pack
+        .update({ where: { id: pack.id }, data: { version: nextPackVersion(pack), update_date: new Date() } })
+        .catch(() => {});
+      logger.error(`[CUSTOM-CARD] Edit stored in S3 but not committed for kid=${kid.id} item=${number}: ${retryError.message}`);
+      throw new ApiError('That change could not be saved. Please try again.', 500);
+    }
+  }
+
+  // Post-commit, so a failed write never leaves a row pointing at an object that
+  // is gone. Only a picture can be orphaned: audio either overwrites its own key
+  // or changes format, and a format change retires the old recording here too.
+  const retired = [
+    clearImage || frameInfo ? target.image_url : null,
+    data.audio_url && data.audio_url !== target.audio_url ? target.audio_url : null
+  ].filter((url) => url && url !== data.image_url && url !== data.audio_url);
+  for (const url of retired) {
+    await uploadService.deleteCustomCardObject(uploadService.customCardKeyFromUrl(url));
+  }
+
+  logger.info(
+    `[CUSTOM-CARD] Edited item ${number} for kid=${kid.id}: pack_code=${pack.pack_code}, version=${saved.version}`
+  );
+
+  return cardFor(kid, saved);
+};
+
 module.exports = {
   getCustomCardForKid,
   addCustomCardContent,
+  patchCustomCardItem,
+  parseIfMatch,
+  cardETag,
   replaceCustomCardItem,
   deleteCustomCardItem,
   setCustomCardItemImage,
@@ -743,6 +1023,12 @@ module.exports = {
   // exported for tests
   validateAudioUpload,
   validateImageUpload,
+  validateFrameUpload,
+  resolveTitle,
+  packContentHash,
+  MAX_TITLE_CHARS,
+  RAW_FRAME_BYTES,
+  LVGL_FRAME_BYTES,
   sniffAudioExtension,
   sniffImageExtension,
   imageDimensions,

@@ -20,6 +20,11 @@ const S3_ENDPOINT = process.env.S3_ENDPOINT || undefined;
 // Public base for AI Imagine image URLs. For MinIO set e.g.
 // http://192.168.0.186:9000/<bucket>; falls back to CloudFront for AWS.
 const IMAGINE_PUBLIC_BASE = process.env.IMAGINE_PUBLIC_BASE || `https://${CLOUDFRONT_DOMAIN}`;
+// Set to invalidate overwritten custom-card objects at the edge. Belt-and-braces
+// only: the objects carry Cache-Control: no-cache, which is what actually makes
+// an overwrite visible — invalidations are slow, rate-limited and eventually
+// consistent, so nothing waits on one. Unset in local and test environments.
+const CLOUDFRONT_DISTRIBUTION_ID = process.env.CLOUDFRONT_DISTRIBUTION_ID || '';
 
 logger.info('S3 Upload Service initialized', {
   region: AWS_REGION,
@@ -341,23 +346,91 @@ function customCardFolder(kidId) {
   return `customcard_kid${kidId}`;
 }
 
-async function uploadCustomCardAudio(fileBuffer, kidId, filename, mimeType) {
+// Custom-card objects are overwritten at a stable key rather than getting a new
+// one on every edit, so a year-long edge cache would serve last week's recording
+// forever. `no-cache` is not `no-store`: the object is still cached, but every
+// fetch revalidates against the ETag S3 computes, so an unchanged asset costs a
+// 304 and a changed one is picked up on the next tap.
+const CUSTOM_CARD_CACHE_CONTROL = 'no-cache';
+
+/**
+ * Recover the S3 key from a stored custom-card URL. The stored value is
+ * <publicBase>/<key>, so everything from the fourth slash on is the key.
+ * Returns null for anything that is not a custom-card object, which is what
+ * keeps an in-place overwrite from ever landing on catalogue content.
+ */
+function customCardKeyFromUrl(url) {
+  if (!url) return null;
+  const key = String(url).split('/').slice(3).join('/');
+  if (!key || !key.startsWith('customcard') || key.includes('..')) return null;
+  // The key is written by us and never contains an escape, but a stored URL is
+  // still data from a row — decode so a %20 in a legacy filename matches.
+  try {
+    return decodeURIComponent(key);
+  } catch {
+    return key;
+  }
+}
+
+/**
+ * Ask CloudFront to forget a key it may be holding. Best-effort in every sense:
+ * no distribution configured is a no-op, the SDK is loaded lazily so a
+ * deployment without it still boots, and a failure is logged rather than failing
+ * a write that has already succeeded. `no-cache` is the real freshness
+ * guarantee — this only shortens the window in which an edge that ignores it
+ * could still answer.
+ */
+async function invalidateCloudFront(keys) {
+  const paths = [...new Set((keys || []).filter(Boolean))].map((key) => `/${key}`);
+  if (!CLOUDFRONT_DISTRIBUTION_ID || paths.length === 0) return;
+
+  try {
+    const { CloudFrontClient, CreateInvalidationCommand } = require('@aws-sdk/client-cloudfront');
+    const client = new CloudFrontClient({ region: AWS_REGION });
+    await client.send(new CreateInvalidationCommand({
+      DistributionId: CLOUDFRONT_DISTRIBUTION_ID,
+      InvalidationBatch: {
+        CallerReference: randomUUID(),
+        Paths: { Quantity: paths.length, Items: paths }
+      }
+    }));
+    logger.info('CloudFront invalidation requested', { paths });
+  } catch (error) {
+    logger.warn(`CloudFront invalidation failed for ${paths.join(', ')}: ${error.message}`);
+  }
+}
+
+/**
+ * @param {Buffer} fileBuffer
+ * @param {bigint|number|string} kidId
+ * @param {string} filename - used only for the extension
+ * @param {string} mimeType - validated MIME type
+ * @param {{reuseKey?: string|null}} [options] - the key of the recording this
+ *   one replaces. Overwriting it keeps `fileUrl` stable, which is what lets the
+ *   app cache a frame and the toy hold a manifest across an edit. Honoured only
+ *   when the extension matches: a WAV written over a `.mp3` key would hand the
+ *   toy a file whose name lies about its contents, so a format change takes a
+ *   fresh key and lets the orphan sweep retire the old one.
+ */
+async function uploadCustomCardAudio(fileBuffer, kidId, filename, mimeType, { reuseKey = null } = {}) {
   const ext = (path.extname(filename || '') || '.mp3').toLowerCase();
-  const s3Key = `${customCardFolder(kidId)}/${randomUUID()}${ext}`;
+  const reusable = reuseKey && path.extname(reuseKey).toLowerCase() === ext ? reuseKey : null;
+  const s3Key = reusable || `${customCardFolder(kidId)}/${randomUUID()}${ext}`;
 
   await s3Client.send(new PutObjectCommand({
     Bucket: S3_BUCKET,
     Key: s3Key,
     Body: fileBuffer,
     ContentType: mimeType || 'audio/mpeg',
-    CacheControl: 'max-age=31536000'
+    CacheControl: CUSTOM_CARD_CACHE_CONTROL
   }));
+  if (reusable) await invalidateCloudFront([s3Key]);
 
   // Public CloudFront URL, same as every other content pack: the ESP32 fetches
   // this straight out of the download manifest, and a signed URL would expire
   // while the manifest sits cached on the toy.
   const url = `${IMAGINE_PUBLIC_BASE}/${s3Key}`;
-  logger.info('Custom card audio uploaded to S3', { s3Key, kidId: String(kidId), size: fileBuffer.length });
+  logger.info('Custom card audio uploaded to S3', { s3Key, kidId: String(kidId), size: fileBuffer.length, overwritten: !!reusable });
   return { s3Key, url };
 }
 
@@ -371,25 +444,30 @@ async function uploadCustomCardAudio(fileBuffer, kidId, filename, mimeType) {
  * The body is already an LVGL binary — octet-stream, not an image type, because
  * that is what the toy downloads and writes to the SD card verbatim.
  *
- * The key is a fresh UUID every time. CloudFront caches these for a year, so a
- * deterministic key would have a replaced picture serve the old bytes forever.
+ * A replacement overwrites the picture it replaces rather than taking a new key,
+ * so `imageUrl` is stable across an edit. Freshness comes from the no-cache +
+ * ETag pair above, not from a changing URL — a picture is always `.bin`, so
+ * unlike the audio there is no extension to disagree about.
  * @param {Buffer} binBuffer - LVGL RGB565 binary
  * @param {bigint|number|string} kidId - the child the picture belongs to
+ * @param {{reuseKey?: string|null}} [options] - the key of the picture this one
+ *   replaces, if any
  * @returns {Promise<{s3Key: string, url: string}>}
  */
-async function uploadCustomCardImage(binBuffer, kidId) {
-  const s3Key = `${customCardFolder(kidId)}/${randomUUID()}.bin`;
+async function uploadCustomCardImage(binBuffer, kidId, { reuseKey = null } = {}) {
+  const s3Key = reuseKey || `${customCardFolder(kidId)}/${randomUUID()}.bin`;
 
   await s3Client.send(new PutObjectCommand({
     Bucket: S3_BUCKET,
     Key: s3Key,
     Body: binBuffer,
     ContentType: 'application/octet-stream',
-    CacheControl: 'max-age=31536000'
+    CacheControl: CUSTOM_CARD_CACHE_CONTROL
   }));
+  if (reuseKey) await invalidateCloudFront([s3Key]);
 
   const url = `${IMAGINE_PUBLIC_BASE}/${s3Key}`;
-  logger.info('Custom card image uploaded to S3', { s3Key, kidId: String(kidId), size: binBuffer.length });
+  logger.info('Custom card image uploaded to S3', { s3Key, kidId: String(kidId), size: binBuffer.length, overwritten: !!reuseKey });
   return { s3Key, url };
 }
 
@@ -417,6 +495,8 @@ module.exports = {
   listImagineImagesForKid,
   uploadCustomCardAudio,
   uploadCustomCardImage,
+  customCardKeyFromUrl,
+  invalidateCloudFront,
   deleteCustomCardObject,
   // Pre-image name, kept so nothing that still calls it breaks.
   deleteCustomCardAudio: deleteCustomCardObject

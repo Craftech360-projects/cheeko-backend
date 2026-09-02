@@ -50,6 +50,7 @@
   "author": "Cheeko Team",
   "license": "MIT",
   "dependencies": {
+    "@aws-sdk/client-cloudfront": "^3.1124.0",
     "@aws-sdk/client-s3": "^3.975.0",
     "@playwright/mcp": "^0.0.62",
     "@prisma/adapter-pg": "^7.4.2",

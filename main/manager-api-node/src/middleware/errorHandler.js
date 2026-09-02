@@ -91,11 +91,16 @@ const errorHandler = (err, req, res, next) => {
   // Don't leak stack traces in production
   const stack = process.env.NODE_ENV === 'development' ? err.stack : undefined;
 
-  // Send response matching Spring Boot format
+  // Send response matching Spring Boot format.
+  // An ApiError may carry a body of its own — a 412 answers with the card the
+  // caller is behind on, so the client can repaint from what actually happened
+  // instead of showing a generic failure. Only an ApiError's, though: an error
+  // thrown by an SDK or HTTP client can carry a `data` of its own, and that is
+  // internal detail, not a body for the app.
   res.status(statusCode).json({
     code,
     msg: message,
-    data: stack ? { stack } : null
+    data: err.isOperational && err.data !== undefined ? err.data : (stack ? { stack } : null)
   });
 };
 

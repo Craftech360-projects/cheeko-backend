@@ -10,6 +10,7 @@ const deviceSettingsService = require('../services/deviceSettings.service');
 const deviceAnalyticsService = require('../services/deviceAnalytics.service');
 const uploadService = require('../services/upload.service');
 const customCardService = require('../services/customCard.service');
+const idempotencyService = require('../services/idempotency.service');
 const { success, badRequest } = require('../utils/response');
 const { ApiError } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
@@ -66,6 +67,60 @@ const CUSTOM_CARD_IMAGE_FIELDS = [
     ...Array.from({ length: customCardService.MAX_ITEMS }, (_, i) => ({ name: `image_${i + 1}`, maxCount: 1 })),
     { name: 'image', maxCount: 1 },
 ];
+
+// The edit endpoint's parts. `audio` is what the spec names; `file` and `files`
+// are accepted alongside it because that is what every other custom-card route
+// calls the recording, and multer answers an unexpected field name with a
+// message no parent can act on.
+const CUSTOM_CARD_PATCH_FIELDS = [
+    { name: 'audio', maxCount: 1 },
+    { name: 'file', maxCount: 1 },
+    { name: 'files', maxCount: 1 },
+    { name: 'image', maxCount: 1 },
+];
+
+const isTruthyField = (value) => ['true', '1', 'yes'].includes(String(value ?? '').trim().toLowerCase());
+
+/**
+ * Replay a retried write instead of performing it twice.
+ *
+ * Opt-in: a request with no `Idempotency-Key` passes straight through, which is
+ * what keeps every shipped build working. The response is captured by wrapping
+ * res.json, so the handler below needs no knowledge of any of this; only a 2xx
+ * is remembered, because a failure has to stay retryable.
+ *
+ * @param {(req) => string} scopeFor - namespaces the key to one parent and one
+ *   target, so a guessed key can only replay the caller's own response
+ */
+const withIdempotency = (scopeFor) => asyncHandler(async (req, res, next) => {
+    const key = req.get('Idempotency-Key');
+    if (!key) return next();
+
+    const scope = scopeFor(req);
+    const claim = await idempotencyService.begin(scope, key);
+
+    if (claim.replay) {
+        return res.status(claim.replay.statusCode).json(claim.replay.body);
+    }
+    if (claim.inFlight) {
+        return res.status(409).json({
+            code: 409,
+            msg: 'That change is still being saved. Please wait a moment and try again.',
+            data: null,
+        });
+    }
+    if (claim.commit) {
+        const sendJson = res.json.bind(res);
+        res.json = (body) => {
+            const done = res.statusCode >= 200 && res.statusCode < 300
+                ? claim.commit(res.statusCode, body)
+                : claim.release();
+            done.catch(() => {});
+            return sendJson(body);
+        };
+    }
+    return next();
+});
 
 const handleUploadErrors = (uploadMiddleware) => (req, res, next) => {
     uploadMiddleware(req, res, (err) => {
@@ -317,8 +372,23 @@ router.post('/kids/:id/avatar', kidAvatarUpload.single('file'), asyncHandler(asy
 // issued custom card tapped on the toy that child is paired to plays this pack,
 // and it follows them to a new toy. Always 200 — a null contentPack means
 // "nothing recorded yet", which is a normal state, not an error.
+// The ETag is a hash of the body, not the pack version: `deviceMac` and
+// `kidName` change without a card write (pairing a toy bumps nothing), and a
+// version-keyed 304 kept answering "no toy paired" until the next edit. The
+// version is still what `If-Match` fences a PATCH with — it is in the body.
 router.get('/kids/:kidId/custom-card', asyncHandler(async (req, res) => {
     const card = await customCardService.getCustomCardForKid(req.mobileUser.id, req.params.kidId);
+    const etag = customCardService.cardETag(card);
+
+    res.set('ETag', `"${etag}"`);
+    const offered = String(req.get('If-None-Match') || '')
+        .split(',')
+        .map((tag) => customCardService.parseIfMatch(tag))
+        .filter(Boolean);
+    if (offered.some((tag) => tag === '*' || tag === etag)) {
+        return res.status(304).end();
+    }
+
     success(res, card);
 }));
 
@@ -333,6 +403,7 @@ router.post('/kids/:kidId/custom-card/content',
         { name: 'file', maxCount: 1 },
         ...CUSTOM_CARD_IMAGE_FIELDS,
     ])),
+    withIdempotency((req) => `${req.mobileUser.id}:add-content:${req.params.kidId}`),
     asyncHandler(async (req, res) => {
         const { uploads, images } = customCardService.pairCustomCardUploads(req.files);
         if (uploads.length === 0) {
@@ -354,6 +425,43 @@ router.post('/kids/:kidId/custom-card/content',
         );
 
         res.status(201).json({ code: 0, msg: 'success', data: card });
+    })
+);
+
+// Edits one recording: picture, title and audio, in a single atomic request.
+//
+// PATCH rather than PUT because every part is optional — this is a partial
+// update of a row, not a replacement of it. What separates it from the three
+// legacy routes below is that the row keeps its id and its number (nothing is
+// deleted and reinserted), the whole thing lands or none of it does, and a
+// caller may fence its write with `If-Match`.
+//
+// The legacy routes are not deprecated by this and never will be: shipped app
+// builds and the manager dashboard both still call them.
+router.patch('/kids/:kidId/custom-card/content/:itemNumber',
+    handleUploadErrors(customCardUpload.fields(CUSTOM_CARD_PATCH_FIELDS)),
+    withIdempotency((req) => `${req.mobileUser.id}:patch-item:${req.params.kidId}:${req.params.itemNumber}`),
+    asyncHandler(async (req, res) => {
+        const card = await customCardService.patchCustomCardItem(
+            req.mobileUser.id,
+            req.params.kidId,
+            req.params.itemNumber,
+            {
+                title: req.body?.title,
+                audioFile: (req.files?.audio || req.files?.file || req.files?.files || [])[0] || null,
+                imageFile: (req.files?.image || [])[0] || null,
+                clearImage: isTruthyField(req.body?.clearImage),
+                // Absent means an unconditional write. That is required rather
+                // than tolerated: no legacy caller sends the header.
+                ifMatch: customCardService.parseIfMatch(req.get('If-Match')),
+            }
+        );
+
+        const version = card.contentPack?.version ?? null;
+        if (version !== null) {
+            res.set('ETag', `"${version}"`);
+        }
+        success(res, card);
     })
 );
 
