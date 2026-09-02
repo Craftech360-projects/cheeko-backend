@@ -1089,9 +1089,9 @@ async function getRecentCardActivityMetadataMap(keys) {
             card_type: true,
             thumbnail_url: true,
             action_data: true,
-            rfid_content_pack: { select: { name: true, thumbnail_url: true } },
-            rfid_question: { select: { title: true } },
-            rfid_pack: { select: { pack_name: true } }
+            rfid_content_pack: { select: { name: true, description: true, thumbnail_url: true } },
+            rfid_question: { select: { title: true, prompt_text: true } },
+            rfid_pack: { select: { pack_name: true, description: true } }
         }
     });
 
@@ -1125,7 +1125,17 @@ async function getRecentCardActivityMetadataMap(keys) {
             actionData.cover_url,
             mapping.rfid_content_pack?.thumbnail_url
         );
-        const metadata = { name, thumbnailUrl };
+        // What the card is about, for the recent-activity detail sheet. Same
+        // precedence as the name above: whatever the tap wrote on itself first,
+        // then the pack an admin described.
+        const description = firstKnownValue(
+            actionData.description,
+            actionData.prompt,
+            mapping.rfid_question?.prompt_text,
+            mapping.rfid_content_pack?.description,
+            mapping.rfid_pack?.description
+        );
+        const metadata = { name, description, thumbnailUrl };
         const key = String(mapping.rfid_uid);
         metadataMap.set(key, metadata);
         metadataMap.set(key.toLowerCase(), metadata);
@@ -1581,6 +1591,13 @@ function formatRecommendationContent(content, reason) {
         contentId,
         title,
         subtitle: reason,
+        // What the pack is, as an admin wrote it in the dashboard. Distinct from
+        // `subtitle`/`reason`, which is why *this* child is being shown it — the
+        // parent app's card detail sheet needs the former and used to carry a
+        // hardcoded copy of these strings because the field never reached it.
+        // Null for a pack nobody has described yet; the app says so rather than
+        // inventing a sentence.
+        description: content.description || null,
         contentType: content.content_type,
         category,
         packCode: content.pack_code || null,
@@ -2357,6 +2374,10 @@ function formatRecentAnalyticsCardActivity(row) {
         contentPackCode,
         content_pack_name: contentPackName,
         contentPackName,
+        // Always present, so the key exists whether or not the pack lookup in
+        // getRecentAnalyticsCardActivities finds one to fill it. An analytics
+        // row never carries a description itself.
+        description: firstKnownValue(data.description, data.prompt),
         image_url: imageUrl,
         imageUrl,
         thumbnail_url: imageUrl,
@@ -2450,6 +2471,12 @@ async function getRecentAnalyticsCardActivities(macAddresses, limit = 3) {
         if (metadata?.name) {
             activity.content_pack_name = metadata.name;
             activity.contentPackName = metadata.name;
+        }
+        // The analytics event carries no description of its own — it is a tap
+        // record, not a catalogue row — so the only place one can come from is
+        // the pack behind the card.
+        if (!activity.description && metadata?.description) {
+            activity.description = metadata.description;
         }
         if (!activity.image_url && metadata?.thumbnailUrl) {
             activity.image_url = metadata.thumbnailUrl;
