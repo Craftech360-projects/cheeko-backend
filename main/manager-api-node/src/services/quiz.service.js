@@ -437,9 +437,15 @@ const nextQuestions = async (deviceMac, bankName = DEFAULT_BANK) => {
   // Diagnostic-grade, like the attempt log: the quiz must still run if this read
   // fails. A missing wonder question costs a warm opening line, nothing more.
   let wonderQuestion = null;
+  let wonderAnswer = null;
   let wonderHistory = [];
   try {
-    wonderQuestion = await takePendingWonderQuestion(context);
+    const pending = await takePendingWonderQuestion(context);
+    wonderQuestion = pending ? pending.question : null;
+    // The child's own words, when they answered it. The worker opens with a
+    // callback rather than re-asking: a question answered thirty seconds before
+    // the toy was switched off is not one the child is still wondering about.
+    wonderAnswer = pending ? pending.answer : null;
     // What she has already asked. Without it "leave them a different one" has no
     // referent: the model reads its own session summaries and hands back the
     // same question in slightly different words.
@@ -454,6 +460,9 @@ const nextQuestions = async (deviceMac, bankName = DEFAULT_BANK) => {
     age_band_defaulted: context.profileMissing,
     // Null when the child has never been left one. Never gates anything.
     wonder_question: wonderQuestion,
+    // Null when the child never answered it, which is the only case where the
+    // next session asks the question again.
+    wonder_answer: wonderAnswer,
     // Newest first, including the one served above. Never gates anything.
     recent_wonder_questions: wonderHistory,
     language,
@@ -525,12 +534,15 @@ const toQuestionId = (questionId) => {
 const normaliseWonder = (text) =>
   text.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '').replace(/\s+/g, ' ').trim();
 
-const recordWonderQuestion = async (deviceMac, question) => {
+const recordWonderQuestion = async (deviceMac, question, answer) => {
   const text = String(question ?? '').trim();
   if (!text) throw new ApiError('question is required', 400);
   // Long enough for a real question, short enough that a runaway model reply
   // cannot fill the column.
   if (text.length > 500) throw new ApiError('question must be 500 characters or fewer', 400);
+  // What the child said, when they answered before the session ended. Same cap:
+  // it is one spoken sentence, not a transcript.
+  const answerText = String(answer ?? '').trim().slice(0, 500) || null;
 
   const context = await resolveDeviceContext(deviceMac);
 
@@ -555,10 +567,10 @@ const recordWonderQuestion = async (deviceMac, question) => {
   }
 
   const row = await prisma.kid_wonder_question.create({
-    data: { device_mac: deviceMac, kid_id: context.kidId ?? null, question: text },
+    data: { device_mac: deviceMac, kid_id: context.kidId ?? null, question: text, answer_text: answerText },
     select: { id: true, asked_at: true },
   });
-  return { id: String(row.id), question: text, asked_at: row.asked_at };
+  return { id: String(row.id), question: text, answered: answerText !== null, asked_at: row.asked_at };
 };
 
 const wonderScope = (context) => (
@@ -621,6 +633,7 @@ const lastWonderQuestion = async (context) => {
  * rule true without a second round trip from the worker.
  */
 const takePendingWonderQuestion = async (context, now = new Date()) => {
+  // Returns { question, answer } — answer null when the child never replied.
   const row = await prisma.kid_wonder_question.findFirst({
     where: {
       ...wonderScope(context),
@@ -632,7 +645,7 @@ const takePendingWonderQuestion = async (context, now = new Date()) => {
       asked_at: { lt: new Date(now.getTime() - WONDER_RECALL_COOLDOWN_MS) },
     },
     orderBy: { asked_at: 'desc' },
-    select: { id: true, question: true },
+    select: { id: true, question: true, answer_text: true },
   });
   if (!row) return null;
   // Before returning it: a failed stamp must not serve the question, or the
@@ -641,7 +654,7 @@ const takePendingWonderQuestion = async (context, now = new Date()) => {
     where: { id: row.id },
     data: { recalled_at: new Date() },
   });
-  return row.question;
+  return { question: row.question, answer: row.answer_text ?? null };
 };
 
 /**

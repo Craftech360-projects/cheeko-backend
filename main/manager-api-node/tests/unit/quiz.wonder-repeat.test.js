@@ -94,9 +94,9 @@ describe('takePendingWonderQuestion', () => {
   it('serves the pending question and retires it', async () => {
     mockFindFirst.mockResolvedValue({ id: 7n, question: BEE });
 
-    const question = await quizService.takePendingWonderQuestion(context);
+    const pending = await quizService.takePendingWonderQuestion(context);
 
-    expect(question).toBe(BEE);
+    expect(pending).toEqual({ question: BEE, answer: null });
     expect(mockFindFirst).toHaveBeenCalledWith(
       expect.objectContaining({ where: expect.objectContaining({ recalled_at: null }) })
     );
@@ -143,6 +143,44 @@ describe('takePendingWonderQuestion', () => {
 
 // "Leave them a different one" needs something to be different FROM. Without
 // this list the model re-reads its own summaries and reworks the same question.
+// A question the child ANSWERED is not one they are still wondering about.
+// Prod 2026-09-01: "Pizza" at 05:47, the same question asked again the next
+// morning, and the child's reply was "ask the direct question".
+describe('the child answer', () => {
+  const context = { kidId: 15n, deviceMac: MAC };
+
+  it('is stored with the question', async () => {
+    await quizService.recordWonderQuestion(MAC, BEE, '  Bubbles of juice  ');
+
+    expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ question: BEE, answer_text: 'Bubbles of juice' }),
+    }));
+  });
+
+  it('is null when the child never answered', async () => {
+    await quizService.recordWonderQuestion(MAC, BEE);
+
+    expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ answer_text: null }),
+    }));
+  });
+
+  it('is capped like the question, so a runaway reply cannot fill the column', async () => {
+    await quizService.recordWonderQuestion(MAC, BEE, 'x'.repeat(900));
+
+    const { data } = mockCreate.mock.calls[0][0];
+    expect(data.answer_text).toHaveLength(500);
+  });
+
+  it('comes back with the question it belongs to', async () => {
+    mockFindFirst.mockResolvedValue({ id: 7n, question: BEE, answer_text: 'Pizza' });
+
+    expect(await quizService.takePendingWonderQuestion(context)).toEqual({
+      question: BEE, answer: 'Pizza',
+    });
+  });
+});
+
 describe('recentWonderQuestions', () => {
   const context = { kidId: 15n, deviceMac: MAC };
 
