@@ -12,6 +12,7 @@ const zlib = require('zlib');
 // URL lands on which item, not about pixels, so they run against a stub; the
 // converter itself is exercised for real further down.
 jest.mock('../../src/utils/lvglImage', () => ({
+  ...jest.requireActual('../../src/utils/lvglImage'),
   toLvglRgb565Bin: jest.fn(async () => Buffer.alloc(12))
 }));
 
@@ -25,7 +26,10 @@ const mockPrisma = {
 const mockUpload = {
   uploadCustomCardAudio: jest.fn(),
   uploadCustomCardImage: jest.fn(),
-  deleteCustomCardObject: jest.fn(async () => {})
+  deleteCustomCardObject: jest.fn(async () => {}),
+  // Pure, and the service depends on what it returns to decide whether an edit
+  // can overwrite the object it replaces. Stubbing it would test the stub.
+  customCardKeyFromUrl: jest.requireActual('../../src/services/upload.service').customCardKeyFromUrl
 };
 
 const mockRfid = { updateContentPack: jest.fn() };
@@ -174,12 +178,12 @@ describe('validateImageUpload', () => {
     // Flutter's MultipartFile.fromBytes() omits the filename; the magic bytes
     // are the control, so this must not be rejected as an unsupported type.
     expect(customCardService.validateImageUpload(asUpload(PNG.buffer, undefined)))
-      .toEqual({ ext: '.png', mimeType: 'image/png' });
+      .toEqual({ kind: 'photo', ext: '.png', mimeType: 'image/png' });
   });
 
   it('accepts a JPEG named .jpeg', () => {
     expect(customCardService.validateImageUpload(asUpload(JPEG.buffer, 'photo.jpeg')))
-      .toEqual({ ext: '.jpg', mimeType: 'image/jpeg' });
+      .toEqual({ kind: 'photo', ext: '.jpg', mimeType: 'image/jpeg' });
   });
 
   it('rejects a JPEG wearing a .png extension', () => {
@@ -218,14 +222,14 @@ describe('validateImageUpload', () => {
     // 48 MP is past the ceiling, but no 48 MP JPEG fits in 5 MB; 12 MP is what a
     // parent's camera roll actually holds, and it must not be turned away.
     expect(customCardService.validateImageUpload(asUpload(makeJpegHeader(4032, 3024), 'photo.jpg')))
-      .toEqual({ ext: '.jpg', mimeType: 'image/jpeg' });
+      .toEqual({ kind: 'photo', ext: '.jpg', mimeType: 'image/jpeg' });
   });
 
   it('lets a picture with no readable frame header through to ffmpeg', () => {
     // Nothing we can measure means nothing ffmpeg can decode either, so the
     // subprocess timeout is the backstop rather than a guess here.
     expect(customCardService.imageDimensions(JPEG.buffer, '.jpg')).toBeNull();
-    expect(customCardService.validateImageUpload(JPEG)).toEqual({ ext: '.jpg', mimeType: 'image/jpeg' });
+    expect(customCardService.validateImageUpload(JPEG)).toEqual({ kind: 'photo', ext: '.jpg', mimeType: 'image/jpeg' });
   });
 
   it('reads dimensions out of each format\'s own header', () => {

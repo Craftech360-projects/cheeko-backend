@@ -32,7 +32,12 @@ const mockUpload = {
 const mockRfid = { updateContentPack: jest.fn() };
 
 jest.mock('../../src/config/database', () => ({ prisma: mockPrisma }));
-jest.mock('../../src/services/upload.service', () => mockUpload);
+jest.mock('../../src/services/upload.service', () => ({
+  // Pure, and the sweep depends on what it returns to decide which objects are
+  // safe to delete. Stubbing it would test the stub.
+  customCardKeyFromUrl: jest.requireActual('../../src/services/upload.service').customCardKeyFromUrl,
+  ...mockUpload,
+}));
 jest.mock('../../src/services/rfid.service', () => mockRfid);
 jest.mock('../../src/utils/lvglImage', () => ({ toLvglRgb565Bin: jest.fn(async () => Buffer.alloc(12)) }));
 

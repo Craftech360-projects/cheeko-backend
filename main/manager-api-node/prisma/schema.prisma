@@ -863,6 +863,29 @@ model rfid_content_pack {
   @@index([active], map: "idx_rfid_content_pack_active")
 }
 
+/// Replayed responses for retried writes.
+///
+/// Mobile networks drop a multipart request after the body is sent but before
+/// the response arrives, and the app retries. Without this the retry appends a
+/// second recording, or bumps the pack version twice and costs every toy holding
+/// the card a pointless re-download. The stored response is the body and status
+/// the first call answered with, not a "seen" flag, so a replay is
+/// indistinguishable from the original.
+model idempotency_record {
+  id            BigInt   @id @default(autoincrement())
+  /// user + endpoint + item, so a guessed key cannot return another parent's card
+  scope         String   @db.VarChar(255)
+  idem_key      String   @db.VarChar(255)
+  /// 'in_progress' until the first call answers, then 'done'
+  status        String   @default("in_progress") @db.VarChar(20)
+  status_code   Int?
+  response_body Json?
+  create_date   DateTime @default(now()) @db.Timestamptz(6)
+
+  @@unique([scope, idem_key], map: "uq_idempotency_scope_key")
+  @@index([create_date], map: "idx_idempotency_create_date")
+}
+
 model content_item {
   id                BigInt             @id @default(autoincrement())
   content_pack_id   BigInt?

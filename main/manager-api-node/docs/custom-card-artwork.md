@@ -122,7 +122,12 @@ timeout and kill control above.
 
 [`uploadCustomCardImage(binBuffer, deviceMac)`](../src/services/upload.service.js#L376)
 mirrors `uploadCustomCardAudio`: a `randomUUID()` key under the **same**
-`customcard_<mac>/` prefix, `application/octet-stream`, one-year cache.
+`customcard_<mac>/` prefix, `application/octet-stream`.
+
+> **Superseded, in part.** The edit endpoint changed the caching and keying rules
+> described in this section — an edit now overwrites the object at its existing
+> key and everything is served `Cache-Control: no-cache`. See
+> [custom-card-item-edit.md](./custom-card-item-edit.md).
 
 Two things about that prefix matter:
 
@@ -132,8 +137,10 @@ Two things about that prefix matter:
   **not** reused — its keys are `rfidcontent/images/<name>`, a global admin
   namespace with no per-device isolation and no cleanup guard.
 
-The key is a fresh UUID on every write. CloudFront caches these for a year, so a
-deterministic key would have a replaced picture serve the old bytes forever.
+The key is a fresh UUID for a picture that has none yet. A picture that
+*replaces* one overwrites it at its existing key instead, so `imageUrl` survives
+an edit — freshness comes from `Cache-Control: no-cache` plus the `ETag`, not
+from a changing URL.
 
 `deleteCustomCardAudio` was renamed to
 [`deleteCustomCardObject`](../src/services/upload.service.js#L397) since it now
@@ -276,10 +283,14 @@ One field added per item; nothing else changed.
 }
 ```
 
-`imageUrl` is `null` when no artwork is set. It is a public CloudFront URL,
-stable and safe to cache — same rules as `fileUrl`. There is deliberately **no
-pack-level image mirror**: the pack-level fields describe `items[0]` and predate
-artwork.
+`imageUrl` is `null` when no artwork is set. It is a public CloudFront URL —
+same rules as `fileUrl`. There is deliberately **no pack-level image mirror**:
+the pack-level fields describe `items[0]` and predate artwork.
+
+> The URL is stable across an edit, which means it is **not** an identity: an
+> edit overwrites the bytes behind it. A cache keyed on the url alone would paint
+> the first frame it ever saw for ever — key on `(url, packVersion)` or send
+> `If-None-Match`. See [custom-card-item-edit.md](./custom-card-item-edit.md).
 
 ### Errors
 
@@ -335,11 +346,12 @@ PUT  …/custom-card/content/1/image      // part name: `image`
 DELETE …/custom-card/content/1/image    // no body
 ```
 
-**Render `items[].imageUrl`.** Public URL, year-cached, safe in a normal image
-cache. `null` means no artwork — show the placeholder, not an error. The URL
-points at an **LVGL `.bin`, not a viewable image**, so the app cannot preview it
-by fetching that URL. Show the local file the parent just picked, or add a
-JPEG-preview companion later if a real preview is wanted.
+**Render `items[].imageUrl`.** Public URL; revalidate rather than cache by age
+(see the note above). `null` means no artwork — show the placeholder, not an
+error. The URL points at an **LVGL `.bin`, not a viewable image**, so the app
+cannot render it with `Image.network`; it has to fetch the bytes, skip the
+12-byte header and expand RGB565 → RGBA8888, the way the manager dashboard's
+decoder does.
 
 **Show `msg` verbatim on 400 and 404.** Every message in the table above is
 written for a parent and says what to do next; a generic "upload failed" throws

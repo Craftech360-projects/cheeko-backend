@@ -207,9 +207,50 @@ const toLvglRgb565Bin = async (buffer, { width = PANEL_WIDTH, height = PANEL_HEI
   return bin;
 };
 
+/**
+ * The two lengths a device frame can arrive as, and the one it is stored as.
+ *
+ * The parent app packs the panel itself and uploads RAW_FRAME_BYTES of RGB565
+ * with no container (lib/utils/toy_screen_image.dart). The toy's SD image loader
+ * and the manager dashboard's preview both parse the 12-byte LVGL v9 header, so
+ * a headerless frame renders nowhere — the header is added here rather than
+ * asking every consumer to guess. Nothing about the pixels changes.
+ */
+const LVGL_HEADER_BYTES = 12;
+const RAW_FRAME_BYTES = PANEL_WIDTH * PANEL_HEIGHT * 2;      // 142,080
+const LVGL_FRAME_BYTES = LVGL_HEADER_BYTES + RAW_FRAME_BYTES; // 142,092
+
+/** True for a buffer that already carries the LVGL v9 RGB565 header. */
+const isLvglFrame = (buffer) =>
+  Buffer.isBuffer(buffer)
+  && buffer.length === LVGL_FRAME_BYTES
+  && buffer[0] === 0x19
+  && buffer[1] === 0x12;
+
+/**
+ * A pre-packed panel frame as the toy stores it, or null when the buffer is not
+ * one. Byte-for-byte on the pixels either way: a raw frame is wrapped, an
+ * already-wrapped one is returned untouched. No decode, no resize, no re-encode
+ * — see the custom-card spec's "do not convert" rule, which is about the pixel
+ * data, not the container.
+ */
+const toDeviceFrame = (buffer) => {
+  if (!Buffer.isBuffer(buffer)) return null;
+  if (isLvglFrame(buffer)) return buffer;
+  if (buffer.length === RAW_FRAME_BYTES) {
+    return Buffer.concat([buildHeader(PANEL_WIDTH, PANEL_HEIGHT), buffer]);
+  }
+  return null;
+};
+
 module.exports = {
   toLvglRgb565Bin,
+  toDeviceFrame,
+  isLvglFrame,
   PANEL_WIDTH,
   PANEL_HEIGHT,
-  MAX_BIN_BYTES
+  MAX_BIN_BYTES,
+  LVGL_HEADER_BYTES,
+  RAW_FRAME_BYTES,
+  LVGL_FRAME_BYTES
 };

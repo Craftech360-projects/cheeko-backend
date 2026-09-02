@@ -26,7 +26,10 @@ jest.mock('../../src/middleware/firebaseAuth', () => ({
   ensureFirebaseInit: () => true,
 }));
 
+// Only the ffmpeg conversion is stubbed. toDeviceFrame is pure and is what
+// decides whether an upload is a pre-packed panel frame, so it stays real.
 jest.mock('../../src/utils/lvglImage', () => ({
+  ...jest.requireActual('../../src/utils/lvglImage'),
   toLvglRgb565Bin: jest.fn(async () => Buffer.alloc(12)),
 }));
 
