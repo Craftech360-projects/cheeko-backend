@@ -1,6 +1,5 @@
 <template>
   <div class="template-management">
-    <HeaderBar />
 
     <div class="main-wrapper">
       <div class="content-panel">
@@ -162,11 +161,9 @@
 
 <script>
 import Api from "@/apis/api";
-import HeaderBar from "@/components/HeaderBar.vue";
 
 export default {
-  name: "TemplateManagement",
-  components: { HeaderBar },
+  name: 'TemplateManagement',
   data() {
     return {
       templates: [],

@@ -3085,6 +3085,37 @@ const getCardTapLogs = async ({ page = 1, limit = 50, mac, uid, cardType, update
  * @param {Object} filters - summary filters
  * @returns {Promise<Object>} analytics summary
  */
+/**
+ * One-call stats overview for the admin dashboard KPI strip.
+ * Replaces the six page:1,limit:1 probe calls the UI used to make.
+ */
+const getRfidStatsOverview = async () => {
+  const [
+    totalQuestionPacks,
+    totalContentPacks,
+    totalProductSkus,
+    totalCards,
+    totalSeries,
+    totalAiCards
+  ] = await Promise.all([
+    prisma.rfid_question_pack.count(),
+    prisma.rfid_content_pack.count(),
+    prisma.rfid_pack.count(),
+    prisma.rfid_card_mapping.count(),
+    prisma.rfid_series.count(),
+    prisma.rfid_card_mapping.count({ where: { card_type: 'ai' } })
+  ]);
+
+  return {
+    totalQuestionPacks,
+    totalContentPacks,
+    totalProductSkus,
+    totalCards,
+    totalSeries,
+    totalAiCards
+  };
+};
+
 const getCardTapAnalyticsSummary = async ({ mac, uid, cardType, updateRequired, recognized, dateFrom, dateTo } = {}) => {
   const { startDate, endDate } = buildSummaryDateRange({ dateFrom, dateTo });
   const baseWhere = buildCardTapWhere({ mac, uid, cardType, updateRequired, recognized }, false);
@@ -4856,6 +4887,7 @@ module.exports = {
   updatePack,
   deletePack,
   deletePacks,
+  getRfidStatsOverview,
 
   // Question management
   getQuestionPage,

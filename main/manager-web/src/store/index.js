@@ -89,6 +89,22 @@ export default new Vuex.Store({
           resolve();
         });
       });
+    },
+    // Fetch user info once per session (cleared by clearAuth on logout)
+    fetchUserInfoOnce({ commit, state }) {
+      if (state.userInfo && state.userInfo.superAdmin !== undefined) {
+        return Promise.resolve(state.userInfo);
+      }
+      return new Promise((resolve) => {
+        Api.user.getUserInfo(({ data }) => {
+          if (data.code === 0 && data.data && data.data.superAdmin !== undefined) {
+            commit('setUserInfo', data.data);
+            resolve(data.data);
+          } else {
+            resolve(null);
+          }
+        });
+      });
     }
   },
   modules: {

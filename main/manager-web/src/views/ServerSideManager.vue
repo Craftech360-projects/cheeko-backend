@@ -1,6 +1,5 @@
 <template>
   <div class="welcome">
-    <HeaderBar />
 
     <div class="operation-bar">
       <h2 class="page-title">Server Management</h2>
@@ -41,12 +40,11 @@
 
 <script>
 import Api from "@/apis/api";
-import HeaderBar from "@/components/HeaderBar.vue";
-import ParamDialog from "@/components/ParamDialog.vue";
 import VersionFooter from "@/components/VersionFooter.vue";
 
 export default {
-  components: { HeaderBar, ParamDialog, VersionFooter },
+  name: 'ServerSideManager',
+  components: { VersionFooter },
   data() {
     return {
       paramsList: [],
@@ -55,14 +53,12 @@ export default {
           value: 'restart',
           title: "Restart Server",
           message: "Are you sure you want to restart the server?",
-          confirmText: "Restart",
-        },
+          confirmText: "Restart" },
         update_config: {
           value: 'update_config',
           title: "Update Configuration",
           message: "Are you sure you want to update the configuration?",
-          confirmText: "Update",
-        }
+          confirmText: "Update" }
       },
       currentPage: 1,
       loading: false,
@@ -78,8 +74,7 @@ export default {
         paramCode: "",
         paramValue: "",
         remark: ""
-      },
-    };
+      } };
   },
   created() {
     this.fetchParams();
@@ -103,8 +98,7 @@ export default {
         pages.push(i);
       }
       return pages;
-    },
-  },
+    } },
   methods: {
     handlePageSizeChange(val) {
       this.pageSize = val;
@@ -163,8 +157,7 @@ export default {
       }
       return "";
     }
-  },
-};
+  } };
 </script>
 
 <style lang="scss" scoped>

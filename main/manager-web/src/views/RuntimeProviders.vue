@@ -1,6 +1,5 @@
 <template>
   <div class="welcome">
-    <HeaderBar />
 
     <div class="operation-bar">
       <div class="title-block">
@@ -189,12 +188,11 @@
 
 <script>
 import Api from "@/apis/api";
-import HeaderBar from "@/components/HeaderBar.vue";
 import VersionFooter from "@/components/VersionFooter.vue";
 
 export default {
-  name: "RuntimeProviders",
-  components: { HeaderBar, VersionFooter },
+  name: 'RuntimeProviders',
+  components: { VersionFooter },
   data() {
     return {
       activeType: "llm",

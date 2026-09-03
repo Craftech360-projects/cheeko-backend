@@ -1,26 +1,27 @@
 <template>
   <div class="welcome">
     <!-- Common Header -->
-    <HeaderBar :devices="devices" @search="handleSearch" @search-reset="handleSearchReset" />
     <el-main style="padding: 20px;display: flex;flex-direction: column;">
       <div>
         <!-- Home Page Content -->
         <div class="add-device">
           <div class="add-device-bg">
-            <div class="hellow-text" style="margin-top: 18px;">
-              Hello, Cheeko
-            </div>
-            <div class="hellow-text">
-              Let's have a
-              <span style="color: var(--primary);">wonderful day!</span>
-            </div>
-            <div class="add-device-btn">
-              <div class="left-add" @click="showAddDialog">
-                Add Agent
+            <div class="hero-left">
+              <div class="hellow-text" style="margin-top: 18px;">
+                Hello, Cheeko
               </div>
-              <div style="width: 23px;height: 13px;background: var(--primary);margin-left: -10px;" />
-              <div class="right-add">
-                <i class="el-icon-right" @click="showAddDialog" style="font-size: 20px;color: #fff;" />
+              <div class="hellow-text">
+                Let's have a
+                <span style="color: var(--primary);">wonderful day!</span>
+              </div>
+              <div class="add-device-btn">
+                <div class="left-add" @click="showAddDialog">
+                  Add Agent
+                </div>
+                <div style="width: 23px;height: 13px;background: var(--primary);margin-left: -10px;" />
+                <div class="right-add">
+                  <i class="el-icon-right" @click="showAddDialog" style="font-size: 20px;color: #fff;" />
+                </div>
               </div>
             </div>
             <!-- Stats Boxes Container -->
@@ -244,19 +245,16 @@
 import Api from '@/apis/api';
 import AddWisdomBodyDialog from '@/components/AddWisdomBodyDialog.vue';
 import ChatHistoryDialog from '@/components/ChatHistoryDialog.vue';
-import HeaderBar from '@/components/HeaderBar.vue';
 import VersionFooter from '@/components/VersionFooter.vue';
 
 export default {
-  name: 'HomePage',
-  components: { AddWisdomBodyDialog, HeaderBar, VersionFooter, ChatHistoryDialog },
+  name: 'Home',
+  components: { AddWisdomBodyDialog, VersionFooter, ChatHistoryDialog },
   data() {
     return {
       addDeviceDialogVisible: false,
       devices: [],
       originalDevices: [],
-      isSearching: false,
-      searchRegex: null,
       isLoading: true,
       showChatHistory: false,
       currentAgentId: '',
@@ -334,27 +332,22 @@ export default {
   },
 
   activated() {
-    // This runs when component is activated (useful if using keep-alive)
-    console.log('Home component activated, fetching agent list'); // Debug log
+    // keep-alive fires activated right after the first mount too — mounted()
+    // already loaded the list then; refresh only on genuine re-entries
+    if (!this._homeEverActivated) {
+      this._homeEverActivated = true;
+      return;
+    }
     this.fetchAgentList();
   },
 
   created() {
     console.log('Home component created'); // Debug log
+    this._homeEverActivated = false;
   },
 
-  watch: {
-    '$route'(to, from) {
-      // Watch for route changes - refetch data when navigating back to home
-      console.log('Route changed:', from.path, '->', to.path); // Debug log
-      if (to.name === 'home' || to.path === '/home') {
-        console.log('Navigated back to home, refetching agent list'); // Debug log
-        this.$nextTick(() => {
-          this.fetchAgentList();
-        });
-      }
-    }
-  },
+  // Re-entry refresh is handled by activated() — the layout's keep-alive
+  // re-activates this component on every navigation back to /home.
 
   methods: {
     showAddDialog() {
@@ -424,41 +417,9 @@ export default {
     handleDeviceManage() {
       this.$router.push('/device-management');
     },
-    handleSearch(regex) {
-      this.isSearching = true;
-      this.searchRegex = regex;
-      this.applySearchFilter();
-      this.currentPage = 1; // Reset to first page on search
-    },
-    handleSearchReset() {
-      this.isSearching = false;
-      this.searchRegex = null;
-      this.devices = [...this.originalDevices];
-      // Reset to first page and refetch when search is cleared
-      if (this.currentPage !== 1) {
-        this.currentPage = 1;
-        this.fetchAgentList();
-      }
-    },
     // Set devices without resetting page (used after API fetch)
     setDevicesFromOriginal() {
-      this.isSearching = false;
-      this.searchRegex = null;
       this.devices = [...this.originalDevices];
-    },
-    applySearchFilter() {
-      if (!this.isSearching || !this.searchRegex) {
-        this.devices = [...this.originalDevices];
-        return;
-      }
-
-      this.devices = this.originalDevices.filter(device => {
-        return this.searchRegex.test(device.agentName);
-      });
-    },
-    // Search and update agent list
-    handleSearchResult(filteredList) {
-      this.devices = filteredList; // Update device list
     },
     // Get agent list
     fetchAgentList() {
@@ -577,7 +538,7 @@ export default {
           agentName: item.agentName || item.name || 'Unknown Agent',
           userId: item.userId || item.user_id || item.ownerId || null,
           deviceCount: item.deviceCount || 0,
-          macAddresses: [], // Will be populated by fetchDeviceDataForAgents
+          macAddresses: item.deviceMacAddresses ? String(item.deviceMacAddresses).split(',').filter(Boolean) : [],
           memModelId: item.memModelId || 'Memory_nomem',
           lastConnectedAt: item.lastConnectedAt || null,
           systemPrompt: item.systemPrompt || 'No system prompt configured',
@@ -590,58 +551,10 @@ export default {
 
       console.log('Basic devices processed:', basicDevices); // Debug log
 
-      // Set basic data for initial display
+      // Set basic data for initial display (deviceCount/macAddresses come
+      // from the /agent/list response — no per-agent device fetches needed)
       this.originalDevices = basicDevices;
       this.setDevicesFromOriginal();
-
-      // Asynchronously fetch device count and MAC addresses
-      this.fetchDeviceDataForAgents();
-    },
-
-    // Get device count and MAC addresses for all agents
-    fetchDeviceDataForAgents() {
-      console.log('Fetching device data for agents...');
-
-      this.originalDevices.forEach(device => {
-        if (device.agentId) {
-          Api.device.getAgentBindDevices(device.agentId, (response) => {
-            console.log(`Device response for agent ${device.agentId}:`, response);
-
-            if (response.data && response.data.code === 0) {
-              const devices = response.data.data || [];
-              const deviceCount = Array.isArray(devices) ? devices.length : 0;
-
-              // Extract MAC addresses from devices
-              const macAddresses = Array.isArray(devices)
-                ? devices.map(d => d.macAddress).filter(Boolean)
-                : [];
-
-              // Update device count and MAC addresses
-              this.updateDeviceInfo(device.agentId, 'deviceCount', deviceCount);
-              this.updateDeviceInfo(device.agentId, 'macAddresses', macAddresses);
-              console.log(`Updated device data for ${device.agentName}: count=${deviceCount}, macs=${macAddresses.join(', ')}`);
-            }
-          });
-        }
-      });
-    },
-
-    // Update device info (generic method)
-    updateDeviceInfo(agentId, field, value) {
-      this.originalDevices = this.originalDevices.map(device => {
-        if (device.agentId === agentId) {
-          return { ...device, [field]: value };
-        }
-        return device;
-      });
-
-      // Also update search results
-      this.devices = this.devices.map(device => {
-        if (device.agentId === agentId) {
-          return { ...device, [field]: value };
-        }
-        return device;
-      });
     },
 
     handleShowChatHistory({ agentId, agentName }) {
@@ -774,7 +687,7 @@ export default {
 }
 
 .add-device {
-  height: 155px;
+  min-height: 155px;
   border-radius: 15px;
   position: relative;
   overflow: hidden;
@@ -786,7 +699,7 @@ export default {
 
 .add-device-bg {
   width: 100%;
-  height: 100%;
+  min-height: 155px;
   text-align: left;
   background-image: url("@/assets/home/main-top-bg.png");
   overflow: hidden;
@@ -798,10 +711,16 @@ export default {
   /* Compatible with older WebKit browsers */
   -o-background-size: cover;
   box-sizing: border-box;
+  /* Hero is a flex row: greeting left, stats right, stats wrap below on
+     narrow screens instead of floating over the text */
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 6px 30px 14px 0;
 
-  /* Compatible with older Opera browsers */
   .hellow-text {
-    margin-left: 50px;
     color: #3d4566;
     font-size: 26px;
     font-weight: 700;
@@ -810,10 +729,14 @@ export default {
   }
 }
 
+.hero-left {
+  padding-left: 50px;
+  min-width: 0;
+}
+
 .add-device-btn {
   display: flex;
   align-items: center;
-  margin-left: 50px;
   margin-top: 10px;
   cursor: pointer;
 
@@ -841,30 +764,31 @@ export default {
   }
 }
 
-/* Stats Container */
+/* Stats Container — flows with the hero instead of floating over the text */
 .stats-container {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
   display: flex;
-  gap: 20px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 14px;
+  padding-right: 20px;
+  min-width: 0;
 }
 
 /* Stats Box Styles */
 .stats-box {
   background: rgba(255, 255, 255, 0.95);
   border-radius: 12px;
-  padding: 12px 24px;
+  padding: 10px 16px;
   box-shadow: 0 4px 16px rgba($primary, 0.2);
   text-align: center;
   backdrop-filter: blur(10px);
   border: 1px solid rgba($primary, 0.15);
-  min-width: 110px;
+  min-width: 96px;
 }
 
 .stats-count {
-  font-size: 32px;
+  font-size: 28px;
   font-weight: 700;
   color: $primary;
   line-height: 1;

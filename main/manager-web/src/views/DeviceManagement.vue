@@ -1,6 +1,5 @@
 <template>
   <div class="welcome">
-    <HeaderBar/>
 
     <div class="operation-bar">
       <h2 class="page-title">Device Management</h2>
@@ -267,11 +266,9 @@
 import Api from '@/apis/api';
 import AddDeviceDialog from "@/components/AddDeviceDialog.vue";
 import ManualAddDeviceDialog from "@/components/ManualAddDeviceDialog.vue";
-import HeaderBar from "@/components/HeaderBar.vue";
 
 export default {
   components: {
-    HeaderBar, 
     AddDeviceDialog,
     ManualAddDeviceDialog
   },
@@ -308,8 +305,7 @@ export default {
       contentTotalCount: 0,
       contentCurrentPage: 1,
       contentPageSize: 10,
-      addingToPlaylist: false,
-    };
+      addingToPlaylist: false };
   },
   computed: {
     filteredDeviceList() {
@@ -348,8 +344,7 @@ export default {
         pages.push(i);
       }
       return pages;
-    },
-  },
+    } },
   mounted() {
     const agentId = this.$route.query.agentId;
     const macAddress = this.$route.query.macAddress;
@@ -604,7 +599,8 @@ export default {
         query: {
           deviceId: row.device_id,
           macAddress: row.macAddress,
-          kidId: row.kidId
+          kidId: row.kidId,
+          userId: row.userId // Admin mode key — without it the page calls the Firebase-only parent app endpoints and gets 401
         }
       });
     },
@@ -750,8 +746,7 @@ export default {
         limit: this.contentPageSize,
         contentType: this.contentPickerType,
         search: this.contentSearchQuery || undefined,
-        category: this.contentFilterCategory || undefined,
-      };
+        category: this.contentFilterCategory || undefined };
 
       Api.content.getLibraryList(params, ({ data }) => {
         this.contentPickerLoading = false;
@@ -829,8 +824,7 @@ export default {
       }
 
       this.contentPickerVisible = false;
-    },
-  }
+    } }
 };
 </script>
 

@@ -1,6 +1,5 @@
 <template>
   <div class="welcome">
-    <header-bar />
     <div class="main-content">
       <div class="content-area">
         <div class="toolbar">
@@ -310,12 +309,11 @@
 
 <script>
 import Api from '@/apis/api'
-import HeaderBar from '@/components/HeaderBar.vue'
 import VersionFooter from '@/components/VersionFooter.vue'
 
 export default {
   name: 'AllDevices',
-  components: { HeaderBar, VersionFooter },
+  components: { VersionFooter },
   data() {
     return {
       loading: false,
@@ -406,8 +404,6 @@ export default {
             otaSwitch: (device.autoUpdate || device.otaUpgrade || device.auto_update) === 1,
             activeMode: device.activeMode || device.active_mode || device.currentMode || 'idle'
           }));
-          // Fetch active modes for all devices
-          this.fetchActiveModes();
         } else {
           this.$message.error(data.msg || 'Failed to load devices');
         }
@@ -815,22 +811,6 @@ export default {
           this.loadSettingsDialogData();
         } else {
           this.$message.error(data?.msg || 'Failed to save settings');
-        }
-      });
-    },
-    fetchActiveModes() {
-      // Fetch active mode for each device that has a MAC address
-      this.deviceList.forEach(device => {
-        if (device.macAddress) {
-          Api.device.getDeviceMode(device.macAddress, ({ data }) => {
-            if (data.code === 0 && data.data) {
-              const mode = data.data.mode || data.data.currentMode || 'idle';
-              const index = this.deviceList.findIndex(d => d.macAddress === device.macAddress);
-              if (index !== -1) {
-                this.$set(this.deviceList[index], 'activeMode', mode);
-              }
-            }
-          });
         }
       });
     },

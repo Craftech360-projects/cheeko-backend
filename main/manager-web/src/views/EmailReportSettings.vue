@@ -1,7 +1,6 @@
 <template>
   <div class="welcome">
     <!-- Common Header -->
-    <HeaderBar />
     <div class="role-config-container">
       <div class="header-bar">
         <h2 class="page-title">Email Report Settings</h2>
@@ -291,13 +290,11 @@
 
 <script>
 import Api from '@/apis/api';
-import HeaderBar from '@/components/HeaderBar.vue';
 
 export default {
   name: 'EmailReportSettings',
   components: {
-    HeaderBar
-  },
+    },
   data() {
     return {
       config: {

@@ -1,6 +1,5 @@
 <template>
   <div class="welcome">
-    <HeaderBar />
 
     <div class="operation-bar">
       <h2 class="page-title">User Management</h2>
@@ -148,11 +147,11 @@
 
 <script>
 import Api from "@/apis/api";
-import HeaderBar from "@/components/HeaderBar.vue";
 import VersionFooter from "@/components/VersionFooter.vue";
 import ViewPasswordDialog from "@/components/ViewPasswordDialog.vue";
 export default {
-  components: { HeaderBar, ViewPasswordDialog, VersionFooter },
+  name: 'UserManagement',
+  components: { ViewPasswordDialog, VersionFooter },
   data() {
     return {
       showViewPassword: false,
@@ -169,8 +168,7 @@ export default {
       showKidProfiles: false,
       loadingKidProfiles: false,
       kidProfilesList: [],
-      selectedUserName: '',
-    };
+      selectedUserName: '' };
   },
   created() {
     this.fetchUsers();
@@ -193,8 +191,7 @@ export default {
         pages.push(i);
       }
       return pages;
-    },
-  },
+    } },
   methods: {
     handlePageSizeChange(val) {
       this.pageSize = val;
@@ -208,8 +205,7 @@ export default {
         {
           page: this.currentPage,
           limit: this.pageSize,
-          mobile: this.searchPhone,
-        },
+          mobile: this.searchPhone },
         ({ data }) => {
           this.loading = false; // End loading
           if (data.code === 0) {
@@ -242,15 +238,13 @@ export default {
       this.$confirm(`Are you sure you want to delete ${selectedUsers.length} selected users?`, "Warning", {
         confirmButtonText: "Confirm",
         cancelButtonText: "Cancel",
-        type: "warning",
-      })
+        type: "warning" })
         .then(async () => {
           const loading = this.$loading({
             lock: true,
             text: "Deleting...",
             spinner: "el-icon-loading",
-            background: "rgba(0, 0, 0, 0.7)",
-          });
+            background: "rgba(0, 0, 0, 0.7)" });
 
           try {
             const results = await Promise.all(
@@ -308,8 +302,7 @@ export default {
     resetPassword(row) {
       this.$confirm("A new password will be generated after reset, continue?", "Tip", {
         confirmButtonText: "Confirm",
-        cancelButtonText: "Cancel",
-      }).then(() => {
+        cancelButtonText: "Cancel" }).then(() => {
         Api.admin.resetUserPassword(row.userid, ({ data }) => {
           if (data.code === 0) {
             this.currentPassword = data.data;
@@ -326,8 +319,7 @@ export default {
       this.$confirm("Are you sure you want to delete this user?", "Warning", {
         confirmButtonText: "Confirm",
         cancelButtonText: "Cancel",
-        type: "warning",
-      })
+        type: "warning" })
         .then(() => {
           Api.admin.deleteUser(row.userid, ({ data }) => {
             if (data.code === 0) {
@@ -432,9 +424,7 @@ export default {
         path: '/device-management',
         query: { macAddress: device.macAddress, deviceId: device.id }
       });
-    },
-  },
-};
+    } } };
 </script>
 
 <style lang="scss" scoped>

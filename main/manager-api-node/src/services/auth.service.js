@@ -134,9 +134,11 @@ const login = async (username, password) => {
 
   // Return token info matching Spring Boot TokenDTO format
   // Spring Boot returns: {token, expire (int seconds), clientHash}
+  // superAdmin is additive so the dashboard can pick the right landing page.
   return {
     token,
-    expire: expireSeconds
+    expire: expireSeconds,
+    superAdmin: user.role === 'admin' ? 1 : 0
   };
 };
 

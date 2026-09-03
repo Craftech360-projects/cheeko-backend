@@ -140,7 +140,9 @@ workbox.routing.registerRoute(
     plugins: [
       new workbox.expiration.ExpirationPlugin({
         maxAgeSeconds: 7 * 24 * 60 * 60, // 7 day cache
-        maxEntries: 50, // Max 50 files
+        // Per-route hashed chunks add up fast; a 50-entry cache evicted
+        // constantly and could serve a stale chunk after each deploy
+        maxEntries: 300,
       }),
     ],
   })

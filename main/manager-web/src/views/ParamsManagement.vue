@@ -1,6 +1,5 @@
 <template>
     <div class="welcome">
-        <HeaderBar />
 
         <div class="operation-bar">
             <h2 class="page-title">Parameter Management</h2>
@@ -94,11 +93,11 @@
 
 <script>
 import Api from "@/apis/api";
-import HeaderBar from "@/components/HeaderBar.vue";
 import ParamDialog from "@/components/ParamDialog.vue";
 import VersionFooter from "@/components/VersionFooter.vue";
 export default {
-    components: { HeaderBar, ParamDialog, VersionFooter },
+  name: 'ParamsManagement',
+    components: { ParamDialog, VersionFooter },
     data() {
         return {
             searchCode: "",
@@ -117,8 +116,7 @@ export default {
                 paramCode: "",
                 paramValue: "",
                 remark: ""
-            },
-        };
+            } };
     },
     created() {
         this.fetchParams();
@@ -143,8 +141,7 @@ export default {
                 pages.push(i);
             }
             return pages;
-        },
-    },
+        } },
     methods: {
         handlePageSizeChange(val) {
             this.pageSize = val;
@@ -157,8 +154,7 @@ export default {
                 {
                     page: this.currentPage,
                     limit: this.pageSize,
-                    paramCode: this.searchCode,
-                },
+                    paramCode: this.searchCode },
                 ({ data }) => {
                     this.loading = false;
                     if (data.code === 0) {
@@ -338,9 +334,7 @@ export default {
         },
         toggleSensitiveValue(row) {
             this.$set(row, 'showValue', !row.showValue);
-        },
-    },
-};
+        } } };
 </script>
 
 <style lang="scss" scoped>

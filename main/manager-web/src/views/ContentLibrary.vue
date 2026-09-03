@@ -1,6 +1,5 @@
 <template>
   <div class="content-library">
-    <HeaderBar />
 
     <div class="main-wrapper">
       <div class="content-panel">
@@ -246,12 +245,10 @@
 
 <script>
 import Api from "@/apis/api";
-import HeaderBar from "@/components/HeaderBar.vue";
 import debounce from 'lodash/debounce';
 
 export default {
-  name: "ContentLibrary",
-  components: { HeaderBar },
+  name: 'ContentLibrary',
   data() {
     return {
       content: [],

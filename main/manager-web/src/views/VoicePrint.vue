@@ -1,6 +1,5 @@
 <template>
     <div class="welcome">
-        <HeaderBar />
 
         <div class="operation-bar">
             <h2 class="page-title">Voice Recognition</h2>
@@ -46,11 +45,10 @@
 
 <script>
 import Api from "@/apis/api";
-import HeaderBar from "@/components/HeaderBar.vue";
 import VersionFooter from "@/components/VersionFooter.vue";
 import VoicePrintDialog from "@/components/VoicePrintDialog.vue";
 export default {
-    components: { HeaderBar, VoicePrintDialog, VersionFooter },
+    components: { VoicePrintDialog, VersionFooter },
     data() {
         return {
             voicePrintList: [],
@@ -82,9 +80,7 @@ export default {
                     this.loading = false;
                     if (data.code === 0) {
                         this.voicePrintList = data.data.map(item => ({
-                            ...item,
-
-                        }));
+                            ...item }));
                     } else {
                         this.$message.error({
                             message: data.msg || 'Failed to get voice print list',
@@ -181,9 +177,7 @@ export default {
                     });
                 }
             });
-        },
-    },
-};
+        } } };
 </script>
 
 <style lang="scss" scoped>
