@@ -45,12 +45,21 @@
         </el-form-item>
 
         <el-form-item label="Content Type" prop="contentType" class="form-item">
-          <el-select v-model="form.contentType" placeholder="Select type" class="custom-select">
-            <el-option label="Story Pack" value="story_pack"/>
-            <el-option label="Rhyme Pack" value="rhyme_pack"/>
-            <el-option label="Habit Pack" value="habit_pack"/>
-            <el-option label="RFID Content" value="rfidcontent"/>
+          <el-select
+            v-model="form.contentType"
+            placeholder="Select a type, or type a new one"
+            class="custom-select"
+            filterable
+            allow-create
+            default-first-option
+            @change="onContentTypeChange">
+            <el-option
+              v-for="opt in contentTypeOptions"
+              :key="opt.value"
+              :label="opt.label"
+              :value="opt.value"/>
           </el-select>
+          <span class="field-hint">Type a name and press Enter to create a new type. It is saved on the pack and appears in this list from then on.</span>
         </el-form-item>
 
         <el-form-item label="Language" prop="language" class="form-item">
@@ -279,6 +288,17 @@
 import Api from "@/apis/api";
 import { pairMediaFiles, fileName } from "@/utils/pairMediaFiles.mjs";
 
+// Friendly labels for the types that shipped with the editor. Any other type —
+// including ones created here — shows its raw value. content_type is a plain
+// VarChar(50) with no DB constraint, and the gateway routes cards by data shape
+// rather than by this string, so new types are safe to add.
+const CONTENT_TYPE_LABELS = {
+  story_pack: 'Story Pack',
+  rhyme_pack: 'Rhyme Pack',
+  habit_pack: 'Habit Pack',
+  rfidcontent: 'RFID Content'
+};
+
 export default {
   props: {
     title: {
@@ -318,6 +338,7 @@ export default {
       importing: false,
       importDone: 0,
       importTotal: 0,
+      knownContentTypes: [],
       binLoading: {},
       binError: {},
       binCache: {},
@@ -328,11 +349,49 @@ export default {
         ],
         name: [
           { required: true, message: "Please enter name", trigger: "blur" }
+        ],
+        contentType: [
+          { required: true, message: "Please select or create a content type", trigger: "change" },
+          { max: 50, message: "Content type must be 50 characters or less", trigger: "change" }
         ]
       }
     };
   },
+  computed: {
+    // Shipped types + every type already used by a saved pack + whatever the
+    // form currently holds, so a type created once stays selectable.
+    contentTypeOptions() {
+      const values = new Set(Object.keys(CONTENT_TYPE_LABELS));
+      this.knownContentTypes.forEach(t => values.add(t));
+      if (this.form.contentType) values.add(this.form.contentType);
+      return [...values].map(value => ({ value, label: CONTENT_TYPE_LABELS[value] || value }));
+    }
+  },
   methods: {
+    // Keeps created types in the snake_case shape every existing value uses, so
+    // "Music Pack" cannot become a near-duplicate of an existing music_pack.
+    normalizeContentType(value) {
+      return String(value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .slice(0, 50);
+    },
+    onContentTypeChange(value) {
+      const normalized = this.normalizeContentType(value);
+      if (normalized !== value) {
+        this.form.contentType = normalized;
+      }
+    },
+    loadContentTypes() {
+      Api.rfid.getContentPackList(({ data }) => {
+        if (data?.code !== 0) return;
+        this.knownContentTypes = [...new Set(
+          (data.data || []).map(pack => pack.contentType).filter(Boolean)
+        )];
+      });
+    },
     addItem() {
         if (this.form.items.length < 10) {
             this.form.items.push({
@@ -807,6 +866,7 @@ export default {
         if (valid) {
           // Build the final form to submit
           const submitForm = { ...this.form };
+          submitForm.contentType = this.normalizeContentType(this.form.contentType);
 
           if (this.storyMode) {
             // Flatten stories into items with storyNumber/storyTitle
@@ -866,6 +926,7 @@ export default {
     visible(newVal) {
       if (newVal) {
         this.dialogKey = Date.now();
+        this.loadContentTypes();
 
         // Detect story mode from existing items (when editing)
         const hasStoryItems = this.form.items && this.form.items.some(i => i.storyNumber > 0);
@@ -1295,6 +1356,14 @@ export default {
     .story-mode-hint {
         margin-left: 12px;
         font-size: 12px;
+        color: #94a3b8;
+    }
+
+    .field-hint {
+        display: block;
+        margin-top: 4px;
+        font-size: 11px;
+        line-height: 1.4;
         color: #94a3b8;
     }
 
