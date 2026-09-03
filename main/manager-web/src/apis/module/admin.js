@@ -571,9 +571,25 @@ export default {
             }).send();
     },
 
-    // Founder dashboard — fleet & ops (watchlist drives the "needs attention" strip)
-    getFounderOperate(callback) {
+    // Light live count of toys connected in the last 5 minutes
+    getActiveNow(callback) {
         RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/stats/active`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to get active count:', err)
+                RequestService.reAjaxFun(() => {
+                    this.getActiveNow(callback)
+                })
+            }).send();
+    },
+
+    // Founder dashboard — fleet & ops (watchlist drives the "needs attention" strip)
+    getFounderOperate(callback) {        RequestService.sendRequest()
             .url(`${getServiceUrl()}/admin/founder/operate`)
             .method('GET')
             .success((res) => {

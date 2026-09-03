@@ -12,6 +12,13 @@
       </el-radio-group>
     </div>
 
+    <!-- Live strip: toys connected in the last 5 minutes -->
+    <div class="live-strip" v-if="onlineNow !== null">
+      <span class="live-dot" :class="{ on: onlineNow > 0 }"></span>
+      <span v-if="onlineNow > 0">{{ onlineNow }} toy{{ onlineNow === 1 ? '' : 's' }} online now</span>
+      <span v-else>No toys connected right now</span>
+    </div>
+
     <div v-loading="loading" class="overview-body">
       <!-- KPI row -->
       <div class="kpi-row" v-if="kpis">
@@ -129,6 +136,7 @@ export default {
     return {
       range: '7d',
       loading: false,
+      onlineNow: null,
       kpis: null,
       deltas: {},
       timeSeries: [],
@@ -172,10 +180,24 @@ export default {
     ensureEcharts();
     this.loadOverview();
     this.loadWatchlist();
+    this.fetchOnlineNow();
+    // Live strip refresh — light count endpoint only
+    this._onlineTimer = setInterval(this.fetchOnlineNow, 60000);
+  },
+  beforeDestroy() {
+    if (this._onlineTimer) clearInterval(this._onlineTimer);
   },
   methods: {
     spark(values) {
       return sparklineOption(values);
+    },
+    fetchOnlineNow() {
+      Api.admin.getActiveNow(({ data }) => {
+        if (data.code === 0 && data.data) {
+          this.onlineNow = data.data.count || 0;
+        }
+        // silent failure — the strip is supplementary
+      });
     },
     featureColor(key) {
       return SERIES_COLORS[key] || SERIES_COLORS.neutral;
@@ -246,6 +268,32 @@ export default {
   margin: 2px 0 0;
   font-size: 12px;
   color: $text-gray;
+}
+
+.live-strip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #fff;
+  border: 1px solid $border-color;
+  border-radius: 16px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: $text-dark;
+  margin-bottom: 12px;
+}
+
+.live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #c4c8d8;
+
+  &.on {
+    background: #0ca30c;
+    box-shadow: 0 0 0 3px rgba(12, 163, 12, 0.15);
+  }
 }
 
 .kpi-row {
