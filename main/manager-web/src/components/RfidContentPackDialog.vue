@@ -287,17 +287,7 @@
 <script>
 import Api from "@/apis/api";
 import { pairMediaFiles, fileName } from "@/utils/pairMediaFiles.mjs";
-
-// Friendly labels for the types that shipped with the editor. Any other type —
-// including ones created here — shows its raw value. content_type is a plain
-// VarChar(50) with no DB constraint, and the gateway routes cards by data shape
-// rather than by this string, so new types are safe to add.
-const CONTENT_TYPE_LABELS = {
-  story_pack: 'Story Pack',
-  rhyme_pack: 'Rhyme Pack',
-  habit_pack: 'Habit Pack',
-  rfidcontent: 'RFID Content'
-};
+import { DEFAULT_CONTENT_TYPES, contentTypeLabel } from "@/utils/contentTypes";
 
 export default {
   props: {
@@ -361,10 +351,10 @@ export default {
     // Shipped types + every type already used by a saved pack + whatever the
     // form currently holds, so a type created once stays selectable.
     contentTypeOptions() {
-      const values = new Set(Object.keys(CONTENT_TYPE_LABELS));
+      const values = new Set(DEFAULT_CONTENT_TYPES);
       this.knownContentTypes.forEach(t => values.add(t));
       if (this.form.contentType) values.add(this.form.contentType);
-      return [...values].map(value => ({ value, label: CONTENT_TYPE_LABELS[value] || value }));
+      return [...values].map(value => ({ value, label: contentTypeLabel(value) }));
     }
   },
   methods: {
