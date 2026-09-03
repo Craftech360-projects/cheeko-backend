@@ -533,7 +533,7 @@ export default {
       const skipped = Math.max(0, pairs.length - room);
       pairs = pairs.slice(0, room);
 
-      if (!(await this.confirmPairs(pairs, skipped))) return;
+      if (!(await this.confirmPairs(pairs, skipped, fileByPath))) return;
 
       // One item per pair; each file uploads into its own field.
       const newItems = pairs.map(p => ({ sequence: 0, title: p.title, audioUrl: '', imageUrl: '', text: '' }));
@@ -579,20 +579,64 @@ export default {
         this.$message.warning(`${skipped} pair(s) skipped — a pack holds at most 10 items.`);
       }
     },
-    confirmPairs(pairs, skipped) {
+    // Renders a locally picked image file to a data URL, decoding .bin through
+    // the LVGL parser. Nothing here touches the network.
+    async localImagePreview(file) {
+      if (!file) return null;
+      try {
+        if (this.isBinFile(file.name)) {
+          const { imageData, width, height } = this.decodeLvglBin(await file.arrayBuffer());
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          canvas.getContext('2d').putImageData(imageData, 0, 0);
+          return canvas.toDataURL();
+        }
+        return URL.createObjectURL(file);
+      } catch (error) {
+        console.warn('Local preview failed for', file.name, error);
+        return null;
+      }
+    },
+    async confirmPairs(pairs, skipped, fileByPath) {
       const h = this.$createElement;
-      const rows = pairs.map((p, i) => h('div', { class: 'import-preview-row' }, [
-        `${i + 1}. ${p.title || '(untitled)'} — ${fileName(p.audio)} + ${p.image ? fileName(p.image) : 'no image'}`
+      const objectUrls = [];
+
+      const rows = await Promise.all(pairs.map(async (p, i) => {
+        const previewUrl = await this.localImagePreview(p.image ? fileByPath.get(p.image) : null);
+        if (previewUrl && previewUrl.startsWith('blob:')) objectUrls.push(previewUrl);
+        return h('div', { class: 'import-preview-row' }, [
+          h('span', { class: 'import-preview-seq' }, [`${i + 1}`]),
+          previewUrl
+            ? h('img', { class: 'import-preview-thumb', attrs: { src: previewUrl } })
+            : h('span', { class: 'import-preview-thumb import-preview-thumb--empty' }, [p.image ? '?' : '—']),
+          h('span', { class: 'import-preview-text' }, [
+            h('strong', [p.title || '(untitled)']),
+            h('span', { class: 'import-preview-files' }, [
+              `${fileName(p.audio)} + ${p.image ? fileName(p.image) : 'no image'}`
+            ])
+          ])
+        ]);
+      }));
+
+      rows.unshift(h('div', { class: 'import-preview-hint' }, [
+        'Nothing has been uploaded yet. These previews are read from your local files — check each image matches its audio, then press Upload.'
       ]));
       if (skipped) {
         rows.push(h('div', { class: 'import-preview-note' }, [
           `${skipped} more pair(s) will be skipped — a pack holds at most 10 items.`
         ]));
       }
-      return this.$confirm(h('div', { class: 'import-preview' }, rows), `Import ${pairs.length} item(s)?`, {
-        confirmButtonText: 'Upload',
-        cancelButtonText: 'Cancel'
-      }).then(() => true).catch(() => false);
+
+      try {
+        return await this.$confirm(h('div', { class: 'import-preview' }, rows), `Import ${pairs.length} item(s)?`, {
+          confirmButtonText: 'Upload',
+          cancelButtonText: 'Cancel',
+          customClass: 'import-preview-box'
+        }).then(() => true).catch(() => false);
+      } finally {
+        objectUrls.forEach(url => URL.revokeObjectURL(url));
+      }
     },
     async runPool(jobs, size, worker) {
       const queue = jobs.slice();
@@ -643,6 +687,59 @@ export default {
       // Hide broken image
       event.target.style.display = 'none';
     },
+    // Decodes an LVGL v9 RGB565 .bin into ImageData. Works on any ArrayBuffer,
+    // so the same parser serves both uploaded URLs and locally picked files.
+    decodeLvglBin(arrayBuffer) {
+      const dataView = new DataView(arrayBuffer);
+
+      // Parse LVGL v9 header (12 bytes)
+      const magic = dataView.getUint8(0);
+      const colorFormat = dataView.getUint8(1);
+      const width = dataView.getUint16(4, true);  // Little endian
+      const height = dataView.getUint16(6, true);
+      const stride = dataView.getUint16(8, true);
+
+      // Validate header
+      if (magic !== 0x19) {
+        console.warn('Invalid LVGL magic number:', magic);
+        throw new Error('Invalid LVGL format');
+      }
+
+      // Only support RGB565 (0x12) for now
+      if (colorFormat !== 0x12) {
+        console.warn('Unsupported color format:', colorFormat);
+        throw new Error('Unsupported color format');
+      }
+
+      // Create ImageData
+      const imageData = new ImageData(width, height);
+      const pixels = imageData.data;
+
+      // Skip 12-byte header, read pixel data
+      const pixelOffset = 12;
+
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const srcIdx = pixelOffset + (y * stride) + (x * 2);
+          const dstIdx = (y * width + x) * 4;
+
+          // Read RGB565 (little endian)
+          const rgb565 = dataView.getUint16(srcIdx, true);
+
+          // Convert RGB565 to RGBA8888
+          const r = ((rgb565 >> 11) & 0x1F) << 3;
+          const g = ((rgb565 >> 5) & 0x3F) << 2;
+          const b = (rgb565 & 0x1F) << 3;
+
+          pixels[dstIdx] = r | (r >> 5);     // R
+          pixels[dstIdx + 1] = g | (g >> 6); // G
+          pixels[dstIdx + 2] = b | (b >> 5); // B
+          pixels[dstIdx + 3] = 255;          // A
+        }
+      }
+
+      return { imageData, width, height };
+    },
     async loadBinPreview(url, index) {
       if (!url || !this.isBinFile(url)) return;
 
@@ -675,56 +772,9 @@ export default {
         if (!response.ok) throw new Error('Failed to fetch .bin file');
 
         const arrayBuffer = await response.arrayBuffer();
-        const dataView = new DataView(arrayBuffer);
-
-        // Parse LVGL v9 header (12 bytes)
-        const magic = dataView.getUint8(0);
-        const colorFormat = dataView.getUint8(1);
-        const width = dataView.getUint16(4, true);  // Little endian
-        const height = dataView.getUint16(6, true);
-        const stride = dataView.getUint16(8, true);
-
-        // Validate header
-        if (magic !== 0x19) {
-          console.warn('Invalid LVGL magic number:', magic);
-          throw new Error('Invalid LVGL format');
-        }
-
-        // Only support RGB565 (0x12) for now
-        if (colorFormat !== 0x12) {
-          console.warn('Unsupported color format:', colorFormat);
-          throw new Error('Unsupported color format');
-        }
-
-        // Create ImageData
-        const imageData = new ImageData(width, height);
-        const pixels = imageData.data;
-
-        // Skip 12-byte header, read pixel data
-        const pixelOffset = 12;
-
-        for (let y = 0; y < height; y++) {
-          for (let x = 0; x < width; x++) {
-            const srcIdx = pixelOffset + (y * stride) + (x * 2);
-            const dstIdx = (y * width + x) * 4;
-
-            // Read RGB565 (little endian)
-            const rgb565 = dataView.getUint16(srcIdx, true);
-
-            // Convert RGB565 to RGBA8888
-            const r = ((rgb565 >> 11) & 0x1F) << 3;
-            const g = ((rgb565 >> 5) & 0x3F) << 2;
-            const b = (rgb565 & 0x1F) << 3;
-
-            pixels[dstIdx] = r | (r >> 5);     // R
-            pixels[dstIdx + 1] = g | (g >> 6); // G
-            pixels[dstIdx + 2] = b | (b >> 5); // B
-            pixels[dstIdx + 3] = 255;          // A
-          }
-        }
 
         // Cache the decoded image data
-        this.binCache[url] = { imageData, width, height };
+        this.binCache[url] = this.decodeLvglBin(arrayBuffer);
 
         // Render to canvas
         this.renderCachedBin(url, index);
@@ -894,14 +944,71 @@ export default {
   border-radius: 16px;
 }
 /* MessageBox is appended to body, so these cannot be scoped. */
+.import-preview-box {
+  width: 520px;
+}
 .import-preview {
-  max-height: 300px;
+  max-height: 360px;
   overflow-y: auto;
   font-size: 13px;
   color: #475569;
 }
+.import-preview-hint {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #ecfdf5;
+  color: #047857;
+  font-size: 12px;
+  line-height: 1.5;
+}
 .import-preview-row {
-  padding: 3px 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid #f1f5f9;
+}
+.import-preview-row:last-child {
+  border-bottom: none;
+}
+.import-preview-seq {
+  flex: 0 0 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #e2e8f0;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.import-preview-thumb {
+  flex: 0 0 48px;
+  width: 48px;
+  height: 48px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  object-fit: cover;
+  image-rendering: pixelated;
+}
+.import-preview-thumb--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #cbd5e1;
+  font-size: 16px;
+}
+.import-preview-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.import-preview-files {
+  color: #94a3b8;
+  font-size: 11px;
   word-break: break-all;
 }
 .import-preview-note {
