@@ -488,6 +488,22 @@
                                     <el-button size="mini" type="success" icon="el-icon-plus" @click="showAddContentPackDialog">Create Pack</el-button>
                                     <el-button size="mini" type="danger" icon="el-icon-delete" @click="deleteSelectedContentPacks">Delete Selected</el-button>
                                 </div>
+                                <div class="filter-group">
+                                    <span class="filter-label">Content Type</span>
+                                    <el-select
+                                        v-model="contentPacksTypeFilter"
+                                        size="mini"
+                                        clearable
+                                        placeholder="All types"
+                                        class="type-filter-select"
+                                        @change="handleContentPacksTypeChange">
+                                        <el-option
+                                            v-for="opt in contentPackTypeOptions"
+                                            :key="opt.value"
+                                            :label="opt.label"
+                                            :value="opt.value"></el-option>
+                                    </el-select>
+                                </div>
                             </div>
 
                             <div v-loading="contentPacksLoading" class="pack-grid-container" element-loading-background="rgba(255, 255, 255, 0.5)">
@@ -1131,6 +1147,7 @@ import RfidCardDialog from "@/components/RfidCardDialog.vue";
 import RfidContentPackDialog from "@/components/RfidContentPackDialog.vue";
 import RfidSeriesDialog from "@/components/RfidSeriesDialog.vue";
 import RfidQuestionPackDialog from "@/components/RfidQuestionPackDialog.vue";
+import { contentTypeLabel } from "@/utils/contentTypes";
 
 export default {
     components: { HeaderBar, VersionFooter, RfidQuestionDialog, RfidPackDialog, RfidCardDialog, RfidContentPackDialog, RfidSeriesDialog, RfidQuestionPackDialog },
@@ -1204,6 +1221,8 @@ export default {
             // Content Packs
             contentPacksList: [],
             contentPacksLoading: false,
+            contentPacksTypeFilter: '',
+            contentPackTypes: [],
             contentPacksCurrentPage: 1,
             contentPacksPageSize: 10,
             contentPacksTotal: 0,
@@ -1302,6 +1321,11 @@ export default {
         this.loadStats();
     },
     computed: {
+        // Content type filter options, built from the types actually in use so a
+        // type created in the pack editor shows up here too.
+        contentPackTypeOptions() {
+            return this.contentPackTypes.map(value => ({ value, label: contentTypeLabel(value) }));
+        },
         // Questions pagination
         questionsPageCount() {
             return Math.ceil(this.questionsTotal / this.questionsPageSize);
@@ -1385,10 +1409,11 @@ export default {
         switchTab(tab) {
             this.activeTab = tab;
             this.searchKeyword = '';
+            this.contentPacksTypeFilter = '';
             if (tab === 'questions') this.fetchQuestions();
             else if (tab === 'packs') this.fetchPacks();
             else if (tab === 'cards') this.fetchCards();
-            else if (tab === 'contentPacks') this.fetchContentPacks();
+            else if (tab === 'contentPacks') { this.fetchContentPacks(); this.loadContentPackTypes(); }
             else if (tab === 'series') this.fetchSeries();
             else if (tab === 'questionPacks') this.fetchQuestionPacks();
             else if (tab === 'aiCards') this.fetchAiCards();
@@ -2050,7 +2075,8 @@ export default {
             Api.rfid.getContentPackPage({
                 page: this.contentPacksCurrentPage,
                 limit: this.contentPacksPageSize,
-                packCode: this.searchKeyword
+                packCode: this.searchKeyword,
+                contentType: this.contentPacksTypeFilter
             }, ({ data }) => {
                 this.contentPacksLoading = false;
                 if (data.code === 0) {
@@ -2059,6 +2085,20 @@ export default {
                 } else {
                     this.$message.error(data.msg || 'Failed to load content packs');
                 }
+            });
+        },
+
+        handleContentPacksTypeChange() {
+            this.contentPacksCurrentPage = 1;
+            this.fetchContentPacks();
+        },
+
+        loadContentPackTypes() {
+            Api.rfid.getContentPackList(({ data }) => {
+                if (data?.code !== 0) return;
+                this.contentPackTypes = [...new Set(
+                    (data.data || []).map(pack => pack.contentType).filter(Boolean)
+                )].sort();
             });
         },
 
@@ -2115,6 +2155,7 @@ export default {
                     this.$message.success(form.id ? 'Updated successfully' : 'Added successfully');
                     this.contentPackDialogVisible = false;
                     this.fetchContentPacks();
+                    this.loadContentPackTypes();
                     this.loadDropdownData();
                     this.loadStats();
                 } else {
@@ -3061,6 +3102,31 @@ export default {
         color: #909399;
         font-size: 14px;
         margin-left: 10px;
+    }
+}
+
+.filter-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.filter-label {
+    font-size: 12px;
+    color: #909399;
+    white-space: nowrap;
+}
+
+.type-filter-select {
+    width: 160px;
+
+    :deep(.el-input__inner) {
+        height: 28px;
+        line-height: 28px;
+        border-radius: 4px;
+        border: 1px solid #e4e7ed;
+        background: #dee7ff;
+        color: #606266;
     }
 }
 

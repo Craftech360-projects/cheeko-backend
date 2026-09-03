@@ -45,12 +45,21 @@
         </el-form-item>
 
         <el-form-item label="Content Type" prop="contentType" class="form-item">
-          <el-select v-model="form.contentType" placeholder="Select type" class="custom-select">
-            <el-option label="Story Pack" value="story_pack"/>
-            <el-option label="Rhyme Pack" value="rhyme_pack"/>
-            <el-option label="Habit Pack" value="habit_pack"/>
-            <el-option label="RFID Content" value="rfidcontent"/>
+          <el-select
+            v-model="form.contentType"
+            placeholder="Select a type, or type a new one"
+            class="custom-select"
+            filterable
+            allow-create
+            default-first-option
+            @change="onContentTypeChange">
+            <el-option
+              v-for="opt in contentTypeOptions"
+              :key="opt.value"
+              :label="opt.label"
+              :value="opt.value"/>
           </el-select>
+          <span class="field-hint">Type a name and press Enter to create a new type. It is saved on the pack and appears in this list from then on.</span>
         </el-form-item>
 
         <el-form-item label="Language" prop="language" class="form-item">
@@ -81,7 +90,17 @@
         <div class="items-section" v-if="!storyMode">
            <div class="items-header">
               <span class="items-title">Pack Items (Max 10)</span>
-              <el-button size="mini" type="primary" icon="el-icon-plus" @click="addItem" :disabled="form.items.length >= 10">Add Item</el-button>
+              <div class="items-header-actions">
+                <el-button
+                  size="mini"
+                  icon="el-icon-folder-opened"
+                  :loading="importing"
+                  :disabled="importing || form.items.length >= 10"
+                  @click="pickFolder">
+                  {{ importing ? `Uploading ${importDone}/${importTotal}` : 'Import Folder' }}
+                </el-button>
+                <el-button size="mini" type="primary" icon="el-icon-plus" @click="addItem" :disabled="form.items.length >= 10">Add Item</el-button>
+              </div>
            </div>
 
            <div class="items-list">
@@ -238,6 +257,15 @@
         style="display: none"
         @change="handleImageFileSelected"
       />
+      <input
+        ref="folderPicker"
+        type="file"
+        webkitdirectory
+        directory
+        multiple
+        style="display: none"
+        @change="handleFolderSelected"
+      />
 
       <div class="dialog-footer">
         <el-button
@@ -258,6 +286,8 @@
 
 <script>
 import Api from "@/apis/api";
+import { pairMediaFiles, fileName } from "@/utils/pairMediaFiles.mjs";
+import { DEFAULT_CONTENT_TYPES, contentTypeLabel } from "@/utils/contentTypes";
 
 export default {
   props: {
@@ -295,6 +325,10 @@ export default {
       stories: [],  // [{title: '', items: [{title, audioUrl, imageUrl, text}]}]
       pendingUpload: null, // { mode: 'flat'|'story'|'packThumbnail', storyIndex, itemIndex, field: 'audioUrl'|'imageUrl'|'thumbnailUrl' }
       uploadingMedia: false,
+      importing: false,
+      importDone: 0,
+      importTotal: 0,
+      knownContentTypes: [],
       binLoading: {},
       binError: {},
       binCache: {},
@@ -305,11 +339,49 @@ export default {
         ],
         name: [
           { required: true, message: "Please enter name", trigger: "blur" }
+        ],
+        contentType: [
+          { required: true, message: "Please select or create a content type", trigger: "change" },
+          { max: 50, message: "Content type must be 50 characters or less", trigger: "change" }
         ]
       }
     };
   },
+  computed: {
+    // Shipped types + every type already used by a saved pack + whatever the
+    // form currently holds, so a type created once stays selectable.
+    contentTypeOptions() {
+      const values = new Set(DEFAULT_CONTENT_TYPES);
+      this.knownContentTypes.forEach(t => values.add(t));
+      if (this.form.contentType) values.add(this.form.contentType);
+      return [...values].map(value => ({ value, label: contentTypeLabel(value) }));
+    }
+  },
   methods: {
+    // Keeps created types in the snake_case shape every existing value uses, so
+    // "Music Pack" cannot become a near-duplicate of an existing music_pack.
+    normalizeContentType(value) {
+      return String(value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .slice(0, 50);
+    },
+    onContentTypeChange(value) {
+      const normalized = this.normalizeContentType(value);
+      if (normalized !== value) {
+        this.form.contentType = normalized;
+      }
+    },
+    loadContentTypes() {
+      Api.rfid.getContentPackList(({ data }) => {
+        if (data?.code !== 0) return;
+        this.knownContentTypes = [...new Set(
+          (data.data || []).map(pack => pack.contentType).filter(Boolean)
+        )];
+      });
+    },
     addItem() {
         if (this.form.items.length < 10) {
             this.form.items.push({
@@ -423,6 +495,39 @@ export default {
       await this.uploadFileToS3(file, 'image');
       event.target.value = '';
     },
+    async uploadOne(file, category, contentPackId) {
+      const token = this.getAuthToken();
+      if (!token) {
+        throw new Error('Authentication token missing. Please login again.');
+      }
+
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('contentType', 'rfidcontent');
+      formData.append('category', category);
+      if (contentPackId) {
+        formData.append('contentPackId', contentPackId);
+      }
+
+      const response = await fetch(`${Api.getServiceUrl()}/admin/rfid/content-pack/upload`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`
+        },
+        body: formData
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || `Upload failed with status ${response.status}`);
+      }
+
+      const result = await response.json();
+      if (result.code !== 0 || !result.data?.url) {
+        throw new Error(result.msg || 'Upload failed');
+      }
+      return result.data.url;
+    },
     async uploadFileToS3(file, type) {
       if (!this.pendingUpload) {
         this.$message.error('No target item selected for upload.');
@@ -435,47 +540,160 @@ export default {
         return;
       }
 
-      const token = this.getAuthToken();
-      if (!token) {
-        this.$message.error('Authentication token missing. Please login again.');
-        return;
-      }
-
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('contentType', 'rfidcontent');
-      formData.append('category', type === 'audio' ? 'audio' : 'images');
-      if (this.pendingUpload.mode === 'packThumbnail' && this.form.id) {
-        formData.append('contentPackId', this.form.id);
-      }
+      const packId = this.pendingUpload.mode === 'packThumbnail' ? this.form.id : null;
 
       this.uploadingMedia = true;
       try {
-        const response = await fetch(`${Api.getServiceUrl()}/admin/rfid/content-pack/upload`, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${token}`
-          },
-          body: formData
-        });
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(errorText || `Upload failed with status ${response.status}`);
-        }
-
-        const result = await response.json();
-        if (result.code !== 0 || !result.data?.url) {
-          throw new Error(result.msg || 'Upload failed');
-        }
-
-        targetItem[this.pendingUpload.field] = result.data.url;
+        targetItem[this.pendingUpload.field] = await this.uploadOne(
+          file,
+          type === 'audio' ? 'audio' : 'images',
+          packId
+        );
         this.$message.success(`${type === 'audio' ? 'Audio' : 'Image'} uploaded successfully.`);
       } catch (error) {
         this.$message.error(`Upload failed: ${error.message}`);
       } finally {
         this.uploadingMedia = false;
       }
+    },
+    // ---- Folder import (flat mode) ----
+    pickFolder() {
+      if (this.$refs.folderPicker) {
+        this.$refs.folderPicker.click();
+      }
+    },
+    async handleFolderSelected(event) {
+      const files = Array.from(event?.target?.files || []);
+      event.target.value = '';
+      if (!files.length) return;
+
+      const fileByPath = new Map(files.map(f => [f.webkitRelativePath || f.name, f]));
+      let pairs = pairMediaFiles([...fileByPath.keys()]);
+      if (pairs.length === 0) {
+        this.$message.warning('No audio files found in that folder.');
+        return;
+      }
+
+      const room = 10 - this.form.items.length;
+      if (room <= 0) {
+        this.$message.warning('This pack already has 10 items.');
+        return;
+      }
+      const skipped = Math.max(0, pairs.length - room);
+      pairs = pairs.slice(0, room);
+
+      if (!(await this.confirmPairs(pairs, skipped, fileByPath))) return;
+
+      // One item per pair; each file uploads into its own field.
+      const newItems = pairs.map(p => ({ sequence: 0, title: p.title, audioUrl: '', imageUrl: '', text: '' }));
+      const jobs = [];
+      pairs.forEach((p, i) => {
+        jobs.push({ path: p.audio, category: 'audio', item: newItems[i], field: 'audioUrl' });
+        if (p.image) {
+          jobs.push({ path: p.image, category: 'images', item: newItems[i], field: 'imageUrl' });
+        }
+      });
+
+      const failures = [];
+      this.importing = true;
+      this.importDone = 0;
+      this.importTotal = jobs.length;
+      try {
+        // ponytail: 4 at a time. Raise it if packs ever get much bigger than 10.
+        await this.runPool(jobs, 4, async (job) => {
+          try {
+            job.item[job.field] = await this.uploadOne(fileByPath.get(job.path), job.category);
+          } catch (error) {
+            failures.push(`${fileName(job.path)}: ${error.message}`);
+          } finally {
+            this.importDone += 1;
+          }
+        });
+      } finally {
+        this.importing = false;
+      }
+
+      // An item without audio is unusable, so drop it rather than adding a blank row.
+      const imported = newItems.filter(item => item.audioUrl);
+      imported.forEach(item => this.form.items.push(item));
+      this.form.items.forEach((item, idx) => { item.sequence = idx + 1; });
+
+      if (imported.length) {
+        this.$message.success(`Imported ${imported.length} item(s).`);
+      }
+      if (failures.length) {
+        this.$message.warning(`${failures.length} file(s) failed to upload: ${failures.join('; ')}`);
+      }
+      if (skipped) {
+        this.$message.warning(`${skipped} pair(s) skipped — a pack holds at most 10 items.`);
+      }
+    },
+    // Renders a locally picked image file to a data URL, decoding .bin through
+    // the LVGL parser. Nothing here touches the network.
+    async localImagePreview(file) {
+      if (!file) return null;
+      try {
+        if (this.isBinFile(file.name)) {
+          const { imageData, width, height } = this.decodeLvglBin(await file.arrayBuffer());
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          canvas.getContext('2d').putImageData(imageData, 0, 0);
+          return canvas.toDataURL();
+        }
+        return URL.createObjectURL(file);
+      } catch (error) {
+        console.warn('Local preview failed for', file.name, error);
+        return null;
+      }
+    },
+    async confirmPairs(pairs, skipped, fileByPath) {
+      const h = this.$createElement;
+      const objectUrls = [];
+
+      const rows = await Promise.all(pairs.map(async (p, i) => {
+        const previewUrl = await this.localImagePreview(p.image ? fileByPath.get(p.image) : null);
+        if (previewUrl && previewUrl.startsWith('blob:')) objectUrls.push(previewUrl);
+        return h('div', { class: 'import-preview-row' }, [
+          h('span', { class: 'import-preview-seq' }, [`${i + 1}`]),
+          previewUrl
+            ? h('img', { class: 'import-preview-thumb', attrs: { src: previewUrl } })
+            : h('span', { class: 'import-preview-thumb import-preview-thumb--empty' }, [p.image ? '?' : '—']),
+          h('span', { class: 'import-preview-text' }, [
+            h('strong', [p.title || '(untitled)']),
+            h('span', { class: 'import-preview-files' }, [
+              `${fileName(p.audio)} + ${p.image ? fileName(p.image) : 'no image'}`
+            ])
+          ])
+        ]);
+      }));
+
+      rows.unshift(h('div', { class: 'import-preview-hint' }, [
+        'Nothing has been uploaded yet. These previews are read from your local files — check each image matches its audio, then press Upload.'
+      ]));
+      if (skipped) {
+        rows.push(h('div', { class: 'import-preview-note' }, [
+          `${skipped} more pair(s) will be skipped — a pack holds at most 10 items.`
+        ]));
+      }
+
+      try {
+        return await this.$confirm(h('div', { class: 'import-preview' }, rows), `Import ${pairs.length} item(s)?`, {
+          confirmButtonText: 'Upload',
+          cancelButtonText: 'Cancel',
+          customClass: 'import-preview-box'
+        }).then(() => true).catch(() => false);
+      } finally {
+        objectUrls.forEach(url => URL.revokeObjectURL(url));
+      }
+    },
+    async runPool(jobs, size, worker) {
+      const queue = jobs.slice();
+      const runners = Array.from(
+        { length: Math.min(size, queue.length) },
+        async () => { while (queue.length) await worker(queue.shift()); }
+      );
+      await Promise.all(runners);
     },
     toggleAudio(url) {
       if (!url) return;
@@ -518,6 +736,59 @@ export default {
       // Hide broken image
       event.target.style.display = 'none';
     },
+    // Decodes an LVGL v9 RGB565 .bin into ImageData. Works on any ArrayBuffer,
+    // so the same parser serves both uploaded URLs and locally picked files.
+    decodeLvglBin(arrayBuffer) {
+      const dataView = new DataView(arrayBuffer);
+
+      // Parse LVGL v9 header (12 bytes)
+      const magic = dataView.getUint8(0);
+      const colorFormat = dataView.getUint8(1);
+      const width = dataView.getUint16(4, true);  // Little endian
+      const height = dataView.getUint16(6, true);
+      const stride = dataView.getUint16(8, true);
+
+      // Validate header
+      if (magic !== 0x19) {
+        console.warn('Invalid LVGL magic number:', magic);
+        throw new Error('Invalid LVGL format');
+      }
+
+      // Only support RGB565 (0x12) for now
+      if (colorFormat !== 0x12) {
+        console.warn('Unsupported color format:', colorFormat);
+        throw new Error('Unsupported color format');
+      }
+
+      // Create ImageData
+      const imageData = new ImageData(width, height);
+      const pixels = imageData.data;
+
+      // Skip 12-byte header, read pixel data
+      const pixelOffset = 12;
+
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const srcIdx = pixelOffset + (y * stride) + (x * 2);
+          const dstIdx = (y * width + x) * 4;
+
+          // Read RGB565 (little endian)
+          const rgb565 = dataView.getUint16(srcIdx, true);
+
+          // Convert RGB565 to RGBA8888
+          const r = ((rgb565 >> 11) & 0x1F) << 3;
+          const g = ((rgb565 >> 5) & 0x3F) << 2;
+          const b = (rgb565 & 0x1F) << 3;
+
+          pixels[dstIdx] = r | (r >> 5);     // R
+          pixels[dstIdx + 1] = g | (g >> 6); // G
+          pixels[dstIdx + 2] = b | (b >> 5); // B
+          pixels[dstIdx + 3] = 255;          // A
+        }
+      }
+
+      return { imageData, width, height };
+    },
     async loadBinPreview(url, index) {
       if (!url || !this.isBinFile(url)) return;
 
@@ -550,56 +821,9 @@ export default {
         if (!response.ok) throw new Error('Failed to fetch .bin file');
 
         const arrayBuffer = await response.arrayBuffer();
-        const dataView = new DataView(arrayBuffer);
-
-        // Parse LVGL v9 header (12 bytes)
-        const magic = dataView.getUint8(0);
-        const colorFormat = dataView.getUint8(1);
-        const width = dataView.getUint16(4, true);  // Little endian
-        const height = dataView.getUint16(6, true);
-        const stride = dataView.getUint16(8, true);
-
-        // Validate header
-        if (magic !== 0x19) {
-          console.warn('Invalid LVGL magic number:', magic);
-          throw new Error('Invalid LVGL format');
-        }
-
-        // Only support RGB565 (0x12) for now
-        if (colorFormat !== 0x12) {
-          console.warn('Unsupported color format:', colorFormat);
-          throw new Error('Unsupported color format');
-        }
-
-        // Create ImageData
-        const imageData = new ImageData(width, height);
-        const pixels = imageData.data;
-
-        // Skip 12-byte header, read pixel data
-        const pixelOffset = 12;
-
-        for (let y = 0; y < height; y++) {
-          for (let x = 0; x < width; x++) {
-            const srcIdx = pixelOffset + (y * stride) + (x * 2);
-            const dstIdx = (y * width + x) * 4;
-
-            // Read RGB565 (little endian)
-            const rgb565 = dataView.getUint16(srcIdx, true);
-
-            // Convert RGB565 to RGBA8888
-            const r = ((rgb565 >> 11) & 0x1F) << 3;
-            const g = ((rgb565 >> 5) & 0x3F) << 2;
-            const b = (rgb565 & 0x1F) << 3;
-
-            pixels[dstIdx] = r | (r >> 5);     // R
-            pixels[dstIdx + 1] = g | (g >> 6); // G
-            pixels[dstIdx + 2] = b | (b >> 5); // B
-            pixels[dstIdx + 3] = 255;          // A
-          }
-        }
 
         // Cache the decoded image data
-        this.binCache[url] = { imageData, width, height };
+        this.binCache[url] = this.decodeLvglBin(arrayBuffer);
 
         // Render to canvas
         this.renderCachedBin(url, index);
@@ -632,6 +856,7 @@ export default {
         if (valid) {
           // Build the final form to submit
           const submitForm = { ...this.form };
+          submitForm.contentType = this.normalizeContentType(this.form.contentType);
 
           if (this.storyMode) {
             // Flatten stories into items with storyNumber/storyTitle
@@ -691,6 +916,7 @@ export default {
     visible(newVal) {
       if (newVal) {
         this.dialogKey = Date.now();
+        this.loadContentTypes();
 
         // Detect story mode from existing items (when editing)
         const hasStoryItems = this.form.items && this.form.items.some(i => i.storyNumber > 0);
@@ -734,6 +960,9 @@ export default {
         this.storyMode = false;
         this.pendingUpload = null;
         this.uploadingMedia = false;
+        this.importing = false;
+        this.importDone = 0;
+        this.importTotal = 0;
       }
     },
     'form.items': {
@@ -764,6 +993,79 @@ export default {
 .custom-rfid-dialog .el-dialog__body {
   padding: 0 !important;
   border-radius: 16px;
+}
+/* MessageBox is appended to body, so these cannot be scoped. */
+.import-preview-box {
+  width: 520px;
+}
+.import-preview {
+  max-height: 360px;
+  overflow-y: auto;
+  font-size: 13px;
+  color: #475569;
+}
+.import-preview-hint {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #ecfdf5;
+  color: #047857;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.import-preview-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid #f1f5f9;
+}
+.import-preview-row:last-child {
+  border-bottom: none;
+}
+.import-preview-seq {
+  flex: 0 0 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #e2e8f0;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.import-preview-thumb {
+  flex: 0 0 48px;
+  width: 48px;
+  height: 48px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  object-fit: cover;
+  image-rendering: pixelated;
+}
+.import-preview-thumb--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #cbd5e1;
+  font-size: 16px;
+}
+.import-preview-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.import-preview-files {
+  color: #94a3b8;
+  font-size: 11px;
+  word-break: break-all;
+}
+.import-preview-note {
+  margin-top: 8px;
+  color: #d97706;
+  font-weight: 600;
 }
 </style>
 
@@ -898,6 +1200,12 @@ export default {
         font-weight: 600;
         color: #475569;
         font-size: 14px;
+    }
+
+    .items-header-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
     }
 
     .item-row {
@@ -1038,6 +1346,14 @@ export default {
     .story-mode-hint {
         margin-left: 12px;
         font-size: 12px;
+        color: #94a3b8;
+    }
+
+    .field-hint {
+        display: block;
+        margin-top: 4px;
+        font-size: 11px;
+        line-height: 1.4;
         color: #94a3b8;
     }
 
