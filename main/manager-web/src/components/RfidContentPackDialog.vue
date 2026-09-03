@@ -81,7 +81,17 @@
         <div class="items-section" v-if="!storyMode">
            <div class="items-header">
               <span class="items-title">Pack Items (Max 10)</span>
-              <el-button size="mini" type="primary" icon="el-icon-plus" @click="addItem" :disabled="form.items.length >= 10">Add Item</el-button>
+              <div class="items-header-actions">
+                <el-button
+                  size="mini"
+                  icon="el-icon-folder-opened"
+                  :loading="importing"
+                  :disabled="importing || form.items.length >= 10"
+                  @click="pickFolder">
+                  {{ importing ? `Uploading ${importDone}/${importTotal}` : 'Import Folder' }}
+                </el-button>
+                <el-button size="mini" type="primary" icon="el-icon-plus" @click="addItem" :disabled="form.items.length >= 10">Add Item</el-button>
+              </div>
            </div>
 
            <div class="items-list">
@@ -238,6 +248,15 @@
         style="display: none"
         @change="handleImageFileSelected"
       />
+      <input
+        ref="folderPicker"
+        type="file"
+        webkitdirectory
+        directory
+        multiple
+        style="display: none"
+        @change="handleFolderSelected"
+      />
 
       <div class="dialog-footer">
         <el-button
@@ -258,6 +277,7 @@
 
 <script>
 import Api from "@/apis/api";
+import { pairMediaFiles, fileName } from "@/utils/pairMediaFiles.mjs";
 
 export default {
   props: {
@@ -295,6 +315,9 @@ export default {
       stories: [],  // [{title: '', items: [{title, audioUrl, imageUrl, text}]}]
       pendingUpload: null, // { mode: 'flat'|'story'|'packThumbnail', storyIndex, itemIndex, field: 'audioUrl'|'imageUrl'|'thumbnailUrl' }
       uploadingMedia: false,
+      importing: false,
+      importDone: 0,
+      importTotal: 0,
       binLoading: {},
       binError: {},
       binCache: {},
@@ -423,6 +446,39 @@ export default {
       await this.uploadFileToS3(file, 'image');
       event.target.value = '';
     },
+    async uploadOne(file, category, contentPackId) {
+      const token = this.getAuthToken();
+      if (!token) {
+        throw new Error('Authentication token missing. Please login again.');
+      }
+
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('contentType', 'rfidcontent');
+      formData.append('category', category);
+      if (contentPackId) {
+        formData.append('contentPackId', contentPackId);
+      }
+
+      const response = await fetch(`${Api.getServiceUrl()}/admin/rfid/content-pack/upload`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`
+        },
+        body: formData
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || `Upload failed with status ${response.status}`);
+      }
+
+      const result = await response.json();
+      if (result.code !== 0 || !result.data?.url) {
+        throw new Error(result.msg || 'Upload failed');
+      }
+      return result.data.url;
+    },
     async uploadFileToS3(file, type) {
       if (!this.pendingUpload) {
         this.$message.error('No target item selected for upload.');
@@ -435,47 +491,116 @@ export default {
         return;
       }
 
-      const token = this.getAuthToken();
-      if (!token) {
-        this.$message.error('Authentication token missing. Please login again.');
-        return;
-      }
-
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('contentType', 'rfidcontent');
-      formData.append('category', type === 'audio' ? 'audio' : 'images');
-      if (this.pendingUpload.mode === 'packThumbnail' && this.form.id) {
-        formData.append('contentPackId', this.form.id);
-      }
+      const packId = this.pendingUpload.mode === 'packThumbnail' ? this.form.id : null;
 
       this.uploadingMedia = true;
       try {
-        const response = await fetch(`${Api.getServiceUrl()}/admin/rfid/content-pack/upload`, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${token}`
-          },
-          body: formData
-        });
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(errorText || `Upload failed with status ${response.status}`);
-        }
-
-        const result = await response.json();
-        if (result.code !== 0 || !result.data?.url) {
-          throw new Error(result.msg || 'Upload failed');
-        }
-
-        targetItem[this.pendingUpload.field] = result.data.url;
+        targetItem[this.pendingUpload.field] = await this.uploadOne(
+          file,
+          type === 'audio' ? 'audio' : 'images',
+          packId
+        );
         this.$message.success(`${type === 'audio' ? 'Audio' : 'Image'} uploaded successfully.`);
       } catch (error) {
         this.$message.error(`Upload failed: ${error.message}`);
       } finally {
         this.uploadingMedia = false;
       }
+    },
+    // ---- Folder import (flat mode) ----
+    pickFolder() {
+      if (this.$refs.folderPicker) {
+        this.$refs.folderPicker.click();
+      }
+    },
+    async handleFolderSelected(event) {
+      const files = Array.from(event?.target?.files || []);
+      event.target.value = '';
+      if (!files.length) return;
+
+      const fileByPath = new Map(files.map(f => [f.webkitRelativePath || f.name, f]));
+      let pairs = pairMediaFiles([...fileByPath.keys()]);
+      if (pairs.length === 0) {
+        this.$message.warning('No audio files found in that folder.');
+        return;
+      }
+
+      const room = 10 - this.form.items.length;
+      if (room <= 0) {
+        this.$message.warning('This pack already has 10 items.');
+        return;
+      }
+      const skipped = Math.max(0, pairs.length - room);
+      pairs = pairs.slice(0, room);
+
+      if (!(await this.confirmPairs(pairs, skipped))) return;
+
+      // One item per pair; each file uploads into its own field.
+      const newItems = pairs.map(p => ({ sequence: 0, title: p.title, audioUrl: '', imageUrl: '', text: '' }));
+      const jobs = [];
+      pairs.forEach((p, i) => {
+        jobs.push({ path: p.audio, category: 'audio', item: newItems[i], field: 'audioUrl' });
+        if (p.image) {
+          jobs.push({ path: p.image, category: 'images', item: newItems[i], field: 'imageUrl' });
+        }
+      });
+
+      const failures = [];
+      this.importing = true;
+      this.importDone = 0;
+      this.importTotal = jobs.length;
+      try {
+        // ponytail: 4 at a time. Raise it if packs ever get much bigger than 10.
+        await this.runPool(jobs, 4, async (job) => {
+          try {
+            job.item[job.field] = await this.uploadOne(fileByPath.get(job.path), job.category);
+          } catch (error) {
+            failures.push(`${fileName(job.path)}: ${error.message}`);
+          } finally {
+            this.importDone += 1;
+          }
+        });
+      } finally {
+        this.importing = false;
+      }
+
+      // An item without audio is unusable, so drop it rather than adding a blank row.
+      const imported = newItems.filter(item => item.audioUrl);
+      imported.forEach(item => this.form.items.push(item));
+      this.form.items.forEach((item, idx) => { item.sequence = idx + 1; });
+
+      if (imported.length) {
+        this.$message.success(`Imported ${imported.length} item(s).`);
+      }
+      if (failures.length) {
+        this.$message.warning(`${failures.length} file(s) failed to upload: ${failures.join('; ')}`);
+      }
+      if (skipped) {
+        this.$message.warning(`${skipped} pair(s) skipped — a pack holds at most 10 items.`);
+      }
+    },
+    confirmPairs(pairs, skipped) {
+      const h = this.$createElement;
+      const rows = pairs.map((p, i) => h('div', { class: 'import-preview-row' }, [
+        `${i + 1}. ${p.title || '(untitled)'} — ${fileName(p.audio)} + ${p.image ? fileName(p.image) : 'no image'}`
+      ]));
+      if (skipped) {
+        rows.push(h('div', { class: 'import-preview-note' }, [
+          `${skipped} more pair(s) will be skipped — a pack holds at most 10 items.`
+        ]));
+      }
+      return this.$confirm(h('div', { class: 'import-preview' }, rows), `Import ${pairs.length} item(s)?`, {
+        confirmButtonText: 'Upload',
+        cancelButtonText: 'Cancel'
+      }).then(() => true).catch(() => false);
+    },
+    async runPool(jobs, size, worker) {
+      const queue = jobs.slice();
+      const runners = Array.from(
+        { length: Math.min(size, queue.length) },
+        async () => { while (queue.length) await worker(queue.shift()); }
+      );
+      await Promise.all(runners);
     },
     toggleAudio(url) {
       if (!url) return;
@@ -734,6 +859,9 @@ export default {
         this.storyMode = false;
         this.pendingUpload = null;
         this.uploadingMedia = false;
+        this.importing = false;
+        this.importDone = 0;
+        this.importTotal = 0;
       }
     },
     'form.items': {
@@ -764,6 +892,22 @@ export default {
 .custom-rfid-dialog .el-dialog__body {
   padding: 0 !important;
   border-radius: 16px;
+}
+/* MessageBox is appended to body, so these cannot be scoped. */
+.import-preview {
+  max-height: 300px;
+  overflow-y: auto;
+  font-size: 13px;
+  color: #475569;
+}
+.import-preview-row {
+  padding: 3px 0;
+  word-break: break-all;
+}
+.import-preview-note {
+  margin-top: 8px;
+  color: #d97706;
+  font-weight: 600;
 }
 </style>
 
@@ -898,6 +1042,12 @@ export default {
         font-weight: 600;
         color: #475569;
         font-size: 14px;
+    }
+
+    .items-header-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
     }
 
     .item-row {
