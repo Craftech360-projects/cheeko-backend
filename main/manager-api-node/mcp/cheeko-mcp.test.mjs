@@ -32,3 +32,18 @@ test('non-JSON body does not throw', () => {
   const r = toToolResult(502, '<html>bad gateway</html>');
   assert.equal(r.isError, true);
 });
+
+test('upload_pack_file is a write tool', () => {
+  assert.ok(names(buildServer({ api: noop, canWrite: true })).includes('upload_pack_file'));
+  assert.ok(!names(buildServer({ api: noop, canWrite: false })).includes('upload_pack_file'));
+});
+
+test('uploadPlan: PNG converts to .bin unless it is a thumbnail or convert=false', async () => {
+  const { uploadPlan } = await import('./cheeko-mcp.mjs');
+  assert.deepEqual(uploadPlan('/x/cover.png'), { filename: 'cover.bin', mime: 'application/octet-stream', shouldConvert: true });
+  assert.deepEqual(uploadPlan('/x/cover.png', { contentPackId: 31 }), { filename: 'cover.png', mime: 'image/png', shouldConvert: false });
+  assert.deepEqual(uploadPlan('/x/cover.png', { convert: false }), { filename: 'cover.png', mime: 'image/png', shouldConvert: false });
+  assert.deepEqual(uploadPlan('/x/song.mp3'), { filename: 'song.mp3', mime: 'audio/mpeg', shouldConvert: false });
+  assert.deepEqual(uploadPlan('/x/frame.bin'), { filename: 'frame.bin', mime: 'application/octet-stream', shouldConvert: false });
+  assert.throws(() => uploadPlan('/x/notes.txt'), /Unsupported file type/);
+});

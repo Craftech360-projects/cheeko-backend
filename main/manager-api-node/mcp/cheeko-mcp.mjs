@@ -15,10 +15,42 @@ import { McpServer } from '@modelcontextprotocol/server';
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import * as z from 'zod/v4';
 import os from 'node:os';
+import path from 'node:path';
+import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+
+// The API's PNG/JPEG -> LVGL RGB565 .bin converter. CJS, and pure apart from
+// spawning ffmpeg, so it loads from here without dragging the API in.
+const lvgl = createRequire(import.meta.url)('../src/utils/lvglImage.js');
 
 const ACTOR = process.env.CHEEKO_MCP_ACTOR || os.userInfo().username;
+
+const MIME = {
+  '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.m4a': 'audio/m4a',
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp',
+  '.bin': 'application/octet-stream'
+};
+
+/**
+ * What to send for a local file. The pack upload endpoint stores bytes as-is,
+ * and the toy only renders LVGL .bin, so PNG/JPEG default to converting —
+ * except when the upload is a pack thumbnail (contentPackId set), which the
+ * web dashboard shows and therefore wants as a real image.
+ */
+export function uploadPlan(filePath, { convert, contentPackId } = {}) {
+  const ext = path.extname(filePath).toLowerCase();
+  const mime = MIME[ext];
+  if (!mime) throw new Error(`Unsupported file type ${ext || '(none)'}; expected ${Object.keys(MIME).join(' ')}`);
+  const convertible = ext === '.png' || ext === '.jpg' || ext === '.jpeg';
+  const shouldConvert = convertible && (convert ?? !contentPackId);
+  return {
+    filename: shouldConvert ? path.basename(filePath, ext) + '.bin' : path.basename(filePath),
+    mime: shouldConvert ? MIME['.bin'] : mime,
+    shouldConvert
+  };
+}
 
 /**
  * manager-api answers 200 with {code:0} on success and a non-zero code on
@@ -39,8 +71,10 @@ export function toToolResult(status, bodyText) {
 }
 
 function makeApi(base, key) {
-  return async function api(path, { method = 'GET', body } = {}) {
-    const res = await fetch(`${base}${path}`, {
+  // `form` is a FormData for multipart routes; fetch sets the boundary itself,
+  // so no Content-Type header in that case.
+  return async function api(route, { method = 'GET', body, form } = {}) {
+    const res = await fetch(`${base}${route}`, {
       method,
       headers: {
         'X-Service-Key': key,
@@ -49,7 +83,7 @@ function makeApi(base, key) {
         'X-Request-ID': `mcp-${ACTOR}-${randomUUID().slice(0, 8)}`,
         ...(body && { 'Content-Type': 'application/json' })
       },
-      body: body && JSON.stringify(body)
+      body: form ?? (body && JSON.stringify(body))
     });
     return toToolResult(res.status, await res.text());
   };
@@ -97,9 +131,36 @@ export function buildServer({ api, canWrite }) {
       description: 'Update an existing RFID content pack by numeric id. Only the fields you pass are changed. Writes to the database.',
       inputSchema: z.object({
         id: z.number().int().describe('Numeric pack id — get it from list_content_packs'),
-        ...Object.fromEntries(Object.entries(packFields).map(([k, v]) => [k, v.optional()]))
+        ...Object.fromEntries(Object.entries(packFields).map(([k, v]) => [k, v.optional()])),
+        items: z.array(z.object({
+          itemNumber: z.number().int().optional().describe('1-based order; defaults to array position'),
+          title: z.string(),
+          description: z.string().optional(),
+          audioUrl: z.string().optional().describe('URL returned by upload_pack_file'),
+          imageUrl: z.string().optional().describe('URL of a .bin returned by upload_pack_file'),
+          text: z.string().optional().describe('Lyrics / story text shown alongside the item')
+        })).optional().describe('REPLACES every item on the pack (delete-all, reinsert). Omit to leave items untouched.')
       })
     }, (data) => api('/admin/rfid/content-pack', { method: 'PUT', body: data }));
+
+    server.registerTool('upload_pack_file', {
+      description: 'Upload a local audio, image or .bin file to the content CDN and return its URL for use in update_content_pack items. PNG/JPEG are converted to the LVGL .bin the toy renders unless convert=false or contentPackId is set (thumbnails stay real images).',
+      inputSchema: z.object({
+        path: z.string().describe('Absolute path on this machine'),
+        category: z.string().optional().describe('CDN subfolder, e.g. the pack code. Default "uploads"'),
+        contentPackId: z.number().int().optional().describe('Set to use this file as that pack\'s thumbnail'),
+        convert: z.boolean().optional().describe('Force PNG/JPEG -> .bin on or off')
+      })
+    }, async ({ path: filePath, category, contentPackId, convert }) => {
+      const plan = uploadPlan(filePath, { convert, contentPackId });
+      let buf = await readFile(filePath);
+      if (plan.shouldConvert) buf = await lvgl.toLvglRgb565Bin(buf);
+      const form = new FormData();
+      form.append('file', new Blob([buf], { type: plan.mime }), plan.filename);
+      if (category) form.append('category', category);
+      if (contentPackId) form.append('contentPackId', String(contentPackId));
+      return api('/admin/rfid/content-pack/upload', { method: 'POST', form });
+    });
   }
 
   return server;
