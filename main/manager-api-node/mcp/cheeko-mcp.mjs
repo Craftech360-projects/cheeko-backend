@@ -99,22 +99,7 @@ export function buildServer({ api, canWrite }) {
         id: z.number().int().describe('Numeric pack id — get it from list_content_packs'),
         ...Object.fromEntries(Object.entries(packFields).map(([k, v]) => [k, v.optional()]))
       })
-    }, async (data) => {
-      // rfid.service.updateContentPack uses updateMany, which matches zero rows
-      // and still reports success. Harmless for the admin UI (it only sends ids
-      // it just listed) but through MCP the model would report an edit that
-      // never happened, so check the id exists first.
-      //
-      // Via /list, not /content-pack/:id — that route is on requireAuth, which
-      // unlike its sibling routes has no service-key branch and 401s us.
-      const found = await api('/admin/rfid/content-pack/list');
-      if (found.isError) return found;
-      const exists = JSON.parse(found.content[0].text)?.some((p) => Number(p.id) === data.id);
-      if (!exists) {
-        return { content: [{ type: 'text', text: `No content pack with id ${data.id}. Use list_content_packs to find the right id.` }], isError: true };
-      }
-      return api('/admin/rfid/content-pack', { method: 'PUT', body: data });
-    });
+    }, (data) => api('/admin/rfid/content-pack', { method: 'PUT', body: data }));
   }
 
   return server;
