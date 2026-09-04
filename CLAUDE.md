@@ -217,6 +217,21 @@ Both APIs share the same module structure:
 - Supabase CLI for migrations
 - Supabase JS Client for queries
 
+### MCP Server (manager-api-node/mcp)
+`main/manager-api-node/mcp/cheeko-mcp.mjs` exposes manager-api to Claude Code / Claude Desktop / Cursor over stdio. It calls the REST API (not Prisma) and has **no compile-time link to it, so API changes break it silently**. Full docs: `main/manager-api-node/docs/mcp.md`.
+
+When a change touches any of these, update the MCP in the same commit and run `npm run test:mcp`:
+- the content-pack routes it hardcodes: `/admin/rfid/content-pack` (list, `code/:packCode`, POST, PUT, `upload`) and `GET /swagger.json`
+- the `{code, msg, data}` response envelope
+- `src/middleware/auth.js` — which middleware accepts `X-Service-Key` vs `Authorization: Bearer`; moving a route between `requireAdmin` and `requireAuth` changes which credential reaches it
+- `src/middleware/requestId.js` honouring inbound `X-Request-ID` (the MCP's audit trail)
+- `src/utils/lvglImage.js` (must stay pure CJS — the MCP requires it directly)
+- the item shape `rfidService.updateContentPack` accepts, and the upload route's multer mime list
+- `sys_user_token` columns / login's raw INSERT in `auth.service.js` (mirrored by `scripts/mcp-token.js`)
+- a new route group that is dangerous to write to (auth, OTA, params, provider keys, server control) → add it to `NO_WRITE` in the MCP
+
+Mention the MCP impact in your response even when no MCP edit is needed.
+
 ## manager-api-node Project Structure
 
 ```
