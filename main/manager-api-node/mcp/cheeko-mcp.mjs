@@ -8,6 +8,8 @@
  * than touching Prisma directly, so Joi validation, the XSS filter and request
  * logging all still run.
  *
+ * Setup, credentials, client configs and safety model: docs/mcp.md
+ *
  * Environment (set per-entry in .mcp.json / claude mcp add):
  *   CHEEKO_API           base URL incl. context path, e.g. https://dev-api.../toy
  *   SERVICE_SECRET_KEY   god-mode key accepted by requireAdmin / requireServiceKey
