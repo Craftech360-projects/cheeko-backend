@@ -8,7 +8,7 @@ const noop = async () => ({ content: [] });
 
 test('write tools are absent unless ALLOW_WRITES is set', () => {
   const ro = names(buildServer({ api: noop, canWrite: false }));
-  assert.deepEqual(ro.sort(), ['get_content_pack', 'list_content_packs']);
+  for (const w of ['create_content_pack', 'update_content_pack', 'upload_pack_file']) assert.ok(!ro.includes(w), w + ' must not exist read-only');
 
   const rw = names(buildServer({ api: noop, canWrite: true }));
   assert.ok(rw.includes('create_content_pack'));
@@ -46,4 +46,39 @@ test('uploadPlan: PNG converts to .bin unless it is a thumbnail or convert=false
   assert.deepEqual(uploadPlan('/x/song.mp3'), { filename: 'song.mp3', mime: 'audio/mpeg', shouldConvert: false });
   assert.deepEqual(uploadPlan('/x/frame.bin'), { filename: 'frame.bin', mime: 'application/octet-stream', shouldConvert: false });
   assert.throws(() => uploadPlan('/x/notes.txt'), /Unsupported file type/);
+});
+
+test('generic proxy tools exist in both modes; curated writes only with ALLOW_WRITES', () => {
+  const ro = names(buildServer({ api: noop, canWrite: false })).sort();
+  assert.deepEqual(ro, ['admin_request', 'describe_endpoint', 'get_content_pack', 'list_content_packs', 'search_endpoints']);
+  assert.ok(names(buildServer({ api: noop, canWrite: true })).includes('admin_request'));
+});
+
+test('writeCheck: GET always, writes need ALLOW_WRITES, NO_WRITE groups refused', async () => {
+  const { writeCheck } = await import('./cheeko-mcp.mjs');
+  assert.equal(writeCheck('GET', '/user/list', false), null);
+  assert.equal(writeCheck('GET', '/ota/check', true), null);
+  assert.match(writeCheck('POST', '/device/register', false), /read-only/);
+  assert.equal(writeCheck('POST', '/device/register', true), null);
+  assert.equal(writeCheck('PUT', '/admin/rfid/content-pack', true), null);
+  for (const r of ['/user/login', '/ota/upload', '/otaMag/x', '/admin/params', '/admin/server/restart', '/models/1', '/livekit/providers']) {
+    assert.match(writeCheck('POST', r, true) ?? '', /blocked/, `expected ${r} blocked`);
+  }
+  // Prefix must be a path segment: /users-report is not /user
+  assert.equal(writeCheck('POST', '/userx', true), null);
+});
+
+test('searchSpec ranks by matched terms and formats METHOD path — summary', async () => {
+  const { searchSpec } = await import('./cheeko-mcp.mjs');
+  const spec = { paths: {
+    '/device/list': { get: { summary: 'List devices', tags: ['Device'] } },
+    '/device/{mac}': { get: { summary: 'Get one device' }, delete: { summary: 'Remove device' } },
+    '/agent/list': { get: { summary: 'List agents', tags: ['Agent'] } }
+  } };
+  const out = searchSpec(spec, 'device list');
+  assert.equal(out[0], 'GET /device/list — List devices');
+  assert.ok(out.includes('GET /agent/list — List agents'));
+  // 'Remove device' matches one term, so it is present but ranked below the two-term hit.
+  assert.ok(out.indexOf('DELETE /device/{mac} — Remove device') > 0);
+  assert.deepEqual(searchSpec(spec, 'zzz'), []);
 });
