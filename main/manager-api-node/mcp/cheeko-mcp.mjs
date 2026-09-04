@@ -10,7 +10,10 @@
  *
  * Environment (set per-entry in .mcp.json / claude mcp add):
  *   CHEEKO_API           base URL incl. context path, e.g. https://dev-api.../toy
- *   SERVICE_SECRET_KEY   god-mode key accepted by requireAdmin
+ *   SERVICE_SECRET_KEY   god-mode key accepted by requireAdmin / requireServiceKey
+ *   CHEEKO_USER_TOKEN    optional user Bearer token (scripts/mcp-token.js) for the
+ *                        requireAuth / requireSuperAdmin / requireFlexAuth routes
+ *                        the service key cannot reach
  *   ALLOW_WRITES=1       registers the create/update tools. Absent = read-only.
  */
 
@@ -108,11 +111,15 @@ export function toToolResult(status, bodyText) {
   };
 }
 
-function makeApi(base, key) {
+export function makeApi(base, key, userToken) {
+  // Both credentials go on every call: requireAdmin/requireServiceKey take the
+  // key first and ignore the bearer; requireAuth and friends ignore the key and
+  // take the bearer. Neither middleware objects to the other header.
   // `form` is a FormData for multipart routes; fetch sets the boundary itself,
   // so no Content-Type header in that case.
   const headers = (body) => ({
     'X-Service-Key': key,
+    ...(userToken && { Authorization: `Bearer ${userToken}` }),
     // requestId.js honours an inbound X-Request-ID, so this lands in the
     // API's normal logs and makes MCP-originated writes greppable.
     'X-Request-ID': `mcp-${ACTOR}-${randomUUID().slice(0, 8)}`,
@@ -142,7 +149,7 @@ const packFields = {
   active: z.boolean().optional()
 };
 
-export function buildServer({ api, canWrite }) {
+export function buildServer({ api, canWrite, hasUserToken = false }) {
   const server = new McpServer({ name: 'cheeko', version: '1.0.0' });
 
   server.registerTool('list_content_packs', {
@@ -209,7 +216,9 @@ export function buildServer({ api, canWrite }) {
     // Some routes sit on requireAuth (a user's own devices, profile, etc.),
     // which has no service-key branch. Say so, or the model retries forever.
     if (result.isError && /"code":\s*401/.test(result.content[0].text)) {
-      result.content[0].text += '\n\nThis route only accepts a user Bearer token (requireAuth), not the service key. It is not reachable from this MCP server; use the admin dashboard, or an admin-scoped equivalent (search_endpoints).';
+      result.content[0].text += hasUserToken
+        ? '\n\nCHEEKO_USER_TOKEN was sent and rejected: it has expired or been revoked. Mint a new one with `node scripts/mcp-token.js <username>` and restart the MCP server.'
+        : '\n\nThis route needs a user Bearer token, not the service key. Set CHEEKO_USER_TOKEN (mint one with `node scripts/mcp-token.js <username>`) and restart the MCP server, or use an admin-scoped equivalent (search_endpoints).';
     }
     return result;
   });
@@ -269,7 +278,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     process.exit(1);
   }
   const canWrite = process.env.ALLOW_WRITES === '1';
-  console.error(`cheeko-mcp: ${base} (${canWrite ? 'read+write' : 'read-only'}) as ${ACTOR}`);
-  await buildServer({ api: makeApi(base.replace(/\/$/, ''), key), canWrite })
+  // Claude Code leaves an unset ${VAR} in .mcp.json unexpanded, so a literal
+  // "${...}" here means "not configured", not a token.
+  const rawToken = process.env.CHEEKO_USER_TOKEN;
+  const userToken = rawToken && !rawToken.startsWith('${') ? rawToken : undefined;
+  console.error(`cheeko-mcp: ${base} (${canWrite ? 'read+write' : 'read-only'}, user token: ${userToken ? 'yes' : 'no'}) as ${ACTOR}`);
+  await buildServer({ api: makeApi(base.replace(/\/$/, ''), key, userToken), canWrite, hasUserToken: Boolean(userToken) })
     .connect(new StdioServerTransport());
 }

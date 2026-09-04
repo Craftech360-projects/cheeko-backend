@@ -82,3 +82,19 @@ test('searchSpec ranks by matched terms and formats METHOD path — summary', as
   assert.ok(out.indexOf('DELETE /device/{mac} — Remove device') > 0);
   assert.deepEqual(searchSpec(spec, 'zzz'), []);
 });
+
+test('makeApi sends the bearer only when a user token is given', async () => {
+  const { makeApi } = await import('./cheeko-mcp.mjs');
+  const seen = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, opts) => { seen.push({ url, headers: opts.headers }); return { status: 200, text: async () => '{"code":0,"data":null}' }; };
+  try {
+    await makeApi('http://x/toy', 'KEY')('/a');
+    await makeApi('http://x/toy', 'KEY', 'TOK')('/b');
+  } finally { globalThis.fetch = realFetch; }
+  assert.equal(seen[0].headers['X-Service-Key'], 'KEY');
+  assert.equal(seen[0].headers.Authorization, undefined);
+  assert.equal(seen[1].headers['X-Service-Key'], 'KEY');
+  assert.equal(seen[1].headers.Authorization, 'Bearer TOK');
+  assert.match(seen[1].headers['X-Request-ID'], /^mcp-.+-[0-9a-f]{8}$/);
+});
