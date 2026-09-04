@@ -830,7 +830,6 @@ export default {
 
 <style scoped>
 .welcome {
-  min-width: 900px;
   min-height: 506px;
   height: 100vh;
   display: flex;

@@ -535,7 +535,6 @@ export default {
 
 <style lang="scss" scoped>
 .welcome {
-  min-width: 900px;
   background: linear-gradient(135deg, #667eea11 0%, #764ba211 100%);
   min-height: 100vh;
 }
