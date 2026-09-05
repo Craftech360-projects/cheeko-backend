@@ -4,97 +4,105 @@
     <el-main style="padding: 20px;display: flex;flex-direction: column;">
       <div>
         <!-- Home Page Content -->
-        <div class="add-device">
-          <div class="add-device-bg">
-            <div class="hero-left">
-              <div class="hellow-text" style="margin-top: 18px;">
-                Hello, Cheeko
-              </div>
-              <div class="hellow-text">
-                Let's have a
-                <span style="color: var(--primary);">wonderful day!</span>
-              </div>
-              <div class="add-device-btn">
-                <div class="left-add" @click="showAddDialog">
-                  Add Agent
-                </div>
-                <div style="width: 23px;height: 13px;background: var(--primary);margin-left: -10px;" />
-                <div class="right-add">
-                  <i class="el-icon-right" @click="showAddDialog" style="font-size: 20px;color: #fff;" />
-                </div>
-              </div>
-            </div>
-            <!-- Stats Boxes Container -->
-            <div class="stats-container">
-              <div v-if="isAdmin" class="stats-box">
-                <div class="stats-count">{{ systemStats.totalUsers }}</div>
-                <div class="stats-label">Total Users</div>
-              </div>
-              <div v-if="isAdmin" class="stats-box">
-                <div class="stats-count">{{ systemStats.totalDevices }}</div>
-                <div class="stats-label">Total Devices</div>
-              </div>
-              <el-popover
-                placement="bottom"
-                width="280"
-                trigger="hover"
-                popper-class="device-popover"
-                @show="fetchTodayActiveDevices">
-                <div class="device-list-popover">
-                  <div class="popover-title">Active Devices Today</div>
-                  <div v-if="todayActiveDevices.length === 0" class="no-devices">No active devices</div>
-                  <div v-else class="device-item" v-for="(device, index) in todayActiveDevices" :key="index">
-                    <div class="device-mac">{{ formatMacAddress(device.macAddress) }}</div>
-                    <div class="device-owner">{{ device.ownerName || 'Unknown' }}</div>
-                  </div>
-                </div>
-                <div slot="reference" class="stats-box hoverable">
-                  <div class="stats-count">{{ todayDeviceCount }}</div>
-                  <div class="stats-label">Active Today</div>
-                </div>
-              </el-popover>
-              <el-popover
-                placement="bottom"
-                width="280"
-                trigger="hover"
-                popper-class="device-popover"
-                @show="fetchMonthActiveDevices">
-                <div class="device-list-popover">
-                  <div class="popover-title">Active Devices This Month</div>
-                  <div v-if="monthActiveDevices.length === 0" class="no-devices">No active devices</div>
-                  <div v-else class="device-item" v-for="(device, index) in monthActiveDevices" :key="index">
-                    <div class="device-mac">{{ formatMacAddress(device.macAddress) }}</div>
-                    <div class="device-owner">{{ device.ownerName || 'Unknown' }}</div>
-                  </div>
-                </div>
-                <div slot="reference" class="stats-box hoverable">
-                  <div class="stats-count">{{ monthDeviceCount }}</div>
-                  <div class="stats-label">Active This Month</div>
-                </div>
-              </el-popover>
-            </div>
+        <div class="page-head">
+          <div>
+            <h1 class="page-title">Agents</h1>
+            <p class="page-lead">Every character a child talks to — voice, prompt, memory and the toys it runs on.</p>
+          </div>
+          <div class="page-actions">
+            <el-button size="small" type="primary" @click="showAddDialog">New agent</el-button>
           </div>
         </div>
+
+        <div class="bento" :class="isAdmin ? 'g4' : 'g2'">
+          <div v-if="isAdmin" class="card kpi">
+            <div class="kpi-label">Total users</div>
+            <div class="kpi-value">{{ systemStats.totalUsers }}</div>
+          </div>
+          <div v-if="isAdmin" class="card kpi">
+            <div class="kpi-label">Total devices</div>
+            <div class="kpi-value">{{ systemStats.totalDevices }}</div>
+          </div>
+          <el-popover placement="bottom" width="280" trigger="hover" popper-class="device-popover"
+            @show="fetchTodayActiveDevices">
+            <div class="device-list-popover">
+              <div class="popover-title">Active devices today</div>
+              <div v-if="todayActiveDevices.length === 0" class="no-devices">No active devices</div>
+              <div v-else class="device-item" v-for="(device, index) in todayActiveDevices" :key="index">
+                <div class="device-mac">{{ formatMacAddress(device.macAddress) }}</div>
+                <div class="device-owner">{{ device.ownerName || 'Unknown' }}</div>
+              </div>
+            </div>
+            <div slot="reference" class="card kpi hoverable">
+              <div class="kpi-label">Active today</div>
+              <div class="kpi-value">{{ todayDeviceCount }}</div>
+            </div>
+          </el-popover>
+          <el-popover placement="bottom" width="280" trigger="hover" popper-class="device-popover"
+            @show="fetchMonthActiveDevices">
+            <div class="device-list-popover">
+              <div class="popover-title">Active devices this month</div>
+              <div v-if="monthActiveDevices.length === 0" class="no-devices">No active devices</div>
+              <div v-else class="device-item" v-for="(device, index) in monthActiveDevices" :key="index">
+                <div class="device-mac">{{ formatMacAddress(device.macAddress) }}</div>
+                <div class="device-owner">{{ device.ownerName || 'Unknown' }}</div>
+              </div>
+            </div>
+            <div slot="reference" class="card kpi hoverable">
+              <div class="kpi-label">Active this month</div>
+              <div class="kpi-value">{{ monthDeviceCount }}</div>
+            </div>
+          </el-popover>
+        </div>
+
+        <ListToolbar
+          :count="totalAgents || devices.length"
+          count-noun="agents"
+          :total="totalAgents || devices.length"
+          :sort-options="sortOptions"
+          :sort-by.sync="sortBy"
+          :sort-dir.sync="sortDir"
+          :group-options="groupOptions"
+          :group-by.sync="groupBy"
+          :selecting.sync="selecting"
+          :selected-count="selectedCount"
+          :all-selected="allSelected"
+          :search.sync="listSearch"
+          search-placeholder="Agent, child or MAC"
+          @select-all-matching="selectAllMatching"
+          @clear-selection="clearSelection"
+        >
+          <template #bulk>
+            <el-button @click="bulkExport">Export</el-button>
+            <el-button type="danger" @click="bulkDelete">Delete agents</el-button>
+          </template>
+        </ListToolbar>
 
         <!-- Agent Table -->
         <div class="agent-table-container">
           <el-card class="agent-card" shadow="never">
             <el-table
               ref="agentTable"
-              :data="paginatedDevices"
+              :data="visibleRows"
               class="agent-table"
               v-loading="isLoading"
               element-loading-text="Loading..."
               element-loading-spinner="el-icon-loading"
               element-loading-background="rgba(255, 255, 255, 0.7)"
               row-key="agentId"
+              :row-class-name="rowClass"
+              @sort-change="onTableSortChange"
+              @selection-change="onSelectionChange"
             >
+              <el-table-column v-if="selecting" type="selection" width="44" />
               <!-- Agent Name -->
-              <el-table-column label="Agent Name" prop="agentName" min-width="150">
+              <el-table-column label="Agent Name" prop="agentName" min-width="190" sortable="custom">
                 <template slot-scope="scope">
                   <div class="agent-name-cell">
-                    <span class="agent-name">{{ scope.row.agentName }}</span>
-                    <el-tooltip :content="scope.row.systemPrompt" placement="top" popper-class="custom-tooltip">
+                    <span class="rowid-mark accent">{{ initials(scope.row.agentName) }}</span>
+                    <span class="agent-name cell-key">{{ scope.row.agentName }}</span>
+                    <el-tooltip placement="top" popper-class="agent-role-tooltip">
+                      <div slot="content" class="agent-role">{{ scope.row.agentRole }}</div>
                       <i class="el-icon-info info-icon"></i>
                     </el-tooltip>
                   </div>
@@ -102,7 +110,7 @@
               </el-table-column>
 
               <!-- Owner (Admin only) -->
-              <el-table-column v-if="isAdmin" label="Owner" prop="ownerUsername" min-width="180">
+              <el-table-column v-if="isAdmin" label="Owner" prop="ownerUsername" min-width="180" sortable="custom">
                 <template slot-scope="scope">
                   {{ scope.row.ownerUsername || `User ID: ${scope.row.userId}` }}
                 </template>
@@ -133,7 +141,7 @@
               </el-table-column>
 
               <!-- MAC ID(s) -->
-              <el-table-column label="MAC ID(s)" min-width="140" align="center">
+              <el-table-column label="MAC ID(s)" prop="deviceCount" min-width="150" sortable="custom">
                 <template slot-scope="scope">
                   <el-tooltip
                     :disabled="!scope.row.macAddresses || scope.row.macAddresses.length === 0"
@@ -160,14 +168,14 @@
               </el-table-column>
 
               <!-- Last Conversation -->
-              <el-table-column label="Last Conversation" min-width="160" align="center">
+              <el-table-column label="Last Conversation" prop="lastConnectedAt" min-width="170" sortable="custom">
                 <template slot-scope="scope">
                   <span class="last-conversation">{{ formatLastConnected(scope.row.lastConnectedAt) }}</span>
                 </template>
               </el-table-column>
 
               <!-- Actions -->
-              <el-table-column label="Actions" min-width="320" align="center">
+              <el-table-column label="Actions" min-width="330" align="right">
                 <template slot-scope="scope">
                   <div class="action-buttons">
                     <el-button type="text" size="small" @click="handleConfigure(scope.row)">
@@ -194,7 +202,7 @@
               </el-table-column>
 
               <template slot="empty">
-                <span>No agents found</span>
+                <div class="ds-empty"><b>No agents yet.</b>Create one to give a toy its character.</div>
               </template>
             </el-table>
 
@@ -246,12 +254,31 @@ import Api from '@/apis/api';
 import AddWisdomBodyDialog from '@/components/AddWisdomBodyDialog.vue';
 import ChatHistoryDialog from '@/components/ChatHistoryDialog.vue';
 import VersionFooter from '@/components/VersionFooter.vue';
+import ListToolbar from '@/components/ListToolbar.vue';
+import listControls from '@/mixins/listControls';
+import { summarizeAgentPrompt } from '@/utils/agentSummary';
 
 export default {
   name: 'Home',
-  components: { AddWisdomBodyDialog, VersionFooter, ChatHistoryDialog },
+  components: { AddWisdomBodyDialog, VersionFooter, ChatHistoryDialog, ListToolbar },
+  mixins: [listControls],
   data() {
     return {
+      // list controls
+      rowKey: 'agentId',
+      sortBy: 'lastConnectedAt',
+      sortDir: 'desc',
+      sortOptions: [
+        { label: 'Last conversation', value: 'lastConnectedAt' },
+        { label: 'Agent name', value: 'agentName' },
+        { label: 'Owner', value: 'ownerUsername' },
+        { label: 'Devices', value: 'deviceCount' }
+      ],
+      groupOptions: [
+        { label: 'None', value: '' },
+        { label: 'Owner', value: 'ownerUsername' }
+      ],
+      searchFields: ['agentName', 'ownerUsername', 'parentName', 'parentEmail', 'parentPhone'],
       addDeviceDialogVisible: false,
       devices: [],
       originalDevices: [],
@@ -286,8 +313,11 @@ export default {
     isAdmin() {
       return this.$store.getters.getIsSuperAdmin;
     },
+    // Server already paginated these; the mixin sorts/searches the page
+    sourceRows() {
+      return this.devices;
+    },
     paginatedDevices() {
-      // Data is already paginated from server, return as-is
       return this.devices;
     },
     pageCount() {
@@ -350,6 +380,42 @@ export default {
   // re-activates this component on every navigation back to /home.
 
   methods: {
+    initials(name) {
+      const value = String(name || '').trim();
+      if (!value) return '—';
+      const parts = value.split(/\s+/).filter(Boolean);
+      return (parts.length > 1 ? parts[0][0] + parts[1][0] : value.slice(0, 2)).toUpperCase();
+    },
+    bulkExport() {
+      const rows = this.selectedRows;
+      if (!rows.length) {
+        this.$message.warning('Nothing to export.');
+        return;
+      }
+      const cols = ['agentName', 'ownerUsername', 'parentName', 'parentEmail', 'deviceCount'];
+      const escape = value => `"${String(value === null || value === undefined ? '' : value).replace(/"/g, '""')}"`;
+      const csv = [cols.join(',')]
+        .concat(rows.map(row => cols.map(col => escape(row[col])).join(',')))
+        .join('\n');
+      const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'agents.csv';
+      link.click();
+      URL.revokeObjectURL(url);
+    },
+    bulkDelete() {
+      const rows = this.selectedRows;
+      if (!rows.length) return;
+      this.$confirm(`Delete ${rows.length} agent${rows.length === 1 ? '' : 's'}? This cannot be undone.`, 'Delete agents', {
+        confirmButtonText: 'Delete',
+        cancelButtonText: 'Cancel',
+        type: 'warning'
+      }).then(() => {
+        rows.forEach(row => this.handleDeleteAgent(row.agentId, true));
+        this.clearSelection();
+      }).catch(() => {});
+    },
     showAddDialog() {
       this.addDeviceDialogVisible = true
     },
@@ -504,12 +570,10 @@ export default {
       this.isLoading = false;
     },
     // Delete agent
-    handleDeleteAgent(agentId) {
-      this.$confirm('Are you sure you want to delete this agent?', 'Confirm', {
-        confirmButtonText: 'Confirm',
-        cancelButtonText: 'Cancel',
-        type: 'warning'
-      }).then(() => {
+    // `skipConfirm` is set by the bulk path, which confirms once for the
+    // whole selection.
+    handleDeleteAgent(agentId, skipConfirm) {
+      const run = () => {
         Api.agent.deleteAgent(agentId, (res) => {
           if (res.data.code === 0) {
             this.$message.success({
@@ -524,7 +588,18 @@ export default {
             });
           }
         });
-      }).catch(() => { });
+      };
+
+      if (skipConfirm) {
+        run();
+        return;
+      }
+
+      this.$confirm('Are you sure you want to delete this agent?', 'Confirm', {
+        confirmButtonText: 'Confirm',
+        cancelButtonText: 'Cancel',
+        type: 'warning'
+      }).then(run).catch(() => { });
     },
 
     // Process agent list
@@ -541,7 +616,10 @@ export default {
           macAddresses: item.deviceMacAddresses ? String(item.deviceMacAddresses).split(',').filter(Boolean) : [],
           memModelId: item.memModelId || 'Memory_nomem',
           lastConnectedAt: item.lastConnectedAt || null,
-          systemPrompt: item.systemPrompt || 'No system prompt configured',
+          // What the agent is and what it is responsible for, read out of the
+          // prompt. The prompt itself is a page of operating procedure and
+          // belongs in the editor, not in a hover.
+          agentRole: summarizeAgentPrompt(item.systemPrompt) || 'No system prompt configured',
           ownerUsername: item.ownerUsername || null,
           parentName: item.parentName || null,
           parentEmail: item.parentEmail || null,
@@ -659,7 +737,7 @@ export default {
 
 .parent-contact {
   font-size: 12px;
-  color: #818cae;
+  color: $text-light;
   line-height: 1.5;
   word-break: break-all;
 }
@@ -671,10 +749,10 @@ export default {
 
 .welcome {
   min-height: 506px;
-  height: 100vh;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  background: linear-gradient(145deg, #fff5eb, #fff7f0);
+  background: transparent;
   background-size: cover;
   /* Ensure background image covers entire element */
   background-position: center;
@@ -685,121 +763,15 @@ export default {
   /* Compatible with older Opera browsers */
 }
 
-.add-device {
-  min-height: 155px;
-  border-radius: 15px;
-  position: relative;
-  overflow: hidden;
-  background: linear-gradient(269.62deg,
-      rgba($primary, 0.15) 0%,
-      rgba($secondary-pink, 0.1) 49.69%,
-      rgba($secondary-blue, 0.15) 100%);
-}
 
-.add-device-bg {
-  width: 100%;
-  min-height: 155px;
-  text-align: left;
-  background-image: url("@/assets/home/main-top-bg.png");
-  overflow: hidden;
-  background-size: cover;
-  /* Ensure background image covers entire element */
-  background-position: center;
-  /* Align from top center */
-  -webkit-background-size: cover;
-  /* Compatible with older WebKit browsers */
-  -o-background-size: cover;
-  box-sizing: border-box;
-  /* Hero is a flex row: greeting left, stats right, stats wrap below on
-     narrow screens instead of floating over the text */
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 8px 16px;
-  padding: 6px 30px 14px 0;
 
-  .hellow-text {
-    color: #3d4566;
-    font-size: 26px;
-    font-weight: 700;
-    letter-spacing: 0;
-    line-height: 1.3;
-  }
-}
 
-.hero-left {
-  padding-left: 50px;
-  min-width: 0;
-}
-
-.add-device-btn {
-  display: flex;
-  align-items: center;
-  margin-top: 10px;
-  cursor: pointer;
-
-  .left-add {
-    width: 105px;
-    height: 34px;
-    border-radius: 17px;
-    background: $primary;
-    color: #fff;
-    font-size: 14px;
-    font-weight: 500;
-    text-align: center;
-    line-height: 34px;
-  }
-
-  .right-add {
-    width: 34px;
-    height: 34px;
-    border-radius: 50%;
-    background: $primary;
-    margin-left: -6px;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-  }
-}
 
 /* Stats Container — flows with the hero instead of floating over the text */
-.stats-container {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 14px;
-  padding-right: 20px;
-  min-width: 0;
-}
 
 /* Stats Box Styles */
-.stats-box {
-  background: rgba(255, 255, 255, 0.95);
-  border-radius: 12px;
-  padding: 10px 16px;
-  box-shadow: 0 4px 16px rgba($primary, 0.2);
-  text-align: center;
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba($primary, 0.15);
-  min-width: 96px;
-}
 
-.stats-count {
-  font-size: 28px;
-  font-weight: 700;
-  color: $primary;
-  line-height: 1;
-  margin-bottom: 4px;
-}
 
-.stats-label {
-  font-size: 13px;
-  font-weight: 500;
-  color: #3d4566;
-  white-space: nowrap;
-}
 
 /* Hoverable stats box */
 .stats-box.hoverable {
@@ -809,7 +781,7 @@ export default {
 
 .stats-box.hoverable:hover {
   transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba($primary, 0.3);
+  box-shadow: none;
 }
 
 /* Responsive Stats */
@@ -893,7 +865,7 @@ export default {
 .agent-card {
   background: white;
   border: none;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
+  box-shadow: none;
   border-radius: 15px;
 }
 
@@ -906,8 +878,8 @@ export default {
 }
 
 ::v-deep .agent-table .el-table__header th {
-  background: #f5f7fa !important;
-  color: #3d4566;
+  background: $surface-sunk !important;
+  color: $text-dark;
   font-weight: 600;
   border-right: none !important;
 }
@@ -924,6 +896,7 @@ export default {
 
 /* Agent Name Cell */
 .agent-name-cell {
+  gap: 10px;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -931,7 +904,7 @@ export default {
 
 .agent-name {
   font-weight: 600;
-  color: #3d4566;
+  color: $text-dark;
   font-size: 14px;
 }
 
@@ -961,7 +934,7 @@ export default {
 
 /* Last Conversation */
 .last-conversation {
-  color: #979db1;
+  color: $text-light;
   font-size: 12px;
 }
 
@@ -985,7 +958,7 @@ export default {
 }
 
 .action-buttons .delete-btn {
-  color: #f56c6c;
+  color: $danger;
 }
 
 .action-buttons .delete-btn:hover {
@@ -999,7 +972,7 @@ export default {
 .footer {
   font-size: 12px;
   font-weight: 400;
-  color: #979db1;
+  color: $text-light;
   text-align: center;
 }
 
@@ -1029,7 +1002,7 @@ export default {
   display: flex;
   align-items: center;
   gap: 10px;
-  color: #606266;
+  color: $text-body;
   font-size: 14px;
 }
 
@@ -1038,7 +1011,7 @@ export default {
 }
 
 .info-separator {
-  color: #dcdfe6;
+  color: $border-color;
 }
 
 .pagination-controls {
@@ -1058,7 +1031,7 @@ export default {
   border-radius: 4px;
   border: 1px solid #e4e7ed;
   background: #fff;
-  color: #606266;
+  color: $text-body;
   font-size: 13px;
 }
 
@@ -1069,7 +1042,7 @@ export default {
   border-radius: 4px;
   border: 1px solid #e4e7ed;
   background: #fff;
-  color: #606266;
+  color: $text-body;
   font-size: 13px;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -1107,8 +1080,15 @@ export default {
 </style>
 
 <style>
-.custom-tooltip {
-  max-width: 400px;
+/* The role summary is two sentences on two lines, so the tooltip has to keep
+   the newline the summary puts between them. */
+.agent-role-tooltip {
+  max-width: 420px;
+}
+
+.agent-role-tooltip .agent-role {
+  white-space: pre-line;
+  line-height: 1.55;
   word-break: break-word;
 }
 
@@ -1141,7 +1121,7 @@ export default {
 .device-list-popover .popover-title {
   font-size: 14px;
   font-weight: 600;
-  color: #3d4566;
+  color: $text-dark;
   padding: 12px 16px;
   border-bottom: 1px solid #ebeef5;
   background: #fafbfc;
@@ -1150,7 +1130,7 @@ export default {
 .device-list-popover .no-devices {
   padding: 20px 16px;
   text-align: center;
-  color: #909399;
+  color: $text-light;
   font-size: 13px;
 }
 
@@ -1167,19 +1147,19 @@ export default {
 }
 
 .device-list-popover .device-item:hover {
-  background: #f5f7fa;
+  background: $surface-sunk;
 }
 
 .device-list-popover .device-mac {
   font-family: 'Courier New', monospace;
   font-size: 12px;
-  color: #3d4566;
+  color: $text-dark;
   font-weight: 500;
 }
 
 .device-list-popover .device-owner {
   font-size: 12px;
-  color: #FF9100;
+  color: $primary;
   font-weight: 500;
 }
 </style>

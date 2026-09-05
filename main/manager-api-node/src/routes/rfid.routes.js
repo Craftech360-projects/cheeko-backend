@@ -3516,6 +3516,12 @@ router.get('/card/lookup-legacy/:rfidUid',
  *         name: active
  *         schema:
  *           type: boolean
+ *       - in: query
+ *         name: scope
+ *         description: "`custom` returns only the per-child custom-card packs, which the default catalogue view excludes"
+ *         schema:
+ *           type: string
+ *           enum: [custom]
  *     responses:
  *       200:
  *         description: Paginated content pack list
@@ -3523,7 +3529,7 @@ router.get('/card/lookup-legacy/:rfidUid',
 router.get('/content-pack/page',
   requireAdmin,
   asyncHandler(async (req, res) => {
-    const { page, limit, packCode, name, contentType, language, active } = req.query;
+    const { page, limit, packCode, name, contentType, language, active, scope } = req.query;
     const result = await rfidService.getContentPackPage({
       page: parseInt(page) || 1,
       limit: parseInt(limit) || 10,
@@ -3532,6 +3538,7 @@ router.get('/content-pack/page',
       contentType,
       language,
       active,
+      scope,
     });
     success(res, result);
   })

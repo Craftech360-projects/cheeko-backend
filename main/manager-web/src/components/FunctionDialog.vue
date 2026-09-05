@@ -418,6 +418,8 @@ export default {
 </script>
 
 <style lang="scss" scoped>
+@import '@/styles/theme.scss';
+
 .function-manager {
   display: grid;
   grid-template-columns: max-content max-content 1fr;
@@ -485,7 +487,7 @@ export default {
   justify-content: space-between;
 
   &:hover {
-    background-color: #f5f7fa;
+    background-color: $surface-sunk;
   }
 }
 
@@ -558,7 +560,7 @@ export default {
 
     .el-form-item__label {
       font-size: 14px !important;
-      color: #606266;
+      color: $text-body;
       text-align: left;
       padding-right: 10px;
       flex-shrink: 0;
@@ -586,7 +588,7 @@ export default {
 
 .empty-tip {
   padding: 20px;
-  color: #909399;
+  color: $text-light;
   text-align: center;
 }
 
@@ -631,8 +633,8 @@ export default {
 }
 
 .custom-close-btn:hover {
-  color: #409EFF;
-  border-color: #409EFF;
+  color: $info;
+  border-color: $info;
 }
 
 ::v-deep .el-checkbox__label {
@@ -747,7 +749,7 @@ export default {
     margin-right: 8px;
 
     &.disconnected {
-      background-color: #909399;
+      background-color: $text-light;
       /* Gray - Not connected */
     }
 
@@ -757,7 +759,7 @@ export default {
     }
 
     &.loading {
-      background-color: #E6A23C;
+      background-color: $warning;
       /* Orange - Loading */
       animation: pulse 1.5s infinite;
     }
@@ -774,7 +776,7 @@ export default {
     padding: 2px 10px;
     background: white;
     color: black;
-    border: 1px solid #DCDFE6;
+    border: 1px solid $border-color;
     border-radius: 4px;
     cursor: pointer;
     font-size: 14px;
@@ -832,7 +834,7 @@ export default {
 
   .no-tools {
     text-align: center;
-    color: #909399;
+    color: $text-light;
     font-size: 14px;
     padding: 10px 0;
   }

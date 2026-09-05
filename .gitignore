@@ -182,6 +182,9 @@ main/manager-web/.webpack_cache/
 main/xiaozhi-server/mysql
 uploadfile
 *.json
+# PWA manifest is a static asset, not config: the blanket *.json rule above
+# kept it out of the repo, so the browser 404'd on the <link rel="manifest">.
+!main/manager-web/public/manifest.json
 .vscode
 
 # Spring Boot configuration files (contain sensitive data)
@@ -216,3 +219,12 @@ clerk-nextjs-guide
 
 # Device simulator imagine output (client.py --mode imagine)
 imagine_outputs/
+
+# Database data shift runbook + scripts (contains connection strings and dumps)
+.db-shift/
+
+# Claude Code design/taste skills — local tooling, not part of the app.
+# The two entries below were committed earlier and stay tracked.
+.claude/skills/*
+!.claude/skills/agent-browser-skill/
+!.claude/skills/ui-ux-pro-max/

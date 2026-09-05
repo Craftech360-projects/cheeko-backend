@@ -1,5 +1,7 @@
 <template>
-  <el-dialog :visible="visible" @close="handleClose" width="400px" center @open="handleOpen">
+  <el-dialog
+    :close-on-click-modal="dismissOnBackdrop"
+    @open="markPristine" :visible="visible" @close="handleClose" width="400px" center @open="handleOpen">
     <div
       style="margin: 0 10px 10px;display: flex;align-items: center;gap: 10px;font-weight: 700;font-size: 20px;text-align: left;color: #3d4566;">
       <div
@@ -58,9 +60,11 @@
 </template>
 
 <script>
+import dialogDismiss from '@/mixins/dialogDismiss';
 import Api from '@/apis/api';
 
 export default {
+  mixins: [dialogDismiss],
   name: 'AddWisdomBodyDialog',
   props: {
     visible: { type: Boolean, required: true }
@@ -80,6 +84,10 @@ export default {
     }
   },
   methods: {
+    dirtyState() {
+      return this.selectedTemplateId;
+    },
+
     handleOpen() {
       this.fetchTemplates();
     },
@@ -172,7 +180,7 @@ export default {
   }
 
   ::v-deep .el-input__inner {
-    border: 1px solid #e4e6ef;
+    border: 1px solid $border-color;
     background: #f6f8fb;
     border-radius: 15px;
     height: 46px;
@@ -184,12 +192,12 @@ export default {
   padding: 12px;
   background: #f6f8fb;
   border-radius: 10px;
-  border: 1px solid #e4e6ef;
+  border: 1px solid $border-color;
 
   .preview-label {
     font-size: 12px;
     font-weight: 600;
-    color: #3d4566;
+    color: $text-dark;
     margin-bottom: 8px;
   }
 
@@ -204,13 +212,13 @@ export default {
       }
 
       .label {
-        color: #909399;
+        color: $text-light;
         min-width: 100px;
         flex-shrink: 0;
       }
 
       .value {
-        color: #606266;
+        color: $text-body;
         word-break: break-word;
 
         &.truncate {
@@ -251,7 +259,7 @@ export default {
 
 ::v-deep .el-dialog {
   border-radius: 15px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  box-shadow: none;
 }
 
 ::v-deep .el-dialog__headerbtn {

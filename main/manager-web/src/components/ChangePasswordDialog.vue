@@ -1,6 +1,8 @@
 <template>
   <form>
-    <el-dialog :visible.sync="dialogVisible"  width="24%" center>
+    <el-dialog
+    :close-on-click-modal="dismissOnBackdrop"
+    @open="markPristine" :visible.sync="dialogVisible"  width="24%" center>
       <div
         style="margin: 0 10px 10px;display: flex;align-items: center;gap: 10px;font-weight: 700;font-size: 20px;text-align: left;color: #3d4566;">
         <div
@@ -47,10 +49,12 @@
 </template>
 
 <script>
+import dialogDismiss from '@/mixins/dialogDismiss';
 import userApi from '@/apis/module/user';
 import { mapActions } from 'vuex';
 
 export default {
+  mixins: [dialogDismiss],
   name: 'ChangePasswordDialog',
   props: {
     value: {
@@ -75,6 +79,10 @@ export default {
     }
   },
   methods: {
+    dirtyState() {
+      return [this.oldPassword, this.newPassword, this.confirmNewPassword];
+    },
+
     ...mapActions(['logout']), // Import Vuex logout action
     confirm() {
       if (!this.oldPassword.trim() || !this.newPassword.trim() || !this.confirmNewPassword.trim()) {
@@ -151,7 +159,7 @@ export default {
 
 ::v-deep .el-dialog {
   border-radius: 15px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  box-shadow: none;
 }
 
 ::v-deep .el-dialog__headerbtn {

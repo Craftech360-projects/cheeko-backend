@@ -1,40 +1,55 @@
 <template>
   <div class="quiz-progress">
     <el-main class="main-content">
-      <div class="page-header">
-        <h1>{{ bankLabel }} Progress</h1>
-        <p class="subtitle">Current Level per device, and admin overrides for testing</p>
-      </div>
-
-      <el-card class="filter-card" shadow="never">
-        <div class="filter-row">
+      <div class="page-head">
+        <div>
+          <h1 class="page-title">{{ bankLabel }} Progress</h1>
+          <p class="page-lead">Level, band and accuracy for every child working through the card quizzes.</p>
+        </div>
+        <div class="page-actions">
           <el-radio-group v-model="bank" size="small" @change="fetchData">
             <el-radio-button label="quiz">Quiz</el-radio-button>
             <el-radio-button label="riddle">Riddles</el-radio-button>
           </el-radio-group>
-          <el-input
-            v-model="search"
-            placeholder="Filter by MAC or child name"
-            prefix-icon="el-icon-search"
-            clearable
-            class="search-input"
-          />
-          <el-checkbox v-model="onlyPlayed">Only devices that have played</el-checkbox>
-          <el-button type="primary" :loading="isLoading" @click="fetchData">
-            <i class="el-icon-refresh"></i> Refresh
-          </el-button>
+          <el-button size="small" :loading="isLoading" @click="fetchData">Refresh</el-button>
         </div>
-      </el-card>
+      </div>
+
+      <ListToolbar
+        :count="filteredRows.length"
+        count-noun="children"
+        :total="filteredRows.length"
+        :sort-options="sortOptions"
+        :sort-by.sync="sortBy"
+        :sort-dir.sync="sortDir"
+        :group-options="groupOptions"
+        :group-by.sync="groupBy"
+        :selecting.sync="selecting"
+        :selected-count="selectedCount"
+        :all-selected="allSelected"
+        :search.sync="search"
+        search-placeholder="Filter by MAC or child name"
+        @select-all-matching="selectAllMatching"
+        @clear-selection="clearSelection"
+      >
+        <template #filters>
+          <el-checkbox v-model="onlyPlayed" class="played-filter">Only devices that have played</el-checkbox>
+        </template>
+      </ListToolbar>
 
       <el-card shadow="never">
-        <el-table :data="filteredRows" v-loading="isLoading" stripe border size="small">
-          <el-table-column label="Device MAC" width="170">
+        <el-table ref="table" :data="visibleRows" v-loading="isLoading" size="small"
+          :row-class-name="rowClass"
+          @sort-change="onTableSortChange"
+          @selection-change="onSelectionChange">
+          <el-table-column v-if="selecting" type="selection" width="44" />
+          <el-table-column label="Device MAC" prop="device_mac" width="180" sortable="custom">
             <template slot-scope="s">
               <span v-if="s.row.device_mac">{{ s.row.device_mac }}</span>
               <span v-else class="muted">no toy</span>
             </template>
           </el-table-column>
-          <el-table-column label="Child" width="130">
+          <el-table-column label="Child" prop="kid_name" width="140" sortable="custom">
             <template slot-scope="s">
               <span v-if="s.row.kid_name">{{ s.row.kid_name }}</span>
               <span v-else class="muted">no profile</span>
@@ -194,7 +209,8 @@
       </span>
     </el-dialog>
 
-    <el-dialog title="Set Level" :visible.sync="levelDialog" width="480px">
+    <el-dialog title="Set Level" :visible.sync="levelDialog" width="480px"
+      :close-on-click-modal="targetLevel === (target && target.current_level || 1)">
       <template v-if="target">
         <p>
           Device <b>{{ target.device_mac }}</b> &mdash; band {{ target.age_band }},
@@ -222,13 +238,30 @@
 </template>
 
 <script>
+import ListToolbar from '@/components/ListToolbar.vue';
+import listControls from '@/mixins/listControls';
 import Api from '@/apis/api';
 
 export default {
   name: 'QuizProgress',
-  components: { },
+  mixins: [listControls],
+  components: { ListToolbar, },
   data() {
     return {
+      // list controls
+      rowKey: 'device_mac',
+      sortBy: 'last_played',
+      sortDir: 'desc',
+      sortOptions: [
+        { label: 'Last played', value: 'last_played' },
+        { label: 'Child', value: 'kid_name' },
+        { label: 'Level', value: 'current_level' },
+        { label: 'Accuracy', value: 'accuracy' }
+      ],
+      groupOptions: [
+        { label: 'None', value: '' },
+        { label: 'Band', value: 'age_band' }
+      ],
       rows: [],
       // Which bank the page is showing. The API defaults to quiz when absent,
       // so this only ever narrows what is already the default.
@@ -255,6 +288,10 @@ export default {
     };
   },
   computed: {
+    // `filteredRows` already applies the bank/onlyPlayed filters
+    sourceRows() {
+      return this.filteredRows;
+    },
     bankLabel() {
       return this.bank === 'riddle' ? 'Riddle' : 'Quiz';
     },
@@ -414,8 +451,10 @@ export default {
 </script>
 
 <style lang="scss" scoped>
+@import '@/styles/theme.scss';
+
 .quiz-progress {
-  min-height: 100vh;
+  min-height: 0;
   background: #f6f8fb;
 }
 
@@ -429,7 +468,7 @@ export default {
   h1 {
     margin: 0;
     font-size: 22px;
-    color: #3d4566;
+    color: $text-dark;
   }
 
   .subtitle {
@@ -507,11 +546,11 @@ export default {
 }
 
 .q-bad {
-  color: #f56c6c;
+  color: $danger;
 }
 
 .q-revealed {
-  color: #e6a23c;
+  color: $warning;
 }
 
 .empty {

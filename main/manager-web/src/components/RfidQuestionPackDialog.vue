@@ -4,7 +4,9 @@
     width="680px"
     class="rfid-dialog-wrapper"
     :append-to-body="true"
-    :close-on-click-modal="false"
+    :close-on-click-modal="dismissOnBackdrop"
+    @open="markPristine"
+    @close="cancel"
     :key="dialogKey"
     custom-class="custom-rfid-dialog"
     :show-close="false"
@@ -135,7 +137,7 @@
                          <template slot="prepend"><i class="el-icon-mic"></i> URL</template>
                          <el-button slot="append" :icon="playingUrl === q.cachedAudioUrl ? 'el-icon-video-pause' : 'el-icon-video-play'" @click="toggleAudio(q.cachedAudioUrl)" v-if="q.cachedAudioUrl"></el-button>
                       </el-input>
-                      <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">
+                      <div class="option-sub">
                           Code: {{ q.code || 'PENDING' }} <span v-if="q.id">(ID: {{ q.id }})</span>
                       </div>
                   </div>
@@ -154,16 +156,14 @@
       </el-form>
 
       <div class="dialog-footer">
+        <el-button size="small" @click="cancel">Cancel</el-button>
         <el-button
+          size="small"
           type="primary"
-          @click="submit"
-          class="save-btn"
           :loading="saving"
-          :disabled="saving">
-          Save Q&A Pack
-        </el-button>
-        <el-button @click="cancel" class="cancel-btn">
-          Cancel
+          :disabled="saving"
+          @click="submit">
+          Save
         </el-button>
       </div>
     </div>
@@ -171,7 +171,9 @@
 </template>
 
 <script>
+import dialogDismiss from '@/mixins/dialogDismiss';
 export default {
+  mixins: [dialogDismiss],
   props: {
     title: {
       type: String,
@@ -229,6 +231,12 @@ export default {
     }
   },
   methods: {
+    // Questions are added and reordered in `localQuestions` before they ever
+    // reach `form`, so the baseline covers both.
+    dirtyState() {
+      return { form: this.form, questions: this.localQuestions };
+    },
+
     // Create Mode Methods
     addQuestion() {
         if (!this.form.questions) this.$set(this.form, 'questions', []);
@@ -379,26 +387,36 @@ export default {
 </script>
 
 <style>
+
+/* Dialog chrome. Not scoped: el-dialog mounts on body. Shared verbatim by
+   every RFID dialog so the overlay reads the same wherever it opens. */
 .custom-rfid-dialog {
-  border-radius: 16px !important;
+  border-radius: 10px !important;
   overflow: hidden;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15) !important;
-  border: none !important;
+  border: 1px solid var(--border-color) !important;
+  box-shadow: var(--shadow-overlay) !important;
 }
 .custom-rfid-dialog .el-dialog__header {
   display: none;
 }
 .custom-rfid-dialog .el-dialog__body {
   padding: 0 !important;
-  border-radius: 16px;
 }
 </style>
 
 <style scoped lang="scss">
+@import '@/styles/theme.scss';
+
+.option-sub {
+  margin-top: 2px;
+  font-size: 11px;
+  color: $text-light;
+}
+
 .rfid-dialog-wrapper {
   .dialog-container {
     padding: 24px 32px;
-    background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+    background: $surface;
   }
 
   .dialog-header {
@@ -409,7 +427,7 @@ export default {
 
   .dialog-title {
     font-size: 20px;
-    color: #1e293b;
+    color: $text-dark;
     margin: 0;
     padding: 0;
     font-weight: 600;
@@ -424,8 +442,8 @@ export default {
     height: 32px;
     border-radius: 50%;
     border: none;
-    background: #f1f5f9;
-    color: #64748b;
+    background: $divider-color;
+    color: $text-gray;
     cursor: pointer;
     display: flex;
     align-items: center;
@@ -433,13 +451,13 @@ export default {
     padding: 0;
     outline: none;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    box-shadow: none;
 
     &:hover {
       color: #ffffff;
-      background: #ef4444;
+      background: $danger;
       transform: rotate(90deg);
-      box-shadow: 0 4px 6px rgba(239, 68, 68, 0.2);
+      box-shadow: none;
     }
   }
 
@@ -448,7 +466,7 @@ export default {
       margin-bottom: 20px;
 
       :deep(.el-form-item__label) {
-        color: #475569;
+        color: $text-body;
         font-weight: 500;
         padding-right: 12px;
         text-align: right;
@@ -469,16 +487,16 @@ export default {
       :deep(.el-input__inner) {
         background-color: #ffffff;
         border-radius: 8px;
-        border: 1px solid #e2e8f0;
+        border: 1px solid $border-color;
         height: 42px;
         padding: 0 14px;
         transition: all 0.3s;
         font-size: 14px;
-        color: #334155;
+        color: $text-body;
 
         &:focus {
-          border-color: #3b82f6;
-          box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+          border-color: $text-light;
+          box-shadow: none;
         }
       }
     }
@@ -489,14 +507,14 @@ export default {
       :deep(.el-input__inner) {
         background-color: #ffffff;
         border-radius: 8px;
-        border: 1px solid #e2e8f0;
+        border: 1px solid $border-color;
         height: 42px;
         font-size: 14px;
-        color: #334155;
+        color: $text-body;
 
         &:focus {
-          border-color: #3b82f6;
-          box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+          border-color: $text-light;
+          box-shadow: none;
         }
       }
     }
@@ -505,14 +523,14 @@ export default {
       :deep(.el-textarea__inner) {
         background-color: #ffffff;
         border-radius: 8px;
-        border: 1px solid #e2e8f0;
+        border: 1px solid $border-color;
         padding: 12px 14px;
         font-size: 14px;
-        color: #334155;
+        color: $text-body;
 
         &:focus {
-          border-color: #3b82f6;
-          box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+          border-color: $text-light;
+          box-shadow: none;
         }
       }
     }
@@ -523,7 +541,7 @@ export default {
       :deep(.el-input__inner) {
         background-color: #ffffff;
         border-radius: 8px;
-        border: 1px solid #e2e8f0;
+        border: 1px solid $border-color;
         height: 42px;
       }
     }
@@ -534,7 +552,7 @@ export default {
     border-radius: 12px;
     padding: 20px;
     margin-bottom: 20px;
-    border: 1px solid #e2e8f0;
+    border: 1px solid $border-color;
 
     .section-header {
       display: flex;
@@ -546,14 +564,14 @@ export default {
     .section-title {
       font-size: 16px;
       font-weight: 600;
-      color: #1e293b;
+      color: $text-dark;
     }
 
     .question-count {
       font-size: 14px;
       font-weight: 500;
-      color: #64748b;
-      background: #f1f5f9;
+      color: $text-gray;
+      background: $divider-color;
       padding: 4px 12px;
       border-radius: 12px;
     }
@@ -561,14 +579,14 @@ export default {
     .field-hint {
       margin-top: 8px;
       font-size: 12px;
-      color: #64748b;
+      color: $text-gray;
       font-style: italic;
     }
 
     .inline-questions-list {
-      background: #f8fafc;
+      background: $surface-sunk;
       border-radius: 8px;
-      border: 1px solid #e2e8f0;
+      border: 1px solid $border-color;
       padding: 16px;
       max-height: 400px;
       overflow-y: auto;
@@ -581,7 +599,7 @@ export default {
       gap: 12px;
       margin-bottom: 16px;
       padding-bottom: 16px;
-      border-bottom: 1px solid #e2e8f0;
+      border-bottom: 1px solid $border-color;
 
       &:last-child {
         margin-bottom: 0;
@@ -592,7 +610,7 @@ export default {
       .q-seq {
         width: 24px;
         height: 24px;
-        background: #3b82f6;
+        background: $text-light;
         color: white;
         border-radius: 50%;
         display: flex;
@@ -612,7 +630,7 @@ export default {
 
     .empty-state-text {
       text-align: center;
-      color: #94a3b8;
+      color: $text-light;
       font-style: italic;
       padding: 20px;
     }
@@ -620,42 +638,11 @@ export default {
 
   .dialog-footer {
     display: flex;
-    justify-content: center;
-    padding: 16px 0 0;
-    margin-top: 16px;
-
-    .save-btn {
-      width: 160px;
-      height: 42px;
-      font-size: 14px;
-      font-weight: 500;
-      border-radius: 8px;
-      background: #3b82f6;
-      color: white;
-      border: none;
-
-      &:hover {
-        background: #2563eb;
-        transform: translateY(-1px);
-      }
-    }
-
-    .cancel-btn {
-      width: 120px;
-      height: 42px;
-      font-size: 14px;
-      font-weight: 500;
-      border-radius: 8px;
-      background: #ffffff;
-      color: #64748b;
-      border: 1px solid #e2e8f0;
-      margin-left: 16px;
-
-      &:hover {
-        background: #f8fafc;
-        color: #475569;
-      }
-    }
+    justify-content: flex-end;
+    gap: 8px;
+    padding-top: 18px;
+    margin-top: 22px;
+    border-top: 1px solid $border-color;
   }
 }
 </style>

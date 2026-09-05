@@ -879,6 +879,115 @@ const getAllDevices = async ({ page = 1, limit = 10, keywords = '' } = {}) => {
 /**
  * Get kid profiles by user ID (admin only)
  */
+/**
+ * List every kid profile in the system, newest families last (admin roster).
+ *
+ * Devices are attached by two separate signals because they answer different
+ * questions. `devices` is the toys actually paired to this child
+ * (`ai_device.kid_id`) — the only link that may key per-child state. The
+ * household fallback is what the roster displays when nothing is paired: most
+ * toys in the fleet carry no `kid_id`, so pairing alone would leave the
+ * majority of registered children looking device-less.
+ *
+ * `ai_device` has no Prisma relation to `kid_profile` (just an indexed
+ * `kid_id` column), so the toys come back in a second query rather than an
+ * `include`.
+ *
+ * @param {Object} options
+ * @param {number} [options.page=1] - 1-based page number
+ * @param {number} [options.limit=50] - rows per page, capped at 200
+ * @returns {Promise<Object>} { total, page, limit, items }
+ */
+const listAllKidProfiles = async ({ page = 1, limit = 50 } = {}) => {
+  const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 200);
+  const safePage = Math.max(Number(page) || 1, 1);
+
+  const [total, profiles] = await Promise.all([
+    prisma.kid_profile.count(),
+    prisma.kid_profile.findMany({
+      include: { sys_user: { include: { parent_profile: true } } },
+      orderBy: { created_at: 'asc' },
+      skip: (safePage - 1) * safeLimit,
+      take: safeLimit,
+    }),
+  ]);
+
+  if (!profiles.length) {
+    return { total, page: safePage, limit: safeLimit, items: [] };
+  }
+
+  const kidIds = profiles.map((kid) => kid.id);
+  const parentIds = [
+    ...new Map(
+      profiles.filter((kid) => kid.user_id).map((kid) => [kid.user_id.toString(), kid.user_id])
+    ).values(),
+  ];
+
+  const devices = await prisma.ai_device.findMany({
+    where: {
+      OR: [
+        { kid_id: { in: kidIds } },
+        ...(parentIds.length ? [{ user_id: { in: parentIds } }] : []),
+      ],
+    },
+    select: {
+      id: true,
+      mac_address: true,
+      alias: true,
+      app_version: true,
+      last_connected_at: true,
+      kid_id: true,
+      user_id: true,
+    },
+    // Postgres sorts NULLs first on DESC, which would let a toy that has never
+    // connected lead the label the roster shows.
+    orderBy: { last_connected_at: { sort: 'desc', nulls: 'last' } },
+  });
+
+  const pairedByKid = new Map();
+  const householdByParent = new Map();
+  for (const device of devices) {
+    const row = {
+      id: device.id,
+      mac_address: device.mac_address,
+      alias: device.alias || device.mac_address,
+      app_version: device.app_version,
+      last_connected_at: device.last_connected_at,
+    };
+    if (device.kid_id) {
+      const key = device.kid_id.toString();
+      if (!pairedByKid.has(key)) pairedByKid.set(key, []);
+      pairedByKid.get(key).push(row);
+    }
+    if (device.user_id) {
+      const key = device.user_id.toString();
+      if (!householdByParent.has(key)) householdByParent.set(key, []);
+      householdByParent.get(key).push(row);
+    }
+  }
+
+  return {
+    total,
+    page: safePage,
+    limit: safeLimit,
+    // Rows keep the snake_case shape of `kid_profile` so the dashboard renders
+    // them with the same columns it uses for the per-family view.
+    items: profiles.map((kid) => {
+      const { sys_user, ...rest } = kid;
+      const paired = pairedByKid.get(kid.id.toString()) || [];
+      const household = kid.user_id ? householdByParent.get(kid.user_id.toString()) || [] : [];
+      return {
+        ...rest,
+        // Display name only. Parent email/phone are intentionally not exposed.
+        parent_name: sys_user?.parent_profile?.display_name || sys_user?.nickname || null,
+        devices: paired.length ? paired : household,
+        device_count: paired.length,
+        household_device_count: household.length,
+      };
+    }),
+  };
+};
+
 const getKidProfilesByUserId = async (userId) => {
   console.log('[admin.service] Fetching kid profiles for userId:', userId);
 
@@ -1029,6 +1138,7 @@ module.exports = {
   getAllDevices,
 
   // Kid Profiles
+  listAllKidProfiles,
   getKidProfilesByUserId,
   createKidProfileForUser,
   updateKidProfile,

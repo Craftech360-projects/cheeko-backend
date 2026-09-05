@@ -1,0 +1,8 @@
+# Renderer scratch (headless-browser profile, temp HTML, screenshots)
+.work/
+shots/
+
+# Design documentation: comps, renders and the redesign spec.
+# Reference material — the app does not read any of it at build or run time.
+docs/
+WEBSITE_RESTYLING_SPEC.md

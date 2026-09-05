@@ -1,74 +1,182 @@
 <template>
   <div class="kid-profiles-container">
     <div class="main-content">
-      <div class="page-header">
-        <h2>Kid Profiles</h2>
-        <p class="subtitle" v-if="macAddress">Device: {{ macAddress }}</p>
-        <p class="subtitle admin-notice" v-if="isAdminMode">
-          <i class="el-icon-setting"></i> Managing user's kid profiles (Admin mode)
-        </p>
+      <div class="page-head">
+        <div>
+          <h1 class="page-title">Kid Profiles</h1>
+          <p class="page-lead">
+            Age, language and interests — the fields the agent uses to personalise every session.
+            <span v-if="globalMode">Open a child to see their toys.</span>
+            <span v-if="macAddress" class="mono">· {{ macAddress }}</span>
+            <span v-if="isAdminMode" class="chip accent">Admin mode</span>
+          </p>
+        </div>
+        <div class="page-actions">
+          <el-button v-if="!globalMode" size="small" @click="goBack">Back</el-button>
+          <!-- Creating a child needs a parent to attach it to, which the
+               system-wide roster does not have. -->
+          <el-button v-if="userId" size="small" type="primary" @click="showAddDialog">Add child</el-button>
+        </div>
       </div>
 
-      <div class="toolbar">
-        <el-button type="primary" @click="showAddDialog">
-          <i class="el-icon-plus"></i> Add Kid Profile
-        </el-button>
-        <el-button @click="goBack">
-          <i class="el-icon-back"></i> Back
-        </el-button>
+      <ListToolbar
+        :count="visibleRows.length"
+        count-noun="children"
+        :total="globalMode ? total : kidProfiles.length"
+        :sort-options="sortOptions"
+        :sort-by.sync="sortBy"
+        :sort-dir.sync="sortDir"
+        :group-options="groupOptions"
+        :group-by.sync="groupBy"
+        :views="views"
+        :view.sync="view"
+        :selecting.sync="selecting"
+        :selected-count="selectedCount"
+        :all-selected="allSelected"
+        :search.sync="listSearch"
+        search-placeholder="Enter name or nickname"
+        @select-all-matching="selectAllMatching"
+        @clear-selection="clearSelection"
+      >
+        <template #filters>
+          <el-select v-model="filterLanguage" size="mini" placeholder="Language" clearable class="lb-filter">
+            <el-option v-for="lang in languageOptions" :key="lang.value" :label="lang.label" :value="lang.value" />
+          </el-select>
+        </template>
+        <template #bulk>
+          <el-button v-if="deviceId" @click="bulkAssign">Assign toy</el-button>
+          <el-button @click="bulkExport">Export</el-button>
+          <el-button type="danger" @click="bulkDelete">Delete</el-button>
+        </template>
+      </ListToolbar>
+
+      <div v-if="view === 'cards'" class="kid-cards">
+        <div
+          v-for="row in visibleRows"
+          :key="row.id"
+          class="mini-card"
+          :class="{ on: isSelected(row), tappable: globalMode }"
+          @click="openKid(row)"
+        >
+          <div class="mini-top">
+            <div>
+              <el-checkbox v-if="selecting" :value="isSelected(row)" @change="toggleRow(row)" />
+              <span class="mini-name">{{ row.name }}</span>
+              <div class="mini-sub">{{ row.nickname || 'No nickname' }} · {{ row.language || '—' }}</div>
+            </div>
+            <span v-if="globalMode" class="chip" :class="deviceLabel(row) === 'No toy' ? '' : 'ok'">{{ deviceLabel(row) }}</span>
+          <span v-else class="chip" :class="isAssigned(row.id) ? 'ok' : ''">{{ isAssigned(row.id) ? 'Assigned' : 'Unassigned' }}</span>
+          </div>
+          <div class="mini-interests">
+            <span v-for="interest in (row.interests || [])" :key="interest" class="chip">{{ interest }}</span>
+            <span v-if="!(row.interests || []).length" class="muted">No interests recorded</span>
+          </div>
+          <div class="mini-stats">
+            <div>Age<b>{{ calculateAge(row.birth_date || row.birthDate) }}</b></div>
+            <div>Gender<b>{{ row.gender || '—' }}</b></div>
+            <div v-if="globalMode">Parent<b>{{ row.parent_name || '—' }}</b></div>
+          </div>
+        </div>
+        <div v-if="!visibleRows.length && !loading" class="card ds-empty">
+          <b>No kid profiles yet.</b>Add one to personalise this toy.
+        </div>
       </div>
 
-      <el-table :data="kidProfiles" v-loading="loading" style="width: 100%">
-        <el-table-column prop="name" label="Name" min-width="150" />
-        <el-table-column prop="nickname" label="Nickname" min-width="120" />
-        <el-table-column label="Age" min-width="80">
-          <template slot-scope="scope">
-            {{ calculateAge(scope.row.birth_date || scope.row.birthDate) }}
+      <div v-else class="card pad0">
+        <el-table
+          ref="table"
+          :data="visibleRows"
+          v-loading="loading"
+          :row-class-name="kidRowClass"
+          style="width: 100%"
+          @sort-change="onTableSortChange"
+          @selection-change="onSelectionChange"
+          @row-click="openKid"
+        >
+          <el-table-column v-if="selecting" type="selection" width="44" />
+          <el-table-column prop="name" label="Name" min-width="170" sortable="custom">
+            <template slot-scope="scope">
+              <div class="rowid">
+                <span class="rowid-mark accent">{{ initials(scope.row.name) }}</span>
+                <span class="cell-key">{{ scope.row.name }}</span>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column prop="nickname" label="Nickname" min-width="120">
+            <template slot-scope="scope">{{ scope.row.nickname || '—' }}</template>
+          </el-table-column>
+          <el-table-column label="Birth date" min-width="120" prop="birth_date" sortable="custom">
+            <template slot-scope="scope">
+              <span class="mono">{{ birthDateValue(scope.row) || '—' }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="Age" width="80" align="right" prop="_age" sortable="custom">
+            <template slot-scope="scope">{{ calculateAge(scope.row.birth_date || scope.row.birthDate) }}</template>
+          </el-table-column>
+          <el-table-column prop="gender" label="Gender" width="100" sortable="custom">
+            <template slot-scope="scope">{{ scope.row.gender || '—' }}</template>
+          </el-table-column>
+          <el-table-column prop="language" label="Language" width="110" sortable="custom">
+            <template slot-scope="scope">{{ scope.row.language || '—' }}</template>
+          </el-table-column>
+          <el-table-column label="Interests" min-width="220">
+            <template slot-scope="scope">
+              <span v-for="interest in (scope.row.interests || [])" :key="interest" class="chip interest-chip">{{ interest }}</span>
+              <span v-if="!(scope.row.interests || []).length" class="muted">—</span>
+            </template>
+          </el-table-column>
+          <el-table-column v-if="globalMode" label="Parent" prop="parent_name" min-width="150" sortable="custom">
+            <template slot-scope="scope">{{ scope.row.parent_name || '—' }}</template>
+          </el-table-column>
+          <el-table-column v-if="globalMode" label="Toys" min-width="150">
+            <template slot-scope="scope">
+              <span class="chip" :class="deviceLabel(scope.row) === 'No toy' ? '' : 'ok'">{{ deviceLabel(scope.row) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column v-else label="Assigned" width="110">
+            <template slot-scope="scope">
+              <span class="chip" :class="isAssigned(scope.row.id) ? 'ok' : ''">
+                {{ isAssigned(scope.row.id) ? 'Yes' : 'No' }}
+              </span>
+            </template>
+          </el-table-column>
+          <el-table-column label="Actions" width="190" align="right">
+            <template slot-scope="scope">
+              <div class="row-actions">
+                <el-button type="text" @click="handleEdit(scope.row)">Edit</el-button>
+                <el-button v-if="deviceId" type="text" @click="handleAssign(scope.row)">
+                  {{ isAssigned(scope.row.id) ? 'Unassign' : 'Assign' }}
+                </el-button>
+                <el-button type="text" class="delete-btn" @click="handleDelete(scope.row)">Delete</el-button>
+              </div>
+            </template>
+          </el-table-column>
+          <template slot="empty">
+            <div class="ds-empty"><b>No kid profiles yet.</b>Add one to personalise this toy.</div>
           </template>
-        </el-table-column>
-        <el-table-column prop="gender" label="Gender" min-width="80" />
-        <el-table-column label="Interests" min-width="200">
-          <template slot-scope="scope">
-            <el-tag v-for="interest in (scope.row.interests || [])" :key="interest" size="small" style="margin-right: 5px;">
-              {{ interest }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="language" label="Language" min-width="100" />
-        <el-table-column label="Assigned" min-width="100">
-          <template slot-scope="scope">
-            <el-tag :type="isAssigned(scope.row.id) ? 'success' : 'info'" size="small">
-              {{ isAssigned(scope.row.id) ? 'Yes' : 'No' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="Actions" min-width="200" align="center">
-          <template slot-scope="scope">
-            <el-button type="text" size="small" @click="handleEdit(scope.row)">
-              Edit
-            </el-button>
-            <el-button type="text" size="small" @click="handleAssign(scope.row)" v-if="deviceId">
-              {{ isAssigned(scope.row.id) ? 'Unassign' : 'Assign' }}
-            </el-button>
-            <el-button type="text" size="small" class="delete-btn" @click="handleDelete(scope.row)">
-              Delete
-            </el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-
-      <div v-if="noContext" class="empty-state">
-        <i class="el-icon-info"></i>
-        <p>Kid profiles are per family or per device. Open a family from <b>Families → Users</b>, or a device from <b>Operate → Devices</b>, then choose "Kid Profile".</p>
+        </el-table>
       </div>
-      <div v-else-if="kidProfiles.length === 0 && !loading" class="empty-state">
-        <i class="el-icon-user"></i>
-        <p>No kid profiles yet. Click "Add Kid Profile" to create one.</p>
+
+      <!-- Shared by both views, so paging survives the card layout -->
+      <div class="card pad0 list-footer-card">
+        <div class="list-footer">
+          <span>{{ footerLabel }}</span>
+          <el-pagination
+            v-if="globalMode"
+            layout="prev, pager, next"
+            :total="total"
+            :page-size="limit"
+            :current-page.sync="page"
+            @current-change="onPageChange"
+          />
+        </div>
       </div>
     </div>
 
     <!-- Add/Edit Dialog -->
-    <el-dialog :title="editMode ? 'Edit Kid Profile' : 'Add Kid Profile'" :visible.sync="dialogVisible" width="500px">
+    <el-dialog
+      :close-on-click-modal="dismissOnBackdrop"
+      @open="markPristine" :title="editMode ? 'Edit Kid Profile' : 'Add Kid Profile'" :visible.sync="dialogVisible" width="500px">
       <el-form :model="form" :rules="rules" ref="kidForm" label-width="100px">
         <el-form-item label="Name" prop="name">
           <el-input v-model="form.name" placeholder="Enter name" />
@@ -119,7 +227,7 @@
             show-word-limit
             placeholder="Optional custom instructions for this child, e.g. 'Bedtime is 8pm. Encourage reading.' Cheeko's safety rules always take priority over these."
           />
-          <div style="font-size: 12px; color: #909399; line-height: 1.4; margin-top: 4px;">
+          <div style="font-size: 12px; color: #A8A199; line-height: 1.4; margin-top: 4px;">
             These guide your child's character but can never override Cheeko's built-in safety rules.
           </div>
         </el-form-item>
@@ -137,16 +245,58 @@
 </template>
 
 <script>
+import dialogDismiss from '@/mixins/dialogDismiss';
 import Api from '@/apis/api'
 import VersionFooter from '@/components/VersionFooter.vue'
+import ListToolbar from '@/components/ListToolbar.vue'
+import listControls from '@/mixins/listControls'
 
 export default {
   name: 'KidProfiles',
-  components: { VersionFooter },
+  components: { VersionFooter, ListToolbar },
+  mixins: [listControls, dialogDismiss],
   data() {
     return {
       loading: false,
-      noContext: false,
+      // list controls
+      sortBy: 'name',
+      sortDir: 'asc',
+      sortOptions: [
+        { label: 'Name', value: 'name' },
+        { label: 'Age', value: '_age' },
+        { label: 'Birth date', value: 'birth_date' },
+        { label: 'Language', value: 'language' },
+        { label: 'Gender', value: 'gender' }
+      ],
+      groupOptions: [
+        { label: 'None', value: '' },
+        { label: 'Language', value: 'language' },
+        { label: 'Gender', value: 'gender' }
+      ],
+      views: [
+        { label: 'Table', value: 'table' },
+        { label: 'Cards', value: 'cards' }
+      ],
+      view: 'cards',
+      searchFields: ['name', 'nickname'],
+      filterLanguage: '',
+      languageOptions: [
+        { label: 'English', value: 'en' },
+        { label: 'Hindi', value: 'hi' },
+        // Present in live data; without an option here the filter silently
+        // hides every Kannada-speaking child.
+        { label: 'Kannada', value: 'kn' },
+        { label: 'Spanish', value: 'es' },
+        { label: 'French', value: 'fr' },
+        { label: 'German', value: 'de' },
+        { label: 'Chinese', value: 'zh' }
+      ],
+      // Opened with no family/device context: the page becomes a roster of
+      // every child in the system, paged server-side like Family 360.
+      globalMode: false,
+      page: 1,
+      limit: 50,
+      total: 0,
       submitting: false,
       kidProfiles: [],
       dialogVisible: false,
@@ -172,7 +322,22 @@ export default {
   },
   computed: {
     isAdminMode() {
-      return !!this.userId
+      return !!this.userId || this.globalMode
+    },
+    footerLabel() {
+      const shown = this.visibleRows.length
+      if (!this.globalMode) return `Showing ${shown} of ${this.kidProfiles.length} children`
+      return `Showing ${shown} of ${this.total} child${this.total === 1 ? '' : 'ren'}`
+    },
+    // The mixin sorts and searches whatever this returns. `_age` is derived so
+    // the Age column can sort numerically rather than on the raw date string.
+    sourceRows() {
+      const rows = this.kidProfiles.map(row => ({
+        ...row,
+        _age: this.ageValue(row.birth_date || row.birthDate)
+      }));
+      if (!this.filterLanguage) return rows;
+      return rows.filter(row => row.language === this.filterLanguage);
     }
   },
   created() {
@@ -180,18 +345,27 @@ export default {
     this.macAddress = this.$route.query.macAddress || ''
     this.assignedKidId = this.$route.query.kidId ? parseInt(this.$route.query.kidId) : null
     this.userId = this.$route.query.userId ? parseInt(this.$route.query.userId) : null
+    this.globalMode = !this.userId && !this.deviceId && !this.macAddress
     this.loadKidProfiles()
   },
   methods: {
     loadKidProfiles() {
-      // Opened with no context (e.g. straight from the sidebar menu): the
-      // parent-app endpoint would 401 for an admin session — guide instead.
-      if (!this.userId && !this.deviceId && !this.macAddress) {
-        this.loading = false
-        this.noContext = true
+      this.loading = true
+
+      // No family or device context (e.g. straight from the sidebar menu):
+      // show every child in the system, one page at a time.
+      if (this.globalMode) {
+        Api.admin.listAllKids(this.page, this.limit, ({ data }) => {
+          this.loading = false
+          if (data.code === 0 && data.data) {
+            this.kidProfiles = data.data.items || []
+            this.total = data.data.total || 0
+          } else {
+            this.$message.error(data.msg || 'Failed to load kid profiles')
+          }
+        })
         return
       }
-      this.loading = true
 
       // If userId is provided (admin mode), use admin API to get that user's kid profiles
       if (this.userId) {
@@ -214,6 +388,89 @@ export default {
           }
         })
       }
+    },
+
+    /**
+     * What the roster shows in the Toys column. `device_count` is the toys
+     * actually paired to this child; `devices` falls back to the household's
+     * toys so a registered child whose toy was never paired still reads as
+     * having one rather than looking abandoned.
+     */
+    deviceLabel(row) {
+      const devices = row.devices || []
+      if (!devices.length) return 'No toy'
+      const name = devices[0].alias || devices[0].mac_address
+      const label = devices.length > 1 ? `${name} +${devices.length - 1}` : name
+      return row.device_count ? label : `${label} (household)`
+    },
+
+    /** Adds the tap affordance on top of the mixin's selection class. */
+    kidRowClass(context) {
+      const base = this.rowClass(context)
+      return this.globalMode ? `${base} tappable-row`.trim() : base
+    },
+
+    /**
+     * `birth_date` is a Postgres date column, so it arrives as an ISO timestamp
+     * ("2018-06-15T00:00:00.000Z"). The column printed that verbatim and the
+     * edit dialog fed it to a date-picker declared value-format="yyyy-MM-dd".
+     * Slicing beats `new Date(...)` here: the value is already UTC midnight, and
+     * re-parsing it would shift the day for anyone west of UTC.
+     */
+    birthDateValue(row) {
+      const raw = row.birth_date || row.birthDate
+      return raw ? String(raw).slice(0, 10) : ''
+    },
+
+    initials(name) {
+      const value = (name || '').trim()
+      if (!value) return '—'
+      const parts = value.split(/\s+/).filter(Boolean)
+      return (parts.length > 1 ? parts[0][0] + parts[1][0] : value.slice(0, 2)).toUpperCase()
+    },
+
+    /** Numeric age for sorting; `calculateAge` stays the display formatter. */
+    ageValue(birthDate) {
+      const age = this.calculateAge(birthDate)
+      return typeof age === 'number' ? age : -1
+    },
+
+    bulkAssign() {
+      const rows = this.selectedRows
+      if (!rows.length) return
+      this.handleAssign(rows[0])
+    },
+
+    bulkExport() {
+      const rows = this.selectedRows
+      if (!rows.length) {
+        this.$message.warning('Nothing to export.')
+        return
+      }
+      const cols = ['name', 'nickname', 'birth_date', 'gender', 'language']
+      const escape = value => `"${String(value === null || value === undefined ? '' : value).replace(/"/g, '""')}"`
+      const csv = [cols.join(',')]
+        .concat(rows.map(row => cols.map(col => escape(row[col])).join(',')))
+        .join('\n')
+      const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }))
+      const link = document.createElement('a')
+      link.href = url
+      link.download = 'kid-profiles.csv'
+      link.click()
+      URL.revokeObjectURL(url)
+    },
+
+    bulkDelete() {
+      const rows = this.selectedRows
+      if (!rows.length) return
+      this.$confirm(`Delete ${rows.length} kid profile${rows.length === 1 ? '' : 's'}? This cannot be undone.`, 'Delete profiles', {
+        confirmButtonText: 'Delete',
+        cancelButtonText: 'Cancel',
+        type: 'warning'
+      }).then(() => {
+        rows.forEach(row => this.handleDelete(row, true))
+        this.clearSelection()
+      }).catch(() => {})
     },
 
     calculateAge(birthDate) {
@@ -253,7 +510,7 @@ export default {
       this.form = {
         name: row.name || '',
         nickname: row.nickname || '',
-        birthDate: row.birth_date || row.birthDate || '',
+        birthDate: this.birthDateValue(row),
         gender: row.gender || '',
         interests: row.interests || [],
         language: row.language || 'en',
@@ -353,12 +610,10 @@ export default {
       }
     },
 
-    handleDelete(row) {
-      this.$confirm('Are you sure you want to delete this kid profile?', 'Confirm', {
-        confirmButtonText: 'Delete',
-        cancelButtonText: 'Cancel',
-        type: 'warning'
-      }).then(() => {
+    // `skipConfirm` is set by the bulk path, which has already confirmed once
+    // for the whole selection.
+    handleDelete(row, skipConfirm) {
+      const run = () => {
         // Use admin API if in admin mode
         if (this.isAdminMode) {
           Api.admin.deleteKidProfile(row.id, ({ data: res }) => {
@@ -379,7 +634,37 @@ export default {
             }
           })
         }
-      }).catch(() => {})
+      }
+
+      if (skipConfirm) {
+        run()
+        return
+      }
+
+      this.$confirm('Are you sure you want to delete this kid profile?', 'Confirm', {
+        confirmButtonText: 'Delete',
+        cancelButtonText: 'Cancel',
+        type: 'warning'
+      }).then(run).catch(() => {})
+    },
+
+    /**
+     * Roster rows drill into Family 360, which is where a child's toys, their
+     * runtime state and usage already live. The Actions column is excluded so
+     * Edit/Delete do not navigate out from under the click.
+     */
+    openKid(row, column) {
+      if (!this.globalMode) return
+      // Select mode and drill-down are different intents: a click meant for a
+      // checkbox must not navigate away mid-selection.
+      if (this.selecting) return
+      if (column && column.label === 'Actions') return
+      this.$router.push(`/families/${encodeURIComponent(row.id)}`)
+    },
+
+    onPageChange() {
+      this.clearSelection()
+      this.loadKidProfiles()
     },
 
     goBack() {
@@ -390,64 +675,108 @@ export default {
 </script>
 
 <style scoped lang="scss">
-.kid-profiles-container {
-  min-height: 100vh;
-  background: #f5f7fa;
-}
+@import '@/styles/theme.scss';
+
+.kid-profiles-container { min-height: 0; background: transparent; }
 
 .main-content {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 20px;
+  max-width: 1400px;
+  margin: 0;
+  padding: 0;
 }
 
-.page-header {
-  margin-bottom: 20px;
+.page-lead .chip { margin-left: 8px; }
 
-  h2 {
-    margin: 0 0 5px 0;
-    color: #303133;
-  }
+.interest-chip { margin-right: 4px; }
 
-  .subtitle {
-    margin: 0;
-    color: #909399;
-    font-size: 14px;
-  }
+.list-footer-card {
+  margin-top: 14px;
 
-  .admin-notice {
-    margin-top: 8px;
-    color: #409eff;
-    font-weight: 500;
-
-    i {
-      margin-right: 4px;
-    }
-  }
+  .list-footer { border-top: none; }
 }
 
-.toolbar {
-  margin-bottom: 20px;
+::v-deep .tappable-row { cursor: pointer; }
+
+.row-actions {
   display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+
+  ::v-deep .el-button + .el-button { margin-left: 0; }
+}
+
+.delete-btn { color: $danger !important; }
+
+// ---------- Card view ----------
+.kid-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+}
+
+@media (max-width: 1100px) { .kid-cards { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 700px) { .kid-cards { grid-template-columns: 1fr; } }
+
+.mini-card {
+  background: $surface;
+  border: 1px solid $border-color;
+  border-radius: $radius-lg;
+  padding: 18px;
+
+  &.on { background: $row-selected; }
+  &.tappable { cursor: pointer; }
+}
+
+.mini-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
   gap: 10px;
+  margin-bottom: 12px;
 }
 
-.empty-state {
-  text-align: center;
-  padding: 60px 20px;
-  color: #909399;
-
-  i {
-    font-size: 48px;
-    margin-bottom: 15px;
-  }
-
-  p {
-    margin: 0;
-  }
+.mini-name {
+  font-size: 13px;
+  font-weight: 560;
+  color: $text-dark;
 }
 
-.delete-btn {
-  color: #f56c6c !important;
+.mini-sub {
+  font-size: 11.5px;
+  color: $text-light;
+  margin-top: 4px;
+}
+
+.mini-interests {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 14px;
+  min-height: 20px;
+}
+
+.mini-stats {
+  display: flex;
+  gap: 18px;
+  padding-top: 14px;
+  border-top: 1px solid $divider-color;
+
+  div {
+    font-family: $font-mono;
+    font-size: 10px;
+    color: $text-light;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  b {
+    display: block;
+    font-family: $font-display;
+    font-size: 20px;
+    font-weight: 400;
+    color: $text-dark;
+    letter-spacing: -0.02em;
+    margin-top: 3px;
+  }
 }
 </style>

@@ -1,0 +1,35 @@
+{
+  "name": "Cheeko Admin",
+  "short_name": "Cheeko",
+  "description": "Cheeko admin dashboard for devices, families and content",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "theme_color": "#B3560F",
+  "background_color": "#FAF9F7",
+  "icons": [
+    {
+      "src": "./cheeko-logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "./favicon-16x16.png",
+      "sizes": "16x16",
+      "type": "image/png"
+    },
+    {
+      "src": "./favicon-32x32.png",
+      "sizes": "32x32",
+      "type": "image/png"
+    },
+    {
+      "src": "./apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

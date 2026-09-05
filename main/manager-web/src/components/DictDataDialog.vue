@@ -1,5 +1,7 @@
 <template>
-    <el-dialog :title="title" :visible.sync="dialogVisible" width="30%" @close="handleClose">
+    <el-dialog
+    :close-on-click-modal="dismissOnBackdrop"
+    @open="markPristine" :title="title" :visible.sync="dialogVisible" width="30%" @close="handleClose">
         <el-form :model="form" :rules="rules" ref="form" label-width="100px">
             <el-form-item label="Dictionary Label" prop="dictLabel">
                 <el-input v-model="form.dictLabel" placeholder="Enter dictionary label"></el-input>
@@ -19,7 +21,9 @@
 </template>
 
 <script>
+import dialogDismiss from '@/mixins/dialogDismiss';
 export default {
+  mixins: [dialogDismiss],
     name: 'DictDataDialog',
     props: {
         visible: {

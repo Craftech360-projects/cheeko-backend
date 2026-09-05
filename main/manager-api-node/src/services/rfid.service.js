@@ -830,6 +830,7 @@ const buildContentPackResponse = async (pack, normalizedUid) => {
       contentType: pack.content_type || 'story_pack',
       title: pack.name,
       packCode: pack.pack_code,
+      thumbnailUrl: pack.thumbnail_url || null,
       version: pack.version,
       stories: stories
     };
@@ -853,6 +854,7 @@ const buildContentPackResponse = async (pack, normalizedUid) => {
     contentType: pack.content_type || 'story_pack',
     title: pack.name,
     packCode: pack.pack_code,
+    thumbnailUrl: pack.thumbnail_url || null,
     version: pack.version,
     items: mappedItems
   };
@@ -3852,6 +3854,11 @@ const updateCachedAudioUrl = async (packCode, sequence, audioUrl) => {
 /**
  * Transform rfid_content_pack row to camelCase DTO
  */
+// A custom pack's code is `CK` + the zero-padded kid id (see packCodeForKid),
+// which is the same shape getCustomPackList() matches on.
+const CUSTOM_PACK_CODE_PATTERN = '^CK[0-9]{6}$';
+const CUSTOM_PACK_SCOPE = 'custom';
+
 const transformContentPackToCamelCase = (pack) => {
   if (!pack) return null;
   return {
@@ -3931,29 +3938,40 @@ const buildExistingContentItemMap = (items = []) => {
  * @param {Object} params - Pagination and filter options
  * @returns {Promise<Object>} Paginated content pack list
  */
-const getContentPackPage = async ({ page = 1, limit = 10, packCode, name, contentType, language, active } = {}) => {
+const getContentPackPage = async ({ page = 1, limit = 10, packCode, name, contentType, language, active, scope } = {}) => {
   const offset = (page - 1) * limit;
 
-  const where = {};
+  const filters = [];
 
-  if (packCode) where.pack_code = { contains: packCode, mode: 'insensitive' };
-  if (name) where.name = { contains: name, mode: 'insensitive' };
-  if (contentType) where.content_type = contentType;
-  if (language) where.language = language;
+  if (packCode) filters.push(Prisma.sql`pack_code ILIKE ${'%' + packCode + '%'}`);
+  if (name) filters.push(Prisma.sql`name ILIKE ${'%' + name + '%'}`);
+  if (contentType) filters.push(Prisma.sql`content_type = ${contentType}`);
+  if (language) filters.push(Prisma.sql`language = ${language}`);
   if (active !== undefined && active !== null && active !== '') {
-    where.active = active === true || active === 'true' || active === '1';
+    filters.push(Prisma.sql`active = ${active === true || active === 'true' || active === '1'}`);
   }
+  // A per-child custom pack is a normal rfid_content_pack row whose code the
+  // app minted from the kid id, so the code shape is the only thing that tells
+  // it apart from catalogue content. The admin grid is a catalogue view, so
+  // those rows are out of it unless they are what was asked for.
+  filters.push(
+    scope === CUSTOM_PACK_SCOPE
+      ? Prisma.sql`pack_code ~ ${CUSTOM_PACK_CODE_PATTERN}`
+      : Prisma.sql`pack_code !~ ${CUSTOM_PACK_CODE_PATTERN}`
+  );
+
+  const where = Prisma.sql`WHERE ${Prisma.join(filters, ' AND ')}`;
 
   try {
-    const [total, packs] = await Promise.all([
-      prisma.rfid_content_pack.count({ where }),
-      prisma.rfid_content_pack.findMany({
-        where,
-        orderBy: { name: 'asc' },
-        skip: offset,
-        take: limit
-      })
+    const [countRows, packs] = await Promise.all([
+      prisma.$queryRaw`SELECT COUNT(*)::int AS count FROM rfid_content_pack ${where}`,
+      prisma.$queryRaw`
+        SELECT * FROM rfid_content_pack ${where}
+        ORDER BY name ASC
+        LIMIT ${limit} OFFSET ${offset}
+      `
     ]);
+    const total = countRows[0]?.count || 0;
 
     return {
       list: packs.map(transformContentPackToCamelCase),

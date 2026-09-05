@@ -1,0 +1,562 @@
+// ============================================
+// Cheeko Admin — shared design primitives
+// Global (not scoped) so every view gets the same card, header, table,
+// tag and toolbar chrome without redefining it. Views should delete their
+// local copies of these rules rather than override them.
+// ============================================
+@import './theme.scss';
+
+// ---------- Page header --------------------------------------------------
+.ds-page {
+  padding: 0;
+}
+
+.page-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 32px;
+  padding-bottom: 22px;
+  margin-bottom: 26px;
+  border-bottom: 1px solid $border-color;
+
+  h1,
+  .page-title {
+    margin: 0;
+    font-family: $font-display;
+    font-size: 34px;
+    font-weight: 400;
+    line-height: 1.05;
+    letter-spacing: -0.025em;
+    color: $text-dark;
+    text-wrap: balance;
+  }
+
+  .page-lead {
+    margin: 7px 0 0;
+    color: $text-gray;
+    font-size: 13px;
+    max-width: 62ch;
+  }
+
+  .page-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 0 0 auto;
+    // Sits on the title's baseline rather than drifting with the lead
+    margin-top: 6px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+}
+
+@media (max-width: 900px) {
+  .page-head {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+
+    h1,
+    .page-title {
+      font-size: 26px;
+    }
+  }
+}
+
+// ---------- Surfaces -----------------------------------------------------
+.card,
+.content-panel,
+.stat-card {
+  background: $surface;
+  border: 1px solid $border-color;
+  border-radius: $radius-lg;
+  box-shadow: none;
+}
+
+.card {
+  padding: 22px 24px;
+
+  &.pad0 {
+    padding: 0;
+  }
+
+  &.sunk {
+    background: $surface-sunk;
+    border-color: $divider-color;
+  }
+}
+
+.card-header,
+.card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+
+  h3,
+  .card-title,
+  .section-title {
+    margin: 0;
+    font-size: 13.5px;
+    font-weight: 590;
+    letter-spacing: -0.01em;
+    color: $text-dark;
+  }
+}
+
+.card-subtitle,
+.section-description,
+.sub {
+  color: $text-light;
+  font-size: 11.5px;
+}
+
+.card-empty,
+.ds-empty {
+  padding: 56px;
+  text-align: center;
+  color: $text-light;
+  font-size: 13px;
+
+  b {
+    display: block;
+    font-family: $font-display;
+    font-size: 19px;
+    font-weight: 400;
+    color: $text-body;
+    margin-bottom: 6px;
+  }
+}
+
+// ---------- Bento grids --------------------------------------------------
+.bento {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 14px;
+
+  &.g2 { grid-template-columns: repeat(2, 1fr); }
+  &.g3 { grid-template-columns: repeat(3, 1fr); }
+  &.g4 { grid-template-columns: repeat(4, 1fr); }
+  &.g5 { grid-template-columns: repeat(5, 1fr); }
+  &.g-2-1 { grid-template-columns: 2fr 1fr; }
+  &.g-1-2 { grid-template-columns: 1fr 2fr; }
+  &.g-3-2 { grid-template-columns: 3fr 2fr; }
+}
+
+@media (max-width: 1280px) {
+  .bento.g5 { grid-template-columns: repeat(3, 1fr); }
+  .bento.g4 { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 900px) {
+  .bento.g5,
+  .bento.g4,
+  .bento.g3,
+  .bento.g2,
+  .bento.g-2-1,
+  .bento.g-1-2,
+  .bento.g-3-2 {
+    grid-template-columns: 1fr;
+  }
+}
+
+// ---------- KPI ----------------------------------------------------------
+.kpi {
+  .kpi-label,
+  .stat-label,
+  h6 {
+    margin: 0 0 14px;
+    font-family: $font-mono;
+    font-size: 9.5px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.11em;
+    color: $text-light;
+  }
+
+  .kpi-value,
+  .stat-value {
+    font-family: $font-display;
+    font-size: 40px;
+    font-weight: 400;
+    line-height: 1;
+    letter-spacing: -0.03em;
+    color: $text-dark;
+
+    small,
+    .unit {
+      font-size: 16px;
+      color: $text-gray;
+      letter-spacing: 0;
+      margin-left: 4px;
+    }
+  }
+
+  .kpi-delta {
+    margin-top: 12px;
+    font-size: 11.5px;
+    color: $text-gray;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+
+    b {
+      font-weight: 560;
+      color: $success;
+
+      &.down { color: $danger; }
+    }
+  }
+}
+
+// ---------- Meters (proportions, in place of donuts) ---------------------
+.meter {
+  display: grid;
+  grid-template-columns: 1fr 56px;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 12px;
+
+  .meter-label {
+    font-size: 12.5px;
+    color: $text-body;
+
+    .meter-sub { color: $text-light; }
+  }
+
+  .meter-track {
+    height: 5px;
+    background: $surface-sunk;
+    border-radius: 999px;
+    margin-top: 6px;
+    overflow: hidden;
+  }
+
+  .meter-fill {
+    height: 100%;
+    background: $primary;
+    border-radius: 999px;
+  }
+
+  .meter-value {
+    font-family: $font-mono;
+    font-size: 11px;
+    color: $text-gray;
+    text-align: right;
+  }
+}
+
+// ---------- List rows ----------------------------------------------------
+.ds-rows {
+  display: flex;
+  flex-direction: column;
+
+  .ds-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 0;
+    border-bottom: 1px solid $divider-color;
+
+    &:last-child { border-bottom: 0; }
+
+    .grow { flex: 1; min-width: 0; }
+
+    .row-title {
+      font-size: 12.5px;
+      font-weight: 520;
+      color: $text-dark;
+    }
+
+    .row-sub {
+      font-size: 11.5px;
+      color: $text-light;
+      margin-top: 2px;
+    }
+  }
+}
+
+// ---------- Identity cell ------------------------------------------------
+.rowid {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+
+  .rowid-mark {
+    width: 22px;
+    height: 22px;
+    border-radius: $radius-sm;
+    background: $surface-sunk;
+    color: $text-gray;
+    font-family: $font-mono;
+    font-size: 10px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+
+    &.accent {
+      background: $accent-wash;
+      color: $primary-dark;
+    }
+  }
+
+  .rowid-sub {
+    display: block;
+    font-family: $font-mono;
+    font-size: 10.5px;
+    color: $text-light;
+  }
+}
+
+// ---------- Monospace data ----------------------------------------------
+.mono,
+.mac,
+.uid {
+  font-family: $font-mono;
+  font-size: 11.5px;
+  letter-spacing: -0.01em;
+  color: $text-gray;
+}
+
+.muted {
+  color: $text-gray;
+  font-size: 12px;
+}
+
+// ---------- Status chips -------------------------------------------------
+.chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 2px 9px;
+  font-family: $font-mono;
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  background: $surface-sunk;
+  color: $text-gray;
+  white-space: nowrap;
+
+  &.ok { background: $success-bg; color: $success; }
+  &.warn { background: $warning-bg; color: $warning; }
+  &.bad { background: $danger-bg; color: $danger; }
+  &.info { background: $info-bg; color: $info; }
+  &.accent { background: $accent-wash; color: $primary-dark; }
+}
+
+// ---------- Micro label --------------------------------------------------
+.micro-label,
+.lab {
+  display: block;
+  font-family: $font-mono;
+  font-size: 9.5px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: $text-light;
+  margin-bottom: 7px;
+}
+
+// ---------- List footer --------------------------------------------------
+.list-footer,
+.table_bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 16px;
+  border-top: 1px solid $border-color;
+  color: $text-light;
+  font-size: 11.5px;
+}
+
+// ---------- Faux window chrome (used by empty states / previews) ---------
+.ds-hint {
+  font-size: 11.5px;
+  color: $text-light;
+  margin-top: 6px;
+}
+
+// ============================================================
+// Shared page chrome
+// These class names are used verbatim by most list views. Defining them once
+// here means a view's scoped block only carries what is genuinely its own.
+// ============================================================
+.welcome {
+  min-height: 0;
+  height: auto;
+  display: flex;
+  position: relative;
+  flex-direction: column;
+  background: transparent;
+}
+
+.main-wrapper {
+  margin: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+  padding: 0;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.content-panel {
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.content-area {
+  background: transparent;
+  border-radius: 0;
+  padding: 0;
+  flex: 1;
+  min-height: 0;
+}
+
+// The card that wraps a table: rule, no shadow, no inner padding
+.user-card,
+.table-card,
+.el-card.is-never-shadow {
+  background: $surface;
+  border: 1px solid $border-color;
+  border-radius: $radius-lg;
+  box-shadow: none !important;
+
+  > .el-card__body { padding: 0; }
+}
+
+.transparent-table {
+  background: transparent;
+
+  tr { background: transparent; }
+}
+
+// ---------- Operation bar (legacy header) ----------
+.operation-bar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 32px;
+  padding-bottom: 22px;
+  margin-bottom: 26px;
+  border-bottom: 1px solid $border-color;
+
+  .page-title {
+    margin: 0;
+    font-family: $font-display;
+    font-size: 34px;
+    font-weight: 400;
+    line-height: 1.05;
+    letter-spacing: -0.025em;
+    color: $text-dark;
+  }
+
+  .right-operations {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+}
+
+// ---------- Footer + pagination ----------
+.ctrl_btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.custom-pagination {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.pagination-btn {
+  min-width: 26px;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid $border-color;
+  border-radius: 3px;
+  background: $surface;
+  color: $text-gray;
+  font-family: $font-sans;
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+
+  &:hover:not(:disabled) {
+    color: $text-dark;
+    border-color: $text-light;
+  }
+
+  &.active {
+    background: $text-dark;
+    border-color: $text-dark;
+    color: $white;
+  }
+
+  &:disabled {
+    color: $text-light;
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
+}
+
+.total-text {
+  color: $text-light;
+  font-size: 11.5px;
+  margin-left: 6px;
+  white-space: nowrap;
+}
+
+.page-size-select {
+  width: 118px;
+
+  .el-input__inner {
+    height: 26px;
+    line-height: 26px;
+    font-size: 11.5px;
+    border-radius: 3px;
+  }
+
+  .el-input__icon { line-height: 26px; }
+}
+
+// Filter dropdowns dropped into the toolbar's filter slot
+.lb-filter {
+  width: 132px;
+
+  .el-input__inner {
+    height: 32px;
+    line-height: 32px;
+    font-size: 12.5px;
+    border-radius: $radius-sm;
+  }
+
+  .el-input__icon { line-height: 32px; }
+}
+
+// Row action clusters
+.row-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  align-items: center;
+
+  .el-button + .el-button { margin-left: 0; }
+}

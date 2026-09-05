@@ -8,39 +8,25 @@
 <style lang="scss">
 @import './styles/theme.scss';
 
+// The Vue CLI scaffold left `text-align: center` here, which centred every
+// heading, card title and table cell in the app, and a bare `nav { padding: 30px }`
+// that hit the sidebar's own <nav> groups.
 #app {
   font-family: Avenir, Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  text-align: center;
-  color: $text-dark;
-}
-
-nav {
-  padding: 30px;
-
-  a {
-    font-weight: bold;
-    color: $text-dark;
-
-    &.router-link-exact-active {
-      color: $primary;
-    }
-  }
+  text-align: left;
+  color: $text-body;
 }
 
 .copyright {
+  // Flows where it is placed. It used to be pinned to the bottom of the
+  // viewport, which pulled it out of the auth form column.
   text-align: center;
-  color: $text-dark;
-  font-size: 12px;
+  color: $text-light;
+  font-size: 11px;
   font-weight: 400;
-  margin-top: auto;
-  padding: 30px 0 20px;
-  position: absolute;
-  bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 100%;
+  padding: 20px 0 0;
 }
 
 .el-message {

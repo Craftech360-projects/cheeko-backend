@@ -1,7 +1,13 @@
 <template>
   <div class="family-profile" v-loading="loading">
-    <div class="profile-topbar">
-      <el-button type="text" icon="el-icon-back" @click="$router.push('/families')">All families</el-button>
+    <div class="page-head">
+      <div>
+        <h1 class="page-title">Family profile</h1>
+        <p class="page-lead">Play time, learning signals and the toys in one household.</p>
+      </div>
+      <div class="page-actions">
+        <el-button size="small" @click="$router.push('/families')">All families</el-button>
+      </div>
     </div>
 
     <template v-if="profile">
@@ -191,12 +197,13 @@ export default {
 }
 
 .card {
-  background: #fff;
+  background: $surface;
   border: 1px solid $border-color;
-  border-radius: 12px;
-  padding: 14px 16px;
-  box-shadow: 0 4px 14px rgba(61, 69, 102, 0.05);
+  border-radius: $radius-lg;
+  padding: 22px 24px;
+  box-shadow: none;
   min-width: 0;
+
 }
 
 .identity {
@@ -270,28 +277,42 @@ export default {
 }
 
 .kpi-value {
-  font-size: 22px;
-  font-weight: 700;
+  font-family: $font-display;
+  font-size: 40px;
+  font-weight: 400;
+  line-height: 1;
+  letter-spacing: -0.03em;
   color: $text-dark;
-  font-variant-numeric: tabular-nums;
+
 }
 
 .kpi-unit {
-  font-size: 13px;
+  font-size: 16px;
   color: $text-gray;
-  font-weight: 500;
+  letter-spacing: 0;
+  margin-left: 4px;
+
 }
 
 .kpi-label {
-  font-size: 11.5px;
-  color: $text-gray;
-  margin: 2px 0 6px;
+  font-family: $font-mono;
+  font-size: 9.5px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.11em;
+  color: $text-light;
+  margin-top: 10px;
+
 }
 
 .section-title {
-  margin: 4px 0 10px;
-  font-size: 14px;
+  margin: 30px 0 14px;
+  font-family: $font-display;
+  font-size: 22px;
+  font-weight: 400;
+  letter-spacing: -0.02em;
   color: $text-dark;
+
 }
 
 .device-grid {
@@ -323,8 +344,8 @@ export default {
   border-radius: 8px;
   white-space: nowrap;
 
-  &.on { background: rgba(12, 163, 12, 0.12); color: #0a7a0a; }
-  &.off { background: #f0f1f7; color: $text-gray; }
+  &.on { background: rgba(12, 163, 12, 0.12); color: $success; }
+  &.off { background: $divider-color; color: $text-gray; }
 }
 
 .device-mac {
@@ -349,9 +370,11 @@ export default {
 }
 
 .card-subtitle {
-  margin: 0 0 8px;
-  font-size: 13px;
+  margin: 0 0 16px;
+  font-size: 13.5px;
+  font-weight: 590;
   color: $text-dark;
+
 }
 
 .muted {
@@ -408,16 +431,20 @@ export default {
 }
 
 .card-empty {
+  padding: 32px 0;
   text-align: center;
-  color: $text-gray;
+  color: $text-light;
   font-size: 12.5px;
-  padding: 16px 0;
+
 
   &.big { padding: 48px 0; }
 }
 
 .mono {
-  font-family: 'Consolas', 'Menlo', monospace;
+  font-family: $font-mono;
+  font-size: 11.5px;
+  letter-spacing: -0.01em;
+
 }
 
 @media (max-width: 900px) {

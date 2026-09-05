@@ -4,7 +4,8 @@
     width="520px"
     class="param-dialog-wrapper"
     :append-to-body="true"
-    :close-on-click-modal="false"
+    :close-on-click-modal="dismissOnBackdrop"
+    @open="markPristine"
     :key="dialogKey"
     custom-class="custom-param-dialog"
     :show-close="false"
@@ -57,7 +58,9 @@
 </template>
 
 <script>
+import dialogDismiss from '@/mixins/dialogDismiss';
 export default {
+  mixins: [dialogDismiss],
   props: {
     title: {
       type: String,
@@ -136,6 +139,7 @@ export default {
 </script>
 
 <style>
+
 .custom-param-dialog {
   border-radius: 16px !important;
   overflow: hidden;
@@ -154,10 +158,12 @@ export default {
 </style>
 
 <style scoped lang="scss">
+@import '@/styles/theme.scss';
+
 .param-dialog-wrapper {
   .dialog-container {
     padding: 24px 32px;
-    background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+    background: $surface;
   }
 
   .dialog-header {
@@ -192,13 +198,13 @@ export default {
     padding: 0;
     outline: none;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    box-shadow: none;
 
     &:hover {
       color: #ffffff;
       background: #ef4444;
       transform: rotate(90deg);
-      box-shadow: 0 4px 6px rgba(239, 68, 68, 0.2);
+      box-shadow: none;
     }
 
     svg {
@@ -230,11 +236,11 @@ export default {
         transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         font-size: 14px;
         color: #334155;
-        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+        box-shadow: none;
 
         &:focus {
           border-color: #3b82f6;
-          box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+          box-shadow: none;
           background-color: #ffffff;
         }
 
@@ -256,11 +262,11 @@ export default {
         transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         font-size: 14px;
         color: #334155;
-        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+        box-shadow: none;
 
         &:focus {
           border-color: #3b82f6;
-          box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+          box-shadow: none;
           background-color: #ffffff;
         }
 
@@ -280,12 +286,12 @@ export default {
         transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         font-size: 14px;
         color: #334155;
-        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+        box-shadow: none;
         line-height: 1.5;
 
         &:focus {
           border-color: #3b82f6;
-          box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+          box-shadow: none;
           background-color: #ffffff;
         }
 
@@ -318,17 +324,17 @@ export default {
       color: white;
       border: none;
       letter-spacing: 0.5px;
-      box-shadow: 0 2px 4px rgba(59, 130, 246, 0.2);
+      box-shadow: none;
 
       &:hover {
         background: #2563eb;
         transform: translateY(-1px);
-        box-shadow: 0 4px 6px rgba(59, 130, 246, 0.3);
+        box-shadow: none;
       }
 
       &:active {
         transform: translateY(0);
-        box-shadow: 0 2px 3px rgba(59, 130, 246, 0.2);
+        box-shadow: none;
       }
     }
 
@@ -344,19 +350,19 @@ export default {
       border: 1px solid #e2e8f0;
       margin-left: 16px;
       letter-spacing: 0.5px;
-      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+      box-shadow: none;
 
       &:hover {
         background: #f8fafc;
         color: #475569;
         border-color: #cbd5e1;
         transform: translateY(-1px);
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        box-shadow: none;
       }
 
       &:active {
         transform: translateY(0);
-        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+        box-shadow: none;
       }
     }
   }

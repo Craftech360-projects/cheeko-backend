@@ -440,6 +440,23 @@ export default {
             }).send();
     },
 
+    // Paged roster of every kid profile in the system (any admin)
+    listAllKids(page, limit, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/kids?page=${page || 1}&limit=${limit || 50}`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to list kid profiles:', err)
+                RequestService.reAjaxFun(() => {
+                    this.listAllKids(page, limit, callback)
+                })
+            }).send();
+    },
+
     // Get kid profiles for a user (Admin only)
     getUserKidProfiles(userId, callback) {
         RequestService.sendRequest()

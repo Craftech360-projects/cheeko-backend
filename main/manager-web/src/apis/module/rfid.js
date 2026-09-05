@@ -494,7 +494,8 @@ export default {
             packCode: params.packCode || '',
             contentType: params.contentType || '',
             language: params.language || '',
-            active: params.active !== undefined ? params.active : ''
+            active: params.active !== undefined ? params.active : '',
+            scope: params.scope || ''
         }).toString();
 
         RequestService.sendRequest()

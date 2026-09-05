@@ -1,120 +1,96 @@
 <template>
   <div class="welcome" @keyup.enter="register">
-    <el-container style="height: 100%;">
-      <!-- Keep the same header -->
-      <el-header>
-        <div style="display: flex;align-items: center;margin-top: 15px;margin-left: 10px;gap: 10px;">
-          <img loading="lazy" alt="" src="@/assets/cheeko-logo.svg" style="width: 45px;height: 45px;" />
-          <!-- <img loading="lazy" alt="" src="@/assets/cheeko-ai.png" style="height: 18px;" /> -->
-        </div>
-      </el-header>
-      <div class="login-person">
-        <img loading="lazy" alt="" src="@/assets/login/register-person.png" style="width: 100%;" />
+    <div class="auth-art">
+      <div class="auth-brand">
+        <img loading="lazy" alt="Cheeko" src="@/assets/cheeko-logo.svg" />
+        <span class="auth-meta">Operator console</span>
       </div>
-      <el-main style="position: relative;">
-        <div class="login-box">
-          <!-- Title section -->
-          <div style="display: flex;align-items: center;gap: 20px;margin-bottom: 39px;padding: 0 30px;">
-            <img loading="lazy" alt="" src="@/assets/login/hi.png" style="width: 34px;height: 34px;" />
-            <div class="login-text">Register</div>
-            <div class="login-welcome">
-              WELCOME TO REGISTER
+      <p class="auth-quote">One account. One family. One shelf of toys.</p>
+      <div class="auth-meta">Accounts are approved by a workspace admin</div>
+    </div>
+
+    <div class="auth-form">
+      <div class="auth-box">
+        <h1 class="auth-title">Create account</h1>
+        <p class="auth-lead">Parents register here to bind a toy. Operator accounts are provisioned by an admin.</p>
+
+        <form @submit.prevent="register">
+          <!-- Username registration -->
+          <div class="input-box" v-if="!enableMobileRegister">
+            <span class="micro-label">Username</span>
+            <el-input v-model="form.username" placeholder="Enter username" />
+          </div>
+
+          <!-- Mobile registration -->
+          <template v-if="enableMobileRegister">
+            <div class="input-box">
+              <span class="micro-label">Phone number</span>
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <el-select v-model="form.areaCode" style="width: 190px;">
+                  <el-option v-for="item in mobileAreaList" :key="item.key" :label="`${item.name} (${item.key})`"
+                    :value="item.key" />
+                </el-select>
+                <el-input v-model="form.mobile" placeholder="Enter phone number" />
+              </div>
             </div>
-          </div>
 
-          <div style="padding: 0 30px;">
-            <form @submit.prevent="register">
-              <!-- Username/phone input box -->
-              <div class="input-box" v-if="!enableMobileRegister">
-                <img loading="lazy" alt="" class="input-icon" src="@/assets/login/username.png" />
-                <el-input v-model="form.username" placeholder="Enter username" />
-              </div>
-
-              <!-- Mobile registration section -->
-              <template v-if="enableMobileRegister">
-                <div class="input-box">
-                  <div style="display: flex; align-items: center; width: 100%;">
-                    <el-select v-model="form.areaCode" style="width: 220px; margin-right: 10px;">
-                      <el-option v-for="item in mobileAreaList" :key="item.key" :label="`${item.name} (${item.key})`"
-                        :value="item.key" />
-                    </el-select>
-                    <el-input v-model="form.mobile" placeholder="Enter phone number" />
-                  </div>
-                </div>
-
-                <div style="display: flex; align-items: center; margin-top: 20px; width: 100%; gap: 10px;">
-                  <div class="input-box" style="width: calc(100% - 130px); margin-top: 0;">
-                    <img loading="lazy" alt="" class="input-icon" src="@/assets/login/shield.png" />
-                    <el-input v-model="form.captcha" placeholder="Enter verification code" style="flex: 1;" />
-                  </div>
-                  <img loading="lazy" v-if="captchaUrl" :src="captchaUrl" alt="Captcha"
-                    style="width: 150px; height: 40px; cursor: pointer;" @click="fetchCaptcha" />
-                </div>
-
-                <!-- Mobile verification code -->
-
-                <div style="display: flex; align-items: center; margin-top: 20px; width: 100%; gap: 10px;">
-                  <div class="input-box" style="width: calc(100% - 130px); margin-top: 0;">
-                    <img loading="lazy" alt="" class="input-icon" src="@/assets/login/phone.png" />
-                    <el-input v-model="form.mobileCaptcha" placeholder="Enter SMS code" style="flex: 1;" maxlength="6" />
-                  </div>
-                  <el-button type="primary" class="send-captcha-btn" :disabled="!canSendMobileCaptcha"
-                    @click="sendMobileCaptcha">
-                    <span>
-                      {{ countdown > 0 ? `Retry in ${countdown}s` : 'Send Code' }}
-                    </span>
-                  </el-button>
-                </div>
-              </template>
-
-              <!-- Password input box -->
+            <div class="input-row">
               <div class="input-box">
-                <img loading="lazy" alt="" class="input-icon" src="@/assets/login/password.png" />
-                <el-input v-model="form.password" placeholder="Enter password" type="password" show-password />
+                <span class="micro-label">Verification code</span>
+                <el-input v-model="form.captcha" placeholder="Enter the code" />
               </div>
+              <img loading="lazy" v-if="captchaUrl" :src="captchaUrl" alt="Verification code"
+                class="captcha-img" @click="fetchCaptcha" />
+            </div>
 
-              <!-- Confirm password -->
+            <div class="input-row">
               <div class="input-box">
-                <img loading="lazy" alt="" class="input-icon" src="@/assets/login/password.png" />
-                <el-input v-model="form.confirmPassword" placeholder="Confirm password" type="password" show-password />
+                <span class="micro-label">SMS code</span>
+                <el-input v-model="form.mobileCaptcha" placeholder="6-digit code" maxlength="6" />
               </div>
+              <el-button class="send-captcha-btn" :disabled="!canSendMobileCaptcha" @click="sendMobileCaptcha">
+                {{ countdown > 0 ? `Retry in ${countdown}s` : 'Send code' }}
+              </el-button>
+            </div>
+          </template>
 
-              <!-- Captcha section -->
-              <div v-if="!enableMobileRegister"
-                style="display: flex; align-items: center; margin-top: 20px; width: 100%; gap: 10px;">
-                <div class="input-box" style="width: calc(100% - 130px); margin-top: 0;">
-                  <img loading="lazy" alt="" class="input-icon" src="@/assets/login/shield.png" />
-                  <el-input v-model="form.captcha" placeholder="Enter verification code" style="flex: 1;" />
-                </div>
-                <img loading="lazy" v-if="captchaUrl" :src="captchaUrl" alt="Captcha"
-                  style="width: 150px; height: 40px; cursor: pointer;" @click="fetchCaptcha" />
-              </div>
-
-              <!-- Bottom link -->
-              <div style="font-weight: 400;font-size: 14px;text-align: left;color: var(--primary);margin-top: 20px;">
-                <div style="cursor: pointer;" @click="goToLogin">Already have an account? Login now</div>
-              </div>
-            </form>
+          <div class="input-box">
+            <span class="micro-label">Password</span>
+            <el-input v-model="form.password" placeholder="At least 8 characters" type="password" show-password />
           </div>
 
-          <!-- Button text -->
-          <div class="login-btn" @click="register">Register Now</div>
-
-          <!-- Agreement declaration -->
-          <div style="font-size: 14px;color: #979db1;">
-            By registering, you agree to the
-            <div style="display: inline-block;color: var(--primary);cursor: pointer;">Terms of Service</div>
-            and
-            <div style="display: inline-block;color: var(--primary);cursor: pointer;">Privacy Policy</div>
+          <div class="input-box">
+            <span class="micro-label">Confirm password</span>
+            <el-input v-model="form.confirmPassword" placeholder="Repeat the password" type="password" show-password />
           </div>
+
+          <!-- Captcha for username registration -->
+          <div v-if="!enableMobileRegister" class="input-row">
+            <div class="input-box">
+              <span class="micro-label">Verification code</span>
+              <el-input v-model="form.captcha" placeholder="Enter the code" />
+            </div>
+            <img loading="lazy" v-if="captchaUrl" :src="captchaUrl" alt="Verification code"
+              class="captcha-img" @click="fetchCaptcha" />
+          </div>
+        </form>
+
+        <div class="login-btn" @click="register">Create account</div>
+
+        <div class="auth-alt">
+          Already registered? <span class="link" @click="goToLogin">Sign in</span>
         </div>
-      </el-main>
 
-      <!-- Footer -->
-      <el-footer>
-        <version-footer />
-      </el-footer>
-    </el-container>
+        <div class="auth-legal">
+          By registering you agree to the
+          <span class="link">Terms of Service</span> and <span class="link">Privacy Policy</span>.
+        </div>
+
+        <div class="auth-footer">
+          <version-footer />
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -299,23 +275,8 @@ export default {
 @import './auth.scss';
 
 .send-captcha-btn {
-  margin-right: -5px;
-  min-width: 100px;
-  height: 40px;
-  line-height: 40px;
-  border-radius: 4px;
-  font-size: 14px;
-  background: $primary;
-  border: none;
-  padding: 0px;
-
-  &:hover {
-    background: $primary-dark;
-  }
-
-  &:disabled {
-    background: #c0c4cc;
-    cursor: not-allowed;
-  }
+  height: 48px;
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 </style>

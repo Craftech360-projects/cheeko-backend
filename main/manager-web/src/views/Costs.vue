@@ -1,11 +1,11 @@
 <template>
   <div class="costs-page">
-    <div class="costs-header">
+    <div class="page-head">
       <div>
-        <h2 class="page-title">Costs</h2>
-        <p class="page-subtitle">AI spend across the fleet · IST</p>
+        <h1 class="page-title">AI Cost</h1>
+        <p class="page-subtitle">Spend attributed to each toy, in rupees, across LLM, TTS and STT · IST</p>
       </div>
-      <div class="header-actions">
+      <div class="page-actions">
         <el-radio-group v-model="range" size="small" @change="loadCosts">
           <el-radio-button label="7d">7 days</el-radio-button>
           <el-radio-button label="30d">30 days</el-radio-button>
@@ -213,7 +213,7 @@ export default {
   max-width: 1280px;
 }
 
-.costs-header {
+.page-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -223,17 +223,24 @@ export default {
 
 .page-title {
   margin: 0;
-  font-size: 20px;
+  font-family: $font-display;
+  font-size: 34px;
+  font-weight: 400;
+  line-height: 1.05;
+  letter-spacing: -0.025em;
   color: $text-dark;
+
 }
 
 .page-subtitle {
-  margin: 2px 0 0;
-  font-size: 12px;
+  margin: 7px 0 0;
+  font-size: 13px;
   color: $text-gray;
+  max-width: 62ch;
+
 }
 
-.header-actions {
+.page-actions {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -252,31 +259,42 @@ export default {
 }
 
 .card {
-  background: #fff;
+  background: $surface;
   border: 1px solid $border-color;
-  border-radius: 12px;
-  padding: 14px 16px;
-  box-shadow: 0 4px 14px rgba(61, 69, 102, 0.05);
+  border-radius: $radius-lg;
+  padding: 22px 24px;
+  box-shadow: none;
   min-width: 0;
+
 }
 
 .kpi-label {
-  font-size: 11.5px;
-  color: $text-gray;
+  font-family: $font-mono;
+  font-size: 9.5px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.11em;
+  color: $text-light;
+  margin-top: 10px;
+
 }
 
 .kpi-big {
-  font-size: 22px;
-  font-weight: 700;
+  font-family: $font-display;
+  font-size: 40px;
+  font-weight: 400;
+  line-height: 1;
+  letter-spacing: -0.03em;
   color: $text-dark;
-  margin-top: 4px;
-  font-variant-numeric: tabular-nums;
+
 }
 
 .kpi-unit {
-  font-size: 13px;
+  font-size: 16px;
   color: $text-gray;
-  font-weight: 500;
+  letter-spacing: 0;
+  margin-left: 4px;
+
 }
 
 .kpi-sub, .kpi-delta {
@@ -284,13 +302,13 @@ export default {
   margin-top: 4px;
   color: $text-gray;
 
-  &.bad { color: #d03b3b; }
-  &.good { color: #006300; }
+  &.bad { color: $danger; }
+  &.good { color: $success; }
 }
 
 .kpi-delta {
-  &.bad { color: #d03b3b; }
-  &.good { color: #006300; }
+  &.bad { color: $danger; }
+  &.good { color: $success; }
 }
 
 .two-col {
@@ -301,9 +319,11 @@ export default {
 }
 
 .card-subtitle {
-  margin: 0 0 10px;
-  font-size: 13px;
+  margin: 0 0 16px;
+  font-size: 13.5px;
+  font-weight: 590;
   color: $text-dark;
+
 }
 
 .muted {
@@ -313,10 +333,11 @@ export default {
 }
 
 .card-empty {
+  padding: 32px 0;
   text-align: center;
-  color: $text-gray;
+  color: $text-light;
   font-size: 12.5px;
-  padding: 40px 0;
+
 }
 
 .mix-bar {
@@ -324,7 +345,7 @@ export default {
   height: 14px;
   border-radius: 7px;
   overflow: hidden;
-  background: #f0f1f7;
+  background: $divider-color;
 
   .mix-seg + .mix-seg { border-left: 2px solid #fff; }
 }
@@ -351,15 +372,20 @@ export default {
 }
 
 .footnote {
-  margin: 10px 0 0;
-  font-size: 11px;
-  color: $text-gray;
+  margin: 14px 0 0;
+  font-size: 11.5px;
+  color: $text-light;
+
 }
 
 .section-title {
-  margin: 4px 0 10px;
-  font-size: 14px;
+  margin: 30px 0 14px;
+  font-family: $font-display;
+  font-size: 22px;
+  font-weight: 400;
+  letter-spacing: -0.02em;
   color: $text-dark;
+
 }
 
 .share-bar {
@@ -367,7 +393,7 @@ export default {
   width: 90px;
   height: 8px;
   border-radius: 4px;
-  background: #f0f1f7;
+  background: $divider-color;
   overflow: hidden;
   vertical-align: middle;
   margin-right: 8px;
@@ -386,8 +412,10 @@ export default {
 }
 
 .mono {
-  font-family: 'Consolas', 'Menlo', monospace;
+  font-family: $font-mono;
   font-size: 11.5px;
+  letter-spacing: -0.01em;
+
 }
 
 @media (max-width: 1100px) {

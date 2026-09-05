@@ -112,7 +112,7 @@ export default {
   margin: 7px 0 10px;
   font-weight: 400;
   font-size: 11px;
-  color: #3d4566;
+  color: $text-dark;
   text-align: left;
 }
 
@@ -144,7 +144,7 @@ export default {
   justify-content: space-between;
   margin-top: 15px;
   font-size: 12px;
-  color: #979db1;
+  color: $text-light;
   font-weight: 400;
 }
 

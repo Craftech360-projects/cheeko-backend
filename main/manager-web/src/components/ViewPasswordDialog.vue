@@ -56,7 +56,7 @@ export default {
 @import '@/styles/theme.scss';
 
 .input-46 {
-  border: 1px solid #e4e6ef;
+  border: 1px solid $border-color;
   background: #f6f8fb;
   border-radius: 15px;
 }
@@ -85,7 +85,7 @@ export default {
 
 ::v-deep .el-dialog {
   border-radius: 15px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  box-shadow: none;
 }
 
 ::v-deep .el-dialog__headerbtn {

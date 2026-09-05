@@ -23,6 +23,7 @@ jest.mock('../../src/config/database', () => {
       device_radio_played: model(),
       voice_session_summaries: model(),
       voice_session_messages: model(),
+      voice_sessions: model(),
       analytics_media_playback: model(),
       parent_profile: model(),
       kid_profile: model(),
@@ -199,8 +200,12 @@ describe('founderDashboard.service', () => {
 
     prisma.voice_session_messages.findMany.mockResolvedValue([
       { session_id: 'sess-1', mac_address: 'AA:AA:AA:AA:AA:01', sequence: 1, role: 'user', content: 'What is inside a volcano?', created_at: instant(0) },
-      { session_id: 'sess-1', mac_address: 'AA:AA:AA:AA:AA:01', sequence: 2, role: 'assistant', content: 'Melted rock called magma!', created_at: instant(0) },
+      { session_id: 'sess-1', mac_address: 'AA:AA:AA:AA:AA:01', sequence: 2, role: 'assistant', content: 'Melted rock called magma!', created_at: instant(0), ai_agent: { agent_name: 'Quizzy Bee' } },
     ]);
+    prisma.voice_sessions.findFirst.mockResolvedValue({
+      ai_agent: { agent_name: 'Cheeko' },
+      kid_profile: { name: 'Maya Sharma', nickname: null },
+    });
 
     prisma.analytics_media_playback.findMany.mockResolvedValue([
       { id: 1n, content_id: 10n, content_type: 'story', event_type: 'start', metadata: { media_title: 'The Clever Crow' }, created_at: instant(0) },
@@ -427,8 +432,21 @@ describe('founderDashboard.service', () => {
     const result = await founderDashboardService.getConversationTranscript('sess-1');
 
     expect(result.lines).toHaveLength(2);
-    expect(result.lines[0]).toMatchObject({ speaker: 'Kid', text: 'What is inside a volcano?' });
-    expect(result.lines[1].speaker).toBe('Cheeko');
+    // The child is named first-name-only, and the agent side is named by the
+    // character that actually spoke rather than by a fixed label.
+    expect(result.lines[0]).toMatchObject({ role: 'user', speaker: 'Maya', text: 'What is inside a volcano?' });
+    expect(result.lines[1]).toMatchObject({ role: 'assistant', speaker: 'Quizzy Bee' });
+  });
+
+  it('falls back to the session agent when a message carries no agent of its own', async () => {
+    prisma.voice_session_messages.findMany.mockResolvedValue([
+      { session_id: 'sess-1', mac_address: 'AA:AA:AA:AA:AA:01', sequence: 1, role: 'assistant', content: 'Hello!', created_at: instant(0) },
+    ]);
+
+    const result = await founderDashboardService.getConversationTranscript('sess-1');
+
+    expect(result.agentName).toBe('Cheeko');
+    expect(result.lines[0].speaker).toBe('Cheeko');
   });
 
   it('builds cost aggregates for the founder costs page', async () => {
