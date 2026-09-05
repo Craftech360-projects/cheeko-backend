@@ -84,10 +84,41 @@ understands and ignores the other.
 Without `CHEEKO_USER_TOKEN` the proxy still works, but ~half of `search_endpoints`
 results will answer 401 (the tool tells you which credential is missing).
 
+Watch for routes that break the pattern of their sibling endpoints — e.g.
+`GET /device/list` and `GET /admin/rfid/content-pack/{id}` both sit on
+`requireAuth` while every neighboring route in the same file uses
+`requireAdmin`. Nothing about the URL shape tells you which one a route uses;
+if the service key alone 401s somewhere you expected it to work, that's
+almost always why — set `CHEEKO_USER_TOKEN` before assuming the route is
+broken.
+
 ### Getting `SERVICE_SECRET_KEY`
 
 It's the same value the API itself runs with — `SERVICE_SECRET_KEY` in the
 API's `.env` / deployment secrets. Ask whoever runs the box.
+
+**If you extract it yourself via SSH, watch for duplicate lines.** Some boxes'
+`.env` files define `SERVICE_SECRET_KEY=` more than once (harmless — the app
+only reads one). A naive `grep '^SERVICE_SECRET_KEY=' .env | cut -d= -f2-`
+matches *both* lines, and bash command substitution joins them with a
+newline — the header then fails with `Headers.append: "<value>\n<value>" is
+an invalid header value`, identical on every call since nothing about it is
+random. Take the **first match only**:
+
+```bash
+grep -m1 '^SERVICE_SECRET_KEY=' .env | cut -d= -f2-
+```
+
+Better: don't trust the file at all — extract what the running process
+actually loaded (`dotenv.config()` can differ from a raw file read, e.g. an
+already-set env var wins over `.env`, or CRLF line endings get trimmed
+differently). Run this **on the box**, in the app's own directory:
+
+```bash
+node -e "require('dotenv').config(); console.log(process.env.SERVICE_SECRET_KEY)"
+```
+
+That's what `server.js` itself sees — no guessing.
 
 ### Minting `CHEEKO_USER_TOKEN`
 
@@ -99,11 +130,20 @@ cd main/manager-api-node
 node scripts/mcp-token.js <username-or-id> [days]     # default 90 days
 ```
 
-Prints one line — the token — on stdout; the user/expiry note goes to stderr,
-so this works:
+Prints the token alone on stdout; the user/expiry note goes to stderr, so
+this works:
 
 ```bash
 export CHEEKO_DEV_USER_TOKEN=$(node scripts/mcp-token.js admin@123)
+```
+
+If you ever see the captured value run suspiciously long, something upstream
+of the script logged extra lines to stdout ahead of the token (this has
+happened once already — a `.env`-set `LOG_LEVEL` overriding the script's own
+attempt to quiet the logger). Take the last line defensively:
+
+```bash
+export CHEEKO_DEV_USER_TOKEN=$(node scripts/mcp-token.js admin@123 2>/dev/null | tail -1)
 ```
 
 The script needs the API's `.env` (it talks to the same DB), so run it on a
@@ -203,20 +243,30 @@ If a variable is unset, Claude Code warns and leaves the literal `${…}` in
 place; the server treats that as "not configured" rather than sending it as a
 credential.
 
-**Adding prod — local scope, never committed.** Prod is read-only unless you
-say otherwise, and it lives in your own `~/.claude.json`, not the repo:
+**Adding any other box (a specific dev server, staging, prod) — local scope,
+never committed.** Give it its own name; it lives in your own `~/.claude.json`,
+not the repo:
 
 ```bash
-claude mcp add cheeko-prod --scope local \
-  --env CHEEKO_API=https://api.cheeko…/toy \
+claude mcp add cheeko-devbox --scope local \
+  --env CHEEKO_API=http://<box-ip-or-host>:8002/toy \
   --env SERVICE_SECRET_KEY=… \
+  --env CHEEKO_USER_TOKEN=… \
+  --env ALLOW_WRITES=1 \
   -- node main/manager-api-node/mcp/cheeko-mcp.mjs
 ```
 
-No `ALLOW_WRITES`, so only the read tools register and `admin_request` is
-GET-only. Add `--env ALLOW_WRITES=1` for the ten minutes you need it, then
-remove it. Tools appear as `cheeko-prod:<tool>`, so the approval dialog always
-shows which box you're hitting.
+Tools appear as `cheeko-devbox:<tool>`, so the approval dialog always shows
+which box you're hitting. For **prod**, default to omitting `ALLOW_WRITES` —
+only the read tools register and `admin_request` is GET-only; add
+`--env ALLOW_WRITES=1` for the ten minutes you need it, then remove it.
+
+**Reconfiguring an *existing* entry needs a restart too.** `claude mcp add`
+with a name that already exists overwrites its config on disk immediately —
+but a client you already have open keeps the *old* env in the child process
+it already spawned. Changing a credential (rotated a key, fixed a bad
+extraction) doesn't take effect until you restart the client, exactly like
+adding a brand-new entry. There's no in-place reload.
 
 ### 5.2 Claude Desktop
 
@@ -368,10 +418,17 @@ per person and revoke individually — that's the reason to mint your own.
 | `Unsupported file type` | Only mp3 / wav / ogg / m4a / png / jpg / jpeg / gif / webp / bin |
 | Everything 5xx / connection refused | `CHEEKO_API` points at a box that isn't running, or is missing the `/toy` context path |
 | Search finds a route but `describe_endpoint` says it's not in swagger.json | Spec is fetched once per process; restart the MCP server (restart the client) after deploying new routes |
+| `Headers.append: "<value>\n<value>" is an invalid header value` | A credential env var got a newline embedded — almost always two matching `.env` lines joined by `grep`. See §3's extraction warning. Reconfigured the entry? You still need a client restart (see §5.1) |
+| Changed a credential but the same error/behavior persists | You edited `~/.claude.json` (or `.mcp.json`) but didn't restart the client — the already-running server process still has the old env |
 
 The MCP server's own stderr (the startup line, ffmpeg errors) shows in the
-client's MCP log: Claude Code → `/mcp` → server → logs; Claude Desktop →
-`%APPDATA%\Claude\logs\mcp-server-cheeko-dev.log`.
+client's MCP log: Claude Desktop → `%APPDATA%\Claude\logs\mcp-server-cheeko-dev.log`.
+In the Claude Code **desktop app**, `/mcp` opens the general connector
+directory (Google Drive, Slack, etc.) rather than project stdio server
+status — it won't list `cheeko-dev` at all, that's a different mechanism.
+Use `claude mcp list` from a terminal instead (a separate CLI health-check,
+not necessarily this exact session's live tool registry, but the fastest way
+to confirm a server's config resolved and its process is reachable).
 
 ---
 
