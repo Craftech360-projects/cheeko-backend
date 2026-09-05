@@ -13,8 +13,12 @@
  * Revoking is deleting the row; the token stops working on the next request.
  */
 require('dotenv').config();
-// The logger prints its DB-connect lines to stdout; keep stdout for the token.
-process.env.LOG_LEVEL = process.env.LOG_LEVEL || 'error';
+// Force quiet regardless of what .env sets: dotenv.config() runs first, so a
+// LOG_LEVEL already in .env (debug in dev, seen in practice) would otherwise
+// survive a `||` fallback here untouched, and its DB-connect banner lands on
+// stdout ahead of the token — this script has no reason to respect the app's
+// ambient logging preference.
+process.env.LOG_LEVEL = 'error';
 const crypto = require('crypto');
 const { prisma } = require('../src/config/database');
 
