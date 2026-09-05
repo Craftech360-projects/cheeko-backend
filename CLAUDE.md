@@ -232,6 +232,12 @@ When a change touches any of these, update the MCP in the same commit and run `n
 
 Mention the MCP impact in your response even when no MCP edit is needed.
 
+If a developer asks you to set up, connect, or fix the MCP tool itself
+(rather than change its code), follow `docs/mcp.md` §10 — it's written
+directly for you: what to ask before touching anything, how to extract
+credentials safely, and to verify with a real tool call rather than
+declaring it done.
+
 ## manager-api-node Project Structure
 
 ```

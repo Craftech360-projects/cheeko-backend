@@ -462,6 +462,60 @@ Run `npm run test:mcp` after any change; it needs no API.
 
 ---
 
+## 10. Claude-guided setup
+
+*This section is written for **you**, the assistant — not the developer. If
+someone asks you to "set up the Cheeko MCP", "connect Claude to manager-api",
+or similar, follow this instead of re-deriving §§2–5 from scratch.*
+
+**Ask, don't guess, in this order:**
+
+1. **Which manager-api box?** Local dev (`http://localhost:8002/toy`) is the
+   common case. If they name a specific server, that's a separate entry (§5.1
+   "adding any other box") — never repurpose `cheeko-dev`'s config for a
+   different box.
+2. **Their own username** on that box's DB, for the user token (§3). Use
+   *their* account, not a shared one or `admin@123` by default — writes on
+   `requireAuth` routes are attributed to whoever's token made them, and that
+   attribution is the entire point of not sharing one login.
+3. **Do they already have `SERVICE_SECRET_KEY`?** If not, tell them to ask
+   whoever runs the box — don't invent one, and don't reuse a value from
+   memory or from another conversation without knowing it's still current.
+   If you have SSH access to the box yourself in this session, you may fetch
+   it directly — but extract it the safe way (§3: `grep -m1`, or read it back
+   from the live process via `dotenv`, never a bare multi-line grep) and
+   **never print the value in chat** — pipe it straight into `setx`/`export`
+   or `claude mcp add`.
+
+**Then, in order:**
+
+1. Confirm `.mcp.json` exists at the repo root (it's committed; if it's
+   missing, something's wrong with their checkout, not their setup).
+2. Set `CHEEKO_DEV_SERVICE_KEY` as a **persistent** env var (`setx` on
+   Windows, `export` in their shell profile on macOS/Linux) — a bare shell
+   `export` in a command you ran yourself doesn't reach the app.
+3. Mint their user token: `node scripts/mcp-token.js <their-username>`,
+   captured defensively (`| tail -1`, §3) in case of stdout noise. Set it as
+   `CHEEKO_DEV_USER_TOKEN` the same persistent way.
+4. Tell them to **fully quit and relaunch** the client — env var changes
+   never reach an already-running process, and neither does reconfiguring an
+   *existing* entry's credentials (§5.1). This is the single most common
+   reason "it's not working" after doing everything else right.
+5. Have them approve `cheeko-dev` when the client prompts for it.
+
+**Verify — don't just declare it done.** Once they say they've restarted,
+actually call a read-only tool (`list_content_packs` is a good default) and
+show them the result. "It should be working now" is not the same as having
+called it. If it 401s, the error text names which credential is missing or
+wrong (§7) — read it rather than re-guessing.
+
+**Never do:** print a secret or token into the chat transcript, fabricate a
+`SERVICE_SECRET_KEY` or reuse one from a different box, mint a token under
+an account that isn't theirs, or skip straight to "should be all set" without
+an actual verified tool call.
+
+---
+
 ## File map
 
 | | |
