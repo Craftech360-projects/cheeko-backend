@@ -1,11 +1,17 @@
-import Fly from 'flyio/dist/npm/fly';
+import axios from 'axios';
 import store from '../store/index';
 import Constant from '../utils/constant';
 import { goToPage, isNotNull, showDanger, showWarning } from '../utils/index';
 
-const fly = new Fly()
-// Set timeout
-fly.config.timeout = 30000
+const http = axios.create();
+http.defaults.timeout = 30000;
+
+// In-flight GET dedup: identical concurrent GETs share one HTTP request
+const inFlightGets = new Map();
+
+// Method of the request that just failed, so reAjaxFun can refuse to
+// auto-retry non-idempotent writes (a retried POST can double-create rows)
+let lastFailedMethod = 'GET';
 
 /**
  * Request service wrapper
@@ -50,7 +56,7 @@ function sendRequest() {
         _header: { 'content-type': 'application/json; charset=utf-8' },
         _url: '',
         _responseType: undefined, // Response type field
-        'send'() {
+        _dispatch() {
             const authToken = getLatestAuthToken();
             if (isNotNull(authToken)) {
                 this._header.Authorization = 'Bearer ' + authToken
@@ -61,25 +67,53 @@ function sendRequest() {
                 delete this._header['Content-Type']
             }
 
-            // Send request
-            fly.request(this._url, this._data, {
-                method: this._method,
+            const method = (this._method || 'GET').toUpperCase()
+            const isGet = method === 'GET'
+            const dedupKey = isGet
+                ? `${method} ${this._url} ${JSON.stringify(this._data || {})}`
+                : null
+
+            const raw = http.request({
+                url: this._url,
+                method,
+                data: this._data,
                 headers: this._header,
                 responseType: this._responseType
-            }).then((res) => {
-                const error = httpHandlerError(res, this._failCallback, this._networkFailCallback);
-                if (error) {
-                    return
-                }
+            })
 
-                if (this._sucCallback) {
+            if (dedupKey && inFlightGets.has(dedupKey)) {
+                // Same GET already in flight: piggyback on it instead of re-sending
+                inFlightGets.get(dedupKey)
+                    .then((res) => {
+                        const error = httpHandlerError(res, this._failCallback, this._networkFailCallback);
+                        if (!error && this._sucCallback) {
+                            this._sucCallback(res)
+                        }
+                    })
+                    .catch((err) => {
+                        lastFailedMethod = method
+                        httpHandlerError(err, this._failCallback, this._networkFailCallback)
+                    })
+                return
+            }
+
+            const tracked = raw.finally(() => {
+                if (dedupKey) inFlightGets.delete(dedupKey)
+            })
+            if (dedupKey) inFlightGets.set(dedupKey, tracked)
+
+            raw.then((res) => {
+                const error = httpHandlerError(res, this._failCallback, this._networkFailCallback);
+                if (!error && this._sucCallback) {
                     this._sucCallback(res)
                 }
-            }).catch((res) => {
-                // Print failure response
-                console.log('catch', res)
-                httpHandlerError(res, this._failCallback, this._networkFailCallback)
+            }).catch((err) => {
+                lastFailedMethod = method
+                httpHandlerError(err, this._failCallback, this._networkFailCallback)
             })
+        },
+        'send'() {
+            this._dispatch()
             return this
         },
         'success'(callback) {
@@ -186,6 +220,15 @@ function reAjaxFun(fn) {
         requestTime = nowTimeSec
     }
     let ajaxIndex = parseInt((nowTimeSec - requestTime) / reAjaxSec)
+
+    // Never auto-retry a failed write — the first request may have landed and a
+    // retry would duplicate the mutation. Surface the failure and stop.
+    if (lastFailedMethod !== 'GET') {
+        showWarning('Request failed. Please try again.')
+        clearRequestTime()
+        return
+    }
+
     if (ajaxIndex > 10) {
         showWarning('Unable to connect to server')
     } else {

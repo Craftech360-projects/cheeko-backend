@@ -1,7 +1,6 @@
 <template>
   <div class="welcome">
     <!-- Common Header -->
-    <HeaderBar />
     <div class="role-config-container">
       <div class="header-bar">
         <h2 class="page-title">Email Report Settings</h2>
@@ -291,13 +290,11 @@
 
 <script>
 import Api from '@/apis/api';
-import HeaderBar from '@/components/HeaderBar.vue';
 
 export default {
   name: 'EmailReportSettings',
   components: {
-    HeaderBar
-  },
+    },
   data() {
     return {
       config: {
@@ -538,7 +535,6 @@ export default {
 
 <style lang="scss" scoped>
 .welcome {
-  min-width: 900px;
   background: linear-gradient(135deg, #667eea11 0%, #764ba211 100%);
   min-height: 100vh;
 }

@@ -1,6 +1,5 @@
 <template>
   <div class="welcome">
-    <HeaderBar />
 
     <div class="operation-bar">
       <h2 class="page-title">RFID Bulk Import</h2>
@@ -219,12 +218,11 @@
 </template>
 
 <script>
-import HeaderBar from '../components/HeaderBar.vue';
 import Api from '../apis/api';
 
 export default {
   name: 'BulkImport',
-  components: { HeaderBar },
+  components: { },
   computed: {
     contentMappings() {
       if (!this.previewData) return [];
@@ -233,8 +231,7 @@ export default {
     aiMappings() {
       if (!this.previewData) return [];
       return this.previewData.mappings.filter(m => m.cardType === 'ai');
-    },
-  },
+    } },
   data() {
     return {
       step: 'upload', // upload → preview → results
@@ -243,8 +240,7 @@ export default {
       executing: false,
       exporting: false,
       previewData: null,
-      resultData: null,
-    };
+      resultData: null };
   },
   methods: {
     getToken() {
@@ -298,8 +294,7 @@ export default {
         const response = await fetch(`${Api.getServiceUrl()}/admin/rfid/bulk-import/preview`, {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${this.getToken()}` },
-          body: formData,
-        });
+          body: formData });
 
         const data = await response.json();
         if (data.code === 0 && data.data) {
@@ -336,8 +331,7 @@ export default {
         const response = await fetch(`${Api.getServiceUrl()}/admin/rfid/bulk-import/execute`, {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${this.getToken()}` },
-          body: formData,
-        });
+          body: formData });
 
         const data = await response.json();
         if (data.code === 0 && data.data) {
@@ -358,8 +352,7 @@ export default {
       this.exporting = true;
       try {
         const response = await fetch(`${Api.getServiceUrl()}/admin/rfid/bulk-import/export`, {
-          headers: { 'Authorization': `Bearer ${this.getToken()}` },
-        });
+          headers: { 'Authorization': `Bearer ${this.getToken()}` } });
 
         if (!response.ok) throw new Error('Export failed');
 
@@ -376,9 +369,7 @@ export default {
       } finally {
         this.exporting = false;
       }
-    },
-  },
-};
+    } } };
 </script>
 
 <style scoped>

@@ -1,6 +1,5 @@
 <template>
     <div class="welcome">
-        <HeaderBar />
 
         <div class="operation-bar">
             <h2 class="page-title">RFID Card Management</h2>
@@ -14,13 +13,6 @@
         <!-- Stats Overview Bar -->
         <div class="stats-bar" v-loading="statsLoading" element-loading-background="transparent">
 
-            <div class="stat-item" @click="switchTab('questionPacks')">
-                <div class="stat-icon qa-packs" style="background: rgba(155, 89, 182, 0.1); color: #9b59b6;"><i class="el-icon-chat-square"></i></div>
-                <div class="stat-content">
-                    <div class="stat-value">{{ stats.totalQuestionPacks }}</div>
-                    <div class="stat-label">Q&A Packs</div>
-                </div>
-            </div>
             <div class="stat-item" @click="switchTab('contentPacks')">
                 <div class="stat-icon content"><i class="el-icon-notebook-2"></i></div>
                 <div class="stat-content">
@@ -69,9 +61,6 @@
             <!-- Tab Navigation -->
             <div class="tab-navigation">
 
-                <div class="tab-btn" :class="{ active: activeTab === 'questionPacks' }" @click="switchTab('questionPacks')">
-                    <i class="el-icon-chat-square"></i> Q&A Packs
-                </div>
                 <div class="tab-btn" :class="{ active: activeTab === 'contentPacks' }" @click="switchTab('contentPacks')">
                     <i class="el-icon-notebook-2"></i> Content Packs
                 </div>
@@ -382,86 +371,6 @@
                             </div>
                         </template>
 
-                        <!-- Q&A Packs Tab (Grid View) -->
-                        <template v-if="activeTab === 'questionPacks'">
-                            <div class="section-header">
-                                <div class="section-info">
-                                    <h3 class="section-title">
-                                        <i class="el-icon-chat-square"></i> Q&A Packs
-                                        <el-tag size="mini" type="info" class="section-count">{{ questionPacksTotal }} total</el-tag>
-                                    </h3>
-                                    <p class="section-description">
-                                        Collections of AI prompts that form a structured conversation or game.
-                                        <el-tooltip content="Q&A Packs allow you to group multiple questions together. When a card is tapped, the system intelligently sequences through these questions." placement="top">
-                                            <i class="el-icon-question section-help"></i>
-                                        </el-tooltip>
-                                    </p>
-                                </div>
-                            </div>
-
-                            <div class="table_top_actions" style="margin-bottom: 20px; display: flex; justify-content: space-between;">
-                                <div>
-                                    <el-button size="mini" type="primary" class="select-all-btn" @click="handleSelectAllQuestionPacks(true)">
-                                        Select All
-                                    </el-button>
-                                    <el-button size="mini" type="success" icon="el-icon-plus" @click="showAddQuestionPackDialog">Create Pack</el-button>
-                                    <el-button size="mini" type="danger" icon="el-icon-delete" @click="deleteSelectedQuestionPacks">Delete Selected</el-button>
-                                </div>
-                            </div>
-
-                            <div v-loading="questionPacksLoading" class="pack-grid-container" element-loading-background="rgba(255, 255, 255, 0.5)">
-                                <div v-if="questionPacksList.length === 0 && !questionPacksLoading" class="empty-state">
-                                    <i class="el-icon-chat-square empty-icon" style="font-size: 48px; color: #ddd; margin-bottom: 10px;"></i>
-                                    <p style="color: #909399;">No Q&A Packs found</p>
-                                    <el-button type="text" @click="showAddQuestionPackDialog">Create your first pack</el-button>
-                                </div>
-
-                                <div v-else class="pack-grid">
-                                    <div v-for="pack in questionPacksList" :key="pack.id" class="pack-card" :class="{ selected: pack.selected }" @click="editQuestionPack(pack)">
-                                        <div class="pack-card-selection" @click.stop="">
-                                            <el-checkbox v-model="pack.selected"></el-checkbox>
-                                        </div>
-                                        <div class="pack-card-header">
-                                            <div class="pack-title-row">
-                                                <span class="pack-title" :title="pack.name">{{ pack.name }}</span>
-                                                <el-tag size="mini" :type="pack.active ? 'success' : 'info'" effect="dark">{{ pack.active ? 'Active' : 'Draft' }}</el-tag>
-                                            </div>
-                                            <div class="pack-code">{{ pack.packCode }}</div>
-                                        </div>
-                                        <div class="pack-card-body">
-                                            <div class="pack-desc">{{ pack.description || 'No description provided.' }}</div>
-                                            <div class="pack-metrics">
-                                                <el-tag size="mini" type="warning" effect="plain"><i class="el-icon-chat-dot-square"></i> {{ (pack.questionIds || []).length }} Qs</el-tag>
-                                                <el-tag size="mini" type="primary" effect="plain"><i class="el-icon-flag"></i> {{ pack.language }}</el-tag>
-                                                <el-tag size="mini" type="info" effect="plain" v-if="pack.category">{{ pack.category }}</el-tag>
-                                            </div>
-                                        </div>
-                                        <div class="pack-card-footer">
-                                            <div class="pack-version">v{{ pack.version }}</div>
-                                            <div class="pack-actions">
-                                                <el-button size="mini" icon="el-icon-edit" circle type="primary" plain @click.stop="editQuestionPack(pack)"></el-button>
-                                                <el-button size="mini" icon="el-icon-delete" circle type="danger" plain @click.stop="deleteQuestionPack(pack)"></el-button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="table_bottom">
-                                <div class="ctrl_btn"></div>
-                                <div class="custom-pagination">
-                                    <el-select v-model="questionPacksPageSize" @change="handleQuestionPacksPageSizeChange" class="page-size-select">
-                                        <el-option v-for="item in pageSizeOptions" :key="item" :label="`${item} items/page`" :value="item"></el-option>
-                                    </el-select>
-                                    <button class="pagination-btn" :disabled="questionPacksCurrentPage === 1" @click="goFirstQuestionPacks">First</button>
-                                    <button class="pagination-btn" :disabled="questionPacksCurrentPage === 1" @click="goPrevQuestionPacks">Previous</button>
-                                    <button v-for="page in questionPacksVisiblePages" :key="page" class="pagination-btn"
-                                        :class="{ active: page === questionPacksCurrentPage }" @click="goToQuestionPacksPage(page)">{{ page }}</button>
-                                    <button class="pagination-btn" :disabled="questionPacksCurrentPage === questionPacksPageCount" @click="goNextQuestionPacks">Next</button>
-                                    <span class="total-text">Total {{ questionPacksTotal }} records</span>
-                                </div>
-                            </div>
-                        </template>
 
                         <!-- Content Packs Tab (Grid View) -->
                         <template v-if="activeTab === 'contentPacks'">
@@ -518,6 +427,18 @@
                                         <div class="pack-card-selection" @click.stop="">
                                             <el-checkbox v-model="pack.selected"></el-checkbox>
                                         </div>
+                                        <!-- Card face: the pack's thumbnail shown like the physical RFID card -->
+                                        <div class="pack-visual">
+                                            <img
+                                                v-if="pack.thumbnailUrl && !pack._thumbError"
+                                                :src="pack.thumbnailUrl"
+                                                :alt="pack.name"
+                                                loading="lazy"
+                                                @error="onPackThumbError(pack)" />
+                                            <div v-else class="pack-visual-empty">
+                                                <i class="el-icon-notebook-2"></i>
+                                            </div>
+                                        </div>
                                         <div class="pack-card-header">
                                             <div class="pack-title-row">
                                                 <span class="pack-title" :title="pack.name">{{ pack.name }}</span>
@@ -528,10 +449,6 @@
                                         <div class="pack-card-body">
                                             <div class="pack-desc">{{ pack.description || 'No description provided.' }}</div>
                                             <div class="pack-metrics">
-                                                <el-tag size="mini" :type="pack.contentType === 'prompt' ? 'primary' : 'warning'" effect="plain">
-                                                    <i :class="pack.contentType === 'prompt' ? 'el-icon-chat-line-round' : 'el-icon-reading'"></i>
-                                                    {{ pack.contentType === 'prompt' ? 'AI' : 'TTS' }}
-                                                </el-tag>
                                                 <el-tag size="mini" type="info" effect="plain"><i class="el-icon-document"></i> {{ pack.totalItems || 0 }} Items</el-tag>
                                                 <el-tag size="mini" type="success" effect="plain"><i class="el-icon-flag"></i> {{ pack.language }}</el-tag>
                                             </div>
@@ -1122,14 +1039,6 @@
             @cancel="seriesDialogVisible = false"
         />
 
-        <RfidQuestionPackDialog
-            :title="questionPackDialogTitle"
-            :visible.sync="questionPackDialogVisible"
-            :form="questionPackForm"
-            :questions="questionsDropdown"
-            @submit="handleQuestionPackSubmit"
-            @cancel="questionPackDialogVisible = false"
-        />
 
         <el-footer>
             <version-footer />
@@ -1139,21 +1048,19 @@
 
 <script>
 import Api from "@/apis/api";
-import HeaderBar from "@/components/HeaderBar.vue";
 import VersionFooter from "@/components/VersionFooter.vue";
-import RfidQuestionDialog from "@/components/RfidQuestionDialog.vue";
 import RfidPackDialog from "@/components/RfidPackDialog.vue";
 import RfidCardDialog from "@/components/RfidCardDialog.vue";
 import RfidContentPackDialog from "@/components/RfidContentPackDialog.vue";
 import RfidSeriesDialog from "@/components/RfidSeriesDialog.vue";
-import RfidQuestionPackDialog from "@/components/RfidQuestionPackDialog.vue";
 import { contentTypeLabel } from "@/utils/contentTypes";
 
 export default {
-    components: { HeaderBar, VersionFooter, RfidQuestionDialog, RfidPackDialog, RfidCardDialog, RfidContentPackDialog, RfidSeriesDialog, RfidQuestionPackDialog },
+  name: 'RfidManagement',
+    components: { VersionFooter, RfidPackDialog, RfidCardDialog, RfidContentPackDialog, RfidSeriesDialog },
     data() {
         return {
-            activeTab: 'questionPacks',
+            activeTab: 'contentPacks',
             searchKeyword: '',
             pageSizeOptions: [10, 20, 50, 100],
 
@@ -1231,16 +1138,6 @@ export default {
             contentPackDialogTitle: 'Add Content Pack',
             contentPackForm: { id: null, packCode: '', name: '', description: '', thumbnailUrl: '', contentType: 'story_pack', language: 'en', status: 'draft', version: 1, items: [], active: true },
 
-            // Question Packs (NEW)
-            questionPacksList: [],
-            questionPacksLoading: false,
-            questionPacksCurrentPage: 1,
-            questionPacksPageSize: 10,
-            questionPacksTotal: 0,
-            isAllQuestionPacksSelected: false,
-            questionPackDialogVisible: false,
-            questionPackDialogTitle: 'Add Q&A Pack',
-            questionPackForm: { id: null, packCode: '', name: '', description: '', questionIds: [], language: 'en', category: '', status: 'draft', version: 1, active: true },
 
             // Card Tap Analytics
             cardTapLogsList: [],
@@ -1312,13 +1209,38 @@ export default {
         };
     },
     beforeDestroy() {
+        if (this._statsRefreshTimer) clearTimeout(this._statsRefreshTimer);
         this.disconnectNfc();
     },
     created() {
 
-        this.fetchQuestionPacks();
         this.loadDropdownData();
         this.loadStats();
+        this._rfidEverActivated = false;
+        // Deep link: /rfid-management/cards opens straight on the cards tab
+        const initialTab = this.$route.params.tab;
+        if (initialTab && this.isValidTab(initialTab)) {
+            this.switchTab(initialTab);
+        } else {
+            this.switchTab('contentPacks');
+        }
+    },
+    watch: {
+        '$route'(to) {
+            const tab = to.params.tab;
+            if (tab && tab !== this.activeTab && this.isValidTab(tab)) {
+                this.switchTab(tab);
+            }
+        }
+    },
+    activated() {
+        // keep-alive fires activated right after the first mount too — skip that
+        // one (created already loaded the default tab); refresh on re-entry only
+        if (!this._rfidEverActivated) {
+            this._rfidEverActivated = true;
+            return;
+        }
+        this.fetchActiveTabList();
     },
     computed: {
         // Content type filter options, built from the types actually in use so a
@@ -1368,13 +1290,6 @@ export default {
         seriesVisiblePages() {
             return this.getVisiblePages(this.seriesCurrentPage, this.seriesPageCount);
         },
-        // Question Packs pagination (NEW)
-        questionPacksPageCount() {
-            return Math.ceil(this.questionPacksTotal / this.questionPacksPageSize);
-        },
-        questionPacksVisiblePages() {
-            return this.getVisiblePages(this.questionPacksCurrentPage, this.questionPacksPageCount);
-        },
         // Card Tap Analytics pagination
         cardTapPageCount() {
             return Math.ceil(this.cardTapTotal / this.cardTapPageSize);
@@ -1406,6 +1321,11 @@ export default {
             event.target.style.display = 'none';
         },
 
+        // Broken pack thumbnail → fall back to the placeholder icon
+        onPackThumbError(pack) {
+            this.$set(pack, '_thumbError', true);
+        },
+
         switchTab(tab) {
             this.activeTab = tab;
             this.searchKeyword = '';
@@ -1415,10 +1335,32 @@ export default {
             else if (tab === 'cards') this.fetchCards();
             else if (tab === 'contentPacks') { this.fetchContentPacks(); this.loadContentPackTypes(); }
             else if (tab === 'series') this.fetchSeries();
-            else if (tab === 'questionPacks') this.fetchQuestionPacks();
             else if (tab === 'aiCards') this.fetchAiCards();
             else if (tab === 'cardAnalytics') this.fetchCardTapAnalytics();
             else if (tab === 'customCards') this.fetchCustomCardsTab();
+            // Deep-linkable tabs: keep the URL on the active tab so browser
+            // back/forward and shared links land on the same view
+            const target = `/rfid-management/${tab}`;
+            if (this.$route.path !== target) {
+                this.$router.push(target).catch(() => {});
+            }
+        },
+
+        // Refresh whichever tab is currently shown (used on keep-alive re-entry)
+        fetchActiveTabList() {
+            const tab = this.activeTab;
+            if (tab === 'questions') this.fetchQuestions();
+            else if (tab === 'packs') this.fetchPacks();
+            else if (tab === 'cards') this.fetchCards();
+            else if (tab === 'contentPacks') this.fetchContentPacks();
+            else if (tab === 'series') this.fetchSeries();
+            else if (tab === 'aiCards') this.fetchAiCards();
+            else if (tab === 'cardAnalytics') this.fetchCardTapAnalytics();
+            else if (tab === 'customCards') this.fetchCustomCardsTab();
+        },
+
+        isValidTab(tab) {
+            return ['contentPacks', 'packs', 'cards', 'aiCards', 'customCards', 'series', 'cardAnalytics', 'console', 'questions'].includes(tab);
         },
 
         // ── Custom Cards ────────────────────────────────────────────────────
@@ -1528,9 +1470,6 @@ export default {
             } else if (this.activeTab === 'series') {
                 this.seriesCurrentPage = 1;
                 this.fetchSeries();
-            } else if (this.activeTab === 'questionPacks') {
-                this.questionPacksCurrentPage = 1;
-                this.fetchQuestionPacks();
             } else if (this.activeTab === 'aiCards') {
                 this.aiCardsCurrentPage = 1;
                 this.fetchAiCards();
@@ -1540,27 +1479,46 @@ export default {
             }
         },
 
-        loadDropdownData() {
-            Api.rfid.getQuestionList(({ data }) => {
-                if (data.code === 0) {
-                    this.questionsDropdown = data.data || [];
-                }
-            });
-            Api.rfid.getPackList(({ data }) => {
-                if (data.code === 0) {
-                    this.packsDropdown = data.data || [];
-                }
-            });
-            Api.rfid.getContentPackList(({ data }) => {
-                if (data.code === 0) {
-                    this.contentPacksDropdown = data.data || [];
-                }
-            });
-            Api.rfid.getQuestionPackList(({ data }) => {
-                if (data.code === 0) {
-                    this.questionPacksDropdown = data.data || [];
-                }
-            });
+        // keys: subset of ['questions','packs','contentPacks','questionPacks'] to refresh;
+        // omit to refresh all four (initial load). Mutations refresh only what they touched.
+        loadDropdownData(keys = ['questions', 'packs', 'contentPacks', 'questionPacks']) {
+            if (keys.includes('questions')) {
+                Api.rfid.getQuestionList(({ data }) => {
+                    if (data.code === 0) {
+                        this.questionsDropdown = data.data || [];
+                    }
+                });
+            }
+            if (keys.includes('packs')) {
+                Api.rfid.getPackList(({ data }) => {
+                    if (data.code === 0) {
+                        this.packsDropdown = data.data || [];
+                    }
+                });
+            }
+            if (keys.includes('contentPacks')) {
+                Api.rfid.getContentPackList(({ data }) => {
+                    if (data.code === 0) {
+                        this.contentPacksDropdown = data.data || [];
+                    }
+                });
+            }
+            if (keys.includes('questionPacks')) {
+                Api.rfid.getQuestionPackList(({ data }) => {
+                    if (data.code === 0) {
+                        this.questionPacksDropdown = data.data || [];
+                    }
+                });
+            }
+        },
+
+        scheduleStatsRefresh() {
+            // Coalesce bursts of mutations (batch deletes etc.) into one refresh
+            if (this._statsRefreshTimer) clearTimeout(this._statsRefreshTimer);
+            this._statsRefreshTimer = setTimeout(() => {
+                this._statsRefreshTimer = null;
+                this.loadStats();
+            }, 1200);
         },
 
         loadStats() {
@@ -1568,30 +1526,18 @@ export default {
             let completed = 0;
             const checkDone = () => {
                 completed++;
-                if (completed >= 7) this.statsLoading = false;
+                if (completed >= 2) this.statsLoading = false;
             };
-            Api.rfid.getQuestionPackPage({ page: 1, limit: 1 }, ({ data }) => {
-                if (data.code === 0) this.stats.totalQuestionPacks = data.data.total || 0;
-                checkDone();
-            });
-            Api.rfid.getContentPackPage({ page: 1, limit: 1 }, ({ data }) => {
-                if (data.code === 0) this.stats.totalContentPacks = data.data.total || 0;
-                checkDone();
-            });
-            Api.rfid.getPackPage({ page: 1, limit: 1 }, ({ data }) => {
-                if (data.code === 0) this.stats.totalProductSkus = data.data.total || 0;
-                checkDone();
-            });
-            Api.rfid.getCardPage({ page: 1, limit: 1 }, ({ data }) => {
-                if (data.code === 0) this.stats.totalCards = data.data.total || 0;
-                checkDone();
-            });
-            Api.rfid.getSeriesPage({ page: 1, limit: 1 }, ({ data }) => {
-                if (data.code === 0) this.stats.totalSeries = data.data.total || 0;
-                checkDone();
-            });
-            Api.rfid.getCardPage({ page: 1, limit: 1, cardType: 'ai' }, ({ data }) => {
-                if (data.code === 0) this.stats.totalAiCards = data.data.total || 0;
+            // One aggregate call replaces the six page:1,limit:1 probes
+            Api.rfid.getRfidStatsOverview(({ data }) => {
+                if (data.code === 0 && data.data) {
+                    this.stats.totalQuestionPacks = data.data.totalQuestionPacks || 0;
+                    this.stats.totalContentPacks = data.data.totalContentPacks || 0;
+                    this.stats.totalProductSkus = data.data.totalProductSkus || 0;
+                    this.stats.totalCards = data.data.totalCards || 0;
+                    this.stats.totalSeries = data.data.totalSeries || 0;
+                    this.stats.totalAiCards = data.data.totalAiCards || 0;
+                }
                 checkDone();
             });
             Api.rfid.getCardTapSummary({}, ({ data }) => {
@@ -1749,8 +1695,8 @@ export default {
                     this.$message.success(form.id ? 'Updated successfully' : 'Added successfully');
                     this.questionDialogVisible = false;
                     this.fetchQuestions();
-                    this.loadDropdownData();
-                    this.loadStats();
+                    this.loadDropdownData(['questions']);
+                    this.scheduleStatsRefresh();
                 } else {
                     this.$message.error(data.msg || 'Operation failed');
                 }
@@ -1769,8 +1715,8 @@ export default {
                     if (data.code === 0) {
                         this.$message.success('Deleted successfully');
                         this.fetchQuestions();
-                        this.loadDropdownData();
-                        this.loadStats();
+                        this.loadDropdownData(['questions']);
+                        this.scheduleStatsRefresh();
                     } else {
                         this.$message.error(data.msg || 'Delete failed');
                     }
@@ -1840,8 +1786,8 @@ export default {
                     this.$message.success(form.id ? 'Updated successfully' : 'Added successfully');
                     this.packDialogVisible = false;
                     this.fetchPacks();
-                    this.loadDropdownData();
-                    this.loadStats();
+                    this.loadDropdownData(['packs']);
+                    this.scheduleStatsRefresh();
                 } else {
                     this.$message.error(data.msg || 'Operation failed');
                 }
@@ -1860,8 +1806,8 @@ export default {
                     if (data.code === 0) {
                         this.$message.success('Deleted successfully');
                         this.fetchPacks();
-                        this.loadDropdownData();
-                        this.loadStats();
+                        this.loadDropdownData(['packs']);
+                        this.scheduleStatsRefresh();
                     } else {
                         this.$message.error(data.msg || 'Delete failed');
                     }
@@ -1964,7 +1910,7 @@ export default {
                     this.cardDialogVisible = false;
                     this.fetchCards();
                     if (this.activeTab === 'aiCards') this.fetchAiCards();
-                    this.loadStats();
+                    this.scheduleStatsRefresh();
                 } else {
                     this.$message.error(data.msg || 'Operation failed');
                 }
@@ -1983,7 +1929,7 @@ export default {
                     if (data.code === 0) {
                         this.$message.success('Deleted successfully');
                         this.fetchCards();
-                        this.loadStats();
+                        this.scheduleStatsRefresh();
                     } else {
                         this.$message.error(data.msg || 'Delete failed');
                     }
@@ -2052,7 +1998,7 @@ export default {
                     if (data.code === 0) {
                         this.$message.success('Deleted successfully');
                         this.fetchAiCards();
-                        this.loadStats();
+                        this.scheduleStatsRefresh();
                     } else {
                         this.$message.error(data.msg || 'Delete failed');
                     }
@@ -2156,8 +2102,8 @@ export default {
                     this.contentPackDialogVisible = false;
                     this.fetchContentPacks();
                     this.loadContentPackTypes();
-                    this.loadDropdownData();
-                    this.loadStats();
+                    this.loadDropdownData(['contentPacks']);
+                    this.scheduleStatsRefresh();
                 } else {
                     this.$message.error(data.msg || 'Operation failed');
                 }
@@ -2176,8 +2122,8 @@ export default {
                     if (data.code === 0) {
                         this.$message.success('Deleted successfully');
                         this.fetchContentPacks();
-                        this.loadDropdownData();
-                        this.loadStats();
+                        this.loadDropdownData(['contentPacks']);
+                        this.scheduleStatsRefresh();
                     } else {
                         this.$message.error(data.msg || 'Delete failed');
                     }
@@ -2246,7 +2192,7 @@ export default {
                     this.$message.success(form.id ? 'Updated successfully' : 'Added successfully');
                     this.seriesDialogVisible = false;
                     this.fetchSeries();
-                    this.loadStats();
+                    this.scheduleStatsRefresh();
                 } else {
                     this.$message.error(data.msg || 'Operation failed');
                 }
@@ -2265,7 +2211,7 @@ export default {
                     if (data.code === 0) {
                         this.$message.success('Deleted successfully');
                         this.fetchSeries();
-                        this.loadStats();
+                        this.scheduleStatsRefresh();
                     } else {
                         this.$message.error(data.msg || 'Delete failed');
                     }
@@ -2282,166 +2228,6 @@ export default {
             this.deleteSeries(selected);
         },
 
-        // ==================== QUESTION PACKS (NEW) ====================
-        fetchQuestionPacks() {
-            this.questionPacksLoading = true;
-            Api.rfid.getQuestionPackPage({
-                page: this.questionPacksCurrentPage,
-                limit: this.questionPacksPageSize,
-                name: this.searchKeyword
-            }, ({ data }) => {
-                this.questionPacksLoading = false;
-                if (data.code === 0) {
-                    this.questionPacksList = data.data.list.map(p => ({ ...p, selected: false }));
-                    this.questionPacksTotal = data.data.total;
-                }
-            });
-        },
-
-        handleQuestionPacksPageSizeChange(val) {
-            this.questionPacksPageSize = val;
-            this.fetchQuestionPacks();
-        },
-
-        goFirstQuestionPacks() {
-            this.questionPacksCurrentPage = 1;
-            this.fetchQuestionPacks();
-        },
-
-        goPrevQuestionPacks() {
-            if (this.questionPacksCurrentPage > 1) {
-                this.questionPacksCurrentPage--;
-                this.fetchQuestionPacks();
-            }
-        },
-
-        goToQuestionPacksPage(page) {
-            this.questionPacksCurrentPage = page;
-            this.fetchQuestionPacks();
-        },
-
-        goNextQuestionPacks() {
-            if (this.questionPacksCurrentPage < Math.ceil(this.questionPacksTotal / this.questionPacksPageSize)) {
-                this.questionPacksCurrentPage++;
-                this.fetchQuestionPacks();
-            }
-        },
-
-        handleSelectAllQuestionPacks(val) {
-            this.isAllQuestionPacksSelected = val;
-            this.questionPacksList.forEach(item => item.selected = val);
-        },
-
-        showAddQuestionPackDialog() {
-            this.questionPackDialogTitle = 'Add Q&A Pack';
-            this.questionPackForm = { id: null, packCode: '', name: '', description: '', questionIds: [], questions: [], language: 'en', category: '', status: 'draft', version: 1, active: true };
-            this.questionPackDialogVisible = true;
-        },
-
-        editQuestionPack(row) {
-            this.questionPackDialogTitle = 'Edit Q&A Pack';
-            // Ensure questionIds is array
-            const form = { ...row };
-            if (!form.questionIds) form.questionIds = [];
-            this.questionPackForm = form;
-            this.questionPackDialogVisible = true;
-        },
-
-        handleQuestionPackSubmit({ form, questionsToProcess, done }) {
-            const processQuestions = () => {
-                if (!questionsToProcess || questionsToProcess.length === 0) {
-                    return Promise.resolve();
-                }
-                const promises = questionsToProcess.map((q, index) => {
-                    return new Promise((resolve) => {
-                        if (q.id) {
-                            // Update existing
-                            Api.rfid.updateQuestion(q, ({ data }) => {
-                               if(data.code !== 0) {
-                                   console.error(`Failed to update question ${q.id}: ${data.msg}`);
-                               }
-                               resolve(q.id);
-                            });
-                        } else {
-                            // Create new
-                            const newQ = {
-                                ...q,
-                                title: q.promptText ? q.promptText.substring(0, 50) : 'New Question',
-                                code: `Q_${Date.now()}_${index}`, // Generate temp code
-                                active: true,
-                                language: form.language,
-                                difficulty: 3,
-                                allowCaching: true
-                            };
-                            Api.rfid.addQuestion(newQ, ({ data }) => {
-                                if (data.code === 0 && data.data) {
-                                    resolve(data.data.id || data.data); // Assuming data returns ID or object
-                                } else {
-                                    console.error(`Failed to create question: ${data.msg}`);
-                                    resolve(null);
-                                }
-                            });
-                        }
-                    });
-                });
-                return Promise.all(promises);
-            };
-
-            processQuestions().then((ids) => {
-                // ids contains updated IDs and new IDs. Filter nulls.
-                // We need to preserve the order if possible, or just gather all valid IDs.
-                // form.questionIds currently has existing IDs, but we want the list in questionsToProcess order.
-                
-                const validIds = ids.filter(id => !!id);
-                if (validIds.length > 0) {
-                    form.questionIds = validIds;
-                }
-
-                const api = form.id ? Api.rfid.updateQuestionPack : Api.rfid.addQuestionPack;
-                api(form, ({ data }) => {
-                    done && done();
-                    if (data.code === 0) {
-                        this.$message.success(form.id ? 'Updated successfully' : 'Created successfully');
-                        this.questionPackDialogVisible = false;
-                        this.fetchQuestionPacks();
-                        this.loadStats();
-                        this.loadDropdownData();
-                    } else {
-                        this.$message.error(data.msg || 'Operation failed');
-                    }
-                });
-            });
-        },
-
-        deleteQuestionPack(row) {
-            const items = Array.isArray(row) ? row : [row];
-            if (items.length === 0) return;
-            this.$confirm(`Delete ${items.length} question packs?`, 'Warning', {
-                confirmButtonText: 'Confirm',
-                cancelButtonText: 'Cancel',
-                type: 'warning'
-            }).then(() => {
-                Api.rfid.deleteQuestionPack(items.map(i => i.id), ({ data }) => {
-                    if (data.code === 0) {
-                        this.$message.success('Deleted successfully');
-                        this.fetchQuestionPacks();
-                        this.loadStats();
-                        this.loadDropdownData();
-                    } else {
-                        this.$message.error(data.msg || 'Delete failed');
-                    }
-                });
-            }).catch(() => {});
-        },
-
-        deleteSelectedQuestionPacks() {
-            const selected = this.questionPacksList.filter(r => r.selected);
-            if (selected.length === 0) {
-                this.$message.warning('Please select items to delete');
-                return;
-            }
-            this.deleteQuestionPack(selected);
-        },
 
         // ==================== CARD TAP ANALYTICS ====================
         buildCardTapSearchParams() {
@@ -2732,7 +2518,7 @@ export default {
                     this.$message.success(`Card ${newUid} mapped successfully`);
                     this.nfcNewCardUid = '';
                     this.loadLinkedCards();
-                    this.loadStats();
+                    this.scheduleStatsRefresh();
                 } else if (data.msg && data.msg.includes('already exists')) {
                     // Card exists with different content — update it
                     Api.rfid.getCardByUid(newUid, ({ data: uidData }) => {
@@ -2743,7 +2529,7 @@ export default {
                                     this.$message.success(`Card ${newUid} remapped to this content`);
                                     this.nfcNewCardUid = '';
                                     this.loadLinkedCards();
-                                    this.loadStats();
+                                    this.scheduleStatsRefresh();
                                 } else {
                                     this.$message.error(upData.msg || 'Failed to update card');
                                 }
@@ -2772,7 +2558,7 @@ export default {
                     if (data.code === 0) {
                         this.$message.success('Card removed');
                         this.loadLinkedCards();
-                        this.loadStats();
+                        this.scheduleStatsRefresh();
                     } else {
                         this.$message.error(data.msg || 'Failed to remove card');
                     }
@@ -2904,7 +2690,6 @@ export default {
 
 <style lang="scss" scoped>
 .welcome {
-    min-width: 900px;
     min-height: 100vh;
     display: flex;
     position: relative;
@@ -2931,6 +2716,8 @@ export default {
     justify-content: space-between;
     align-items: center;
     padding: 16px 24px;
+    flex-wrap: wrap;
+    gap: 10px;
 }
 
 .page-title {
@@ -2959,6 +2746,8 @@ export default {
     gap: 12px;
     padding: 12px 24px;
     background: transparent;
+    // Mobile: tab pills scroll sideways instead of wrapping into a blob
+    overflow-x: auto;
 }
 
 .tab-btn {
@@ -3214,10 +3003,12 @@ export default {
     gap: 16px;
     padding: 0 24px 8px;
     min-height: 64px;
+    // Mobile: the KPI strip scrolls sideways instead of squeezing
+    overflow-x: auto;
 }
 
 .stat-item {
-    flex: 1;
+    flex: 1 0 120px;
     display: flex;
     align-items: center;
     gap: 12px;
@@ -3944,7 +3735,7 @@ export default {
 }
 .pack-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
     gap: 24px;
     padding-bottom: 20px;
 }
@@ -3960,6 +3751,34 @@ export default {
     overflow: hidden;
     cursor: pointer;
     height: 100%;
+}
+
+/* Card face — the pack thumbnail rendered like the physical RFID card
+   (standard card ratio 85.6:54 ≈ 1.585) */
+.pack-visual {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 85.6 / 54;
+    background: linear-gradient(135deg, #fdf3e7, #f7e8d2);
+    overflow: hidden;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.pack-visual img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.pack-visual-empty {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #dcb98a;
+    font-size: 30px;
 }
 .pack-card:hover {
     transform: translateY(-4px);

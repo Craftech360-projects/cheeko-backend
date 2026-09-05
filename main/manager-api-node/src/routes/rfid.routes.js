@@ -353,6 +353,17 @@ router.get('/card/tap-logs',
 );
 
 /**
+ * One-call stats overview for the dashboard KPI strip (packs, cards, series counts).
+ */
+router.get('/stats/overview',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const result = await rfidService.getRfidStatsOverview();
+    success(res, result);
+  })
+);
+
+/**
  * Get aggregated card tap analytics summary.
  */
 router.get('/card/tap-analytics/summary',

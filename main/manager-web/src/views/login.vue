@@ -198,7 +198,8 @@ export default {
       Api.user.login(this.form, ({ data }) => {
         showSuccess('Login successful!');
         this.$store.commit('setToken', JSON.stringify(data.data));
-        goToPage('/home');
+        // Super admins land on the Overview dashboard; regular users on agents
+        goToPage(data.data && data.data.superAdmin === 1 ? '/overview' : '/home');
       }, (err) => {
         showDanger(err.data.msg || 'Login failed')
         if (err.data != null && err.data.msg != null && err.data.msg.indexOf('verification code') > -1) {
@@ -217,8 +218,7 @@ export default {
     },
     goToForgetPassword() {
       goToPage('/retrieve-password')
-    },
-  }
+    } }
 }
 </script>
 <style lang="scss" scoped>

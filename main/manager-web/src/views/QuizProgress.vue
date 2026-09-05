@@ -1,6 +1,5 @@
 <template>
   <div class="quiz-progress">
-    <HeaderBar />
     <el-main class="main-content">
       <div class="page-header">
         <h1>{{ bankLabel }} Progress</h1>
@@ -224,11 +223,10 @@
 
 <script>
 import Api from '@/apis/api';
-import HeaderBar from '@/components/HeaderBar.vue';
 
 export default {
   name: 'QuizProgress',
-  components: { HeaderBar },
+  components: { },
   data() {
     return {
       rows: [],

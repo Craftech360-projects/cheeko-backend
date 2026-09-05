@@ -9,6 +9,7 @@
 
 const { Prisma } = require('@prisma/client');
 const { prisma } = require('../config/database');
+const { ApiError } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
 const { normalizeMacAddress, packCodeForKid } = require('../utils/helpers');
 const { resolveRuntimeAgentName } = require('./character-resolver');
@@ -3085,6 +3086,37 @@ const getCardTapLogs = async ({ page = 1, limit = 50, mac, uid, cardType, update
  * @param {Object} filters - summary filters
  * @returns {Promise<Object>} analytics summary
  */
+/**
+ * One-call stats overview for the admin dashboard KPI strip.
+ * Replaces the six page:1,limit:1 probe calls the UI used to make.
+ */
+const getRfidStatsOverview = async () => {
+  const [
+    totalQuestionPacks,
+    totalContentPacks,
+    totalProductSkus,
+    totalCards,
+    totalSeries,
+    totalAiCards
+  ] = await Promise.all([
+    prisma.rfid_question_pack.count(),
+    prisma.rfid_content_pack.count(),
+    prisma.rfid_pack.count(),
+    prisma.rfid_card_mapping.count(),
+    prisma.rfid_series.count(),
+    prisma.rfid_card_mapping.count({ where: { card_type: 'ai' } })
+  ]);
+
+  return {
+    totalQuestionPacks,
+    totalContentPacks,
+    totalProductSkus,
+    totalCards,
+    totalSeries,
+    totalAiCards
+  };
+};
+
 const getCardTapAnalyticsSummary = async ({ mac, uid, cardType, updateRequired, recognized, dateFrom, dateTo } = {}) => {
   const { startDate, endDate } = buildSummaryDateRange({ dateFrom, dateTo });
   const baseWhere = buildCardTapWhere({ mac, uid, cardType, updateRequired, recognized }, false);
@@ -4173,8 +4205,9 @@ const updateContentPack = async (data, userId) => {
   }
   if (data.status !== undefined) updateData.status = data.status;
 
+  let updated;
   try {
-    await prisma.rfid_content_pack.updateMany({
+    updated = await prisma.rfid_content_pack.updateMany({
       where: { id: BigInt(data.id) },
       data: updateData
     });
@@ -4184,6 +4217,15 @@ const updateContentPack = async (data, userId) => {
       throw new Error('Content pack with this code already exists');
     }
     throw new Error('Failed to update content pack');
+  }
+
+  // updateMany matches zero rows without complaining, so an id that does not
+  // exist used to fall straight through to a 200 — and, worse, on to the item
+  // write below, which would delete and reinsert content_item rows against a
+  // pack that isn't there. The admin UI never hit this because it only sends
+  // ids it just listed; API and MCP callers can send anything.
+  if (updated.count === 0) {
+    throw new ApiError(`Content pack ${data.id} not found`, 404);
   }
 
   // Update Items (Delete All + Re-insert) — only if items array is provided
@@ -4856,6 +4898,7 @@ module.exports = {
   updatePack,
   deletePack,
   deletePacks,
+  getRfidStatsOverview,
 
   // Question management
   getQuestionPage,

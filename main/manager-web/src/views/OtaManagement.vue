@@ -1,6 +1,5 @@
 <template>
     <div class="welcome">
-        <HeaderBar />
 
         <div class="operation-bar">
             <h2 class="page-title">Firmware Management</h2>
@@ -145,12 +144,12 @@
 <script>
 import Api from "@/apis/api";
 import FirmwareDialog from "@/components/FirmwareDialog.vue";
-import HeaderBar from "@/components/HeaderBar.vue";
 import VersionFooter from "@/components/VersionFooter.vue";
 import { formatDate, formatFileSize } from "@/utils/format";
 
 export default {
-    components: { HeaderBar, FirmwareDialog, VersionFooter },
+  name: 'OtaManagement',
+    components: { FirmwareDialog, VersionFooter },
     data() {
         return {
             searchName: "",
@@ -206,8 +205,7 @@ export default {
                 pages.push(i);
             }
             return pages;
-        },
-    },
+        } },
     methods: {
         handlePageSizeChange(val) {
             this.pageSize = val;
@@ -535,13 +533,11 @@ export default {
             }
             return 'Enable to force all devices to this version (including downgrades)';
         }
-    },
-};
+    } };
 </script>
 
 <style lang="scss" scoped>
 .welcome {
-    min-width: 900px;
     min-height: 506px;
     height: 100vh;
     display: flex;

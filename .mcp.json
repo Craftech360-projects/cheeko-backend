@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "cheeko-dev": {
+      "command": "node",
+      "args": [
+        "main/manager-api-node/mcp/cheeko-mcp.mjs"
+      ],
+      "env": {
+        "CHEEKO_API": "${CHEEKO_DEV_API:-http://localhost:8002/toy}",
+        "SERVICE_SECRET_KEY": "${CHEEKO_DEV_SERVICE_KEY}",
+        "ALLOW_WRITES": "1",
+        "CHEEKO_USER_TOKEN": "${CHEEKO_DEV_USER_TOKEN}"
+      }
+    }
+  }
+}

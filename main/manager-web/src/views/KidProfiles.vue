@@ -1,6 +1,5 @@
 <template>
   <div class="kid-profiles-container">
-    <header-bar />
     <div class="main-content">
       <div class="page-header">
         <h2>Kid Profiles</h2>
@@ -58,7 +57,11 @@
         </el-table-column>
       </el-table>
 
-      <div v-if="kidProfiles.length === 0 && !loading" class="empty-state">
+      <div v-if="noContext" class="empty-state">
+        <i class="el-icon-info"></i>
+        <p>Kid profiles are per family or per device. Open a family from <b>Families → Users</b>, or a device from <b>Operate → Devices</b>, then choose "Kid Profile".</p>
+      </div>
+      <div v-else-if="kidProfiles.length === 0 && !loading" class="empty-state">
         <i class="el-icon-user"></i>
         <p>No kid profiles yet. Click "Add Kid Profile" to create one.</p>
       </div>
@@ -135,15 +138,15 @@
 
 <script>
 import Api from '@/apis/api'
-import HeaderBar from '@/components/HeaderBar.vue'
 import VersionFooter from '@/components/VersionFooter.vue'
 
 export default {
   name: 'KidProfiles',
-  components: { HeaderBar, VersionFooter },
+  components: { VersionFooter },
   data() {
     return {
       loading: false,
+      noContext: false,
       submitting: false,
       kidProfiles: [],
       dialogVisible: false,
@@ -181,6 +184,13 @@ export default {
   },
   methods: {
     loadKidProfiles() {
+      // Opened with no context (e.g. straight from the sidebar menu): the
+      // parent-app endpoint would 401 for an admin session — guide instead.
+      if (!this.userId && !this.deviceId && !this.macAddress) {
+        this.loading = false
+        this.noContext = true
+        return
+      }
       this.loading = true
 
       // If userId is provided (admin mode), use admin API to get that user's kid profiles

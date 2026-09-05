@@ -817,7 +817,8 @@ const getAllDevices = async ({ page = 1, limit = 10, keywords = '' } = {}) => {
           user_id: true,
           alias: true,
           kid_id: true,
-          device_mode: true
+          device_mode: true,
+          mode: true
         },
         orderBy: { create_date: 'desc' },
         skip: offset,
@@ -853,6 +854,7 @@ const getAllDevices = async ({ page = 1, limit = 10, keywords = '' } = {}) => {
       kidId: device.kid_id, // Include kid_id for kid profile navigation
       alias: device.alias, // Include alias for display/edit
       deviceMode: device.device_mode || 'manual', // Include device mode (auto/manual)
+      activeMode: device.mode || 'conversation', // Live mode so the UI doesn't fetch it per device
       bindUserName: device.user_id ? (userMap[device.user_id] || null) : null,
       autoUpdate: device.auto_update, // Also include as autoUpdate for frontend
       otaUpgrade: device.auto_update,

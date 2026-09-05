@@ -829,6 +829,22 @@ export default {
     },
 
     // Get card tap analytics summary
+    getRfidStatsOverview(callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/rfid/stats/overview`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to get rfid stats overview:', err)
+                RequestService.reAjaxFun(() => {
+                    this.getRfidStatsOverview(callback)
+                })
+            }).send()
+    },
+
     getCardTapSummary(params, callback) {
         const queryParams = new URLSearchParams({
             mac: params.mac || '',

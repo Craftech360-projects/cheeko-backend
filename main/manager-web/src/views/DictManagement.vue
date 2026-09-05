@@ -1,6 +1,5 @@
 <template>
     <div class="welcome">
-        <HeaderBar />
 
         <div class="operation-bar">
             <h2 class="page-title">Dictionary Management</h2>
@@ -128,12 +127,10 @@
 import dictApi from '@/apis/module/dict'
 import DictDataDialog from '@/components/DictDataDialog.vue'
 import DictTypeDialog from '@/components/DictTypeDialog.vue'
-import HeaderBar from '@/components/HeaderBar.vue'
 import VersionFooter from '@/components/VersionFooter.vue'
 export default {
     name: 'DictManagement',
     components: {
-        HeaderBar,
         DictTypeDialog,
         DictDataDialog,
         VersionFooter
@@ -411,7 +408,6 @@ export default {
 @import '@/styles/theme.scss';
 
 .welcome {
-    min-width: 900px;
     min-height: 506px;
     height: 100vh;
     display: flex;

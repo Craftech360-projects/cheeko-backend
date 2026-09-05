@@ -1,5 +1,6 @@
 import { getServiceUrl } from '../api';
 import RequestService from '../httpRequest';
+import { showDanger } from '../../utils/index';
 
 
 export default {
@@ -549,6 +550,179 @@ export default {
                             totalSessions: 0
                         }
                     }
+                })
+            }).send();
+    },
+
+    // Founder dashboard — Morning Pulse overview (KPIs, time split, leaderboards)
+    getFounderOverview(range, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/founder/overview?range=${encodeURIComponent(range || '7d')}`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to get founder overview:', err)
+                RequestService.reAjaxFun(() => {
+                    this.getFounderOverview(range, callback)
+                })
+            }).send();
+    },
+
+    // Light live count of toys connected in the last 5 minutes
+    getActiveNow(callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/stats/active`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to get active count:', err)
+                RequestService.reAjaxFun(() => {
+                    this.getActiveNow(callback)
+                })
+            }).send();
+    },
+
+    // Founder dashboard — fleet & ops (watchlist drives the "needs attention" strip)
+    getFounderOperate(callback) {        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/founder/operate`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to get founder operate data:', err)
+                RequestService.reAjaxFun(() => {
+                    this.getFounderOperate(callback)
+                })
+            }).send();
+    },
+
+    // Family 360 — unified search across kids, parents and devices
+    searchFamilies(query, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/founder/families/search?q=${encodeURIComponent(query || '')}`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to search families:', err)
+                RequestService.reAjaxFun(() => {
+                    this.searchFamilies(query, callback)
+                })
+            }).send();
+    },
+
+    // Family 360 — paged list of all families (one row per kid)
+    listFamilies(page, limit, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/founder/families/list?page=${page || 1}&limit=${limit || 50}`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to list families:', err)
+                RequestService.reAjaxFun(() => {
+                    this.listFamilies(page, limit, callback)
+                })
+            }).send();
+    },
+
+    // Family 360 — one-call profile aggregator (kid + parent + devices + usage)
+    getFamilyProfile(macOrKidId, callback, failCallback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/founder/families/${encodeURIComponent(macOrKidId)}/profile`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .fail((err) => {
+                if (failCallback) failCallback(err)
+                else showDanger((err.data && err.data.msg) || 'Failed to load family profile')
+            })
+            .networkFail((err) => {
+                console.error('Failed to get family profile:', err)
+                RequestService.reAjaxFun(() => {
+                    this.getFamilyProfile(macOrKidId, callback, failCallback)
+                })
+            }).send();
+    },
+
+    // Costs dashboard — ₹ KPIs, daily spend, token mix, top toys by spend
+    getFounderCosts(range, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/founder/costs?range=${encodeURIComponent(range || 'month')}`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to get costs data:', err)
+                RequestService.reAjaxFun(() => {
+                    this.getFounderCosts(range, callback)
+                })
+            }).send();
+    },
+
+    // Engagement dashboard — DAU/WAU/stickiness, heatmap, quiet devices
+    getFounderEngagement(range, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/founder/engagement?range=${encodeURIComponent(range || '30d')}`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to get engagement data:', err)
+                RequestService.reAjaxFun(() => {
+                    this.getFounderEngagement(range, callback)
+                })
+            }).send();
+    },
+
+    // Conversations dashboard — talk KPIs, topics, summarised sessions
+    getFounderConversations(range, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/founder/conversations?range=${encodeURIComponent(range || '7d')}`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to get conversations data:', err)
+                RequestService.reAjaxFun(() => {
+                    this.getFounderConversations(range, callback)
+                })
+            }).send();
+    },
+
+    // Full transcript lines for one summarised session
+    getConversationTranscript(sessionId, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/founder/conversations/${encodeURIComponent(sessionId)}/transcript`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to get transcript:', err)
+                RequestService.reAjaxFun(() => {
+                    this.getConversationTranscript(sessionId, callback)
                 })
             }).send();
     }

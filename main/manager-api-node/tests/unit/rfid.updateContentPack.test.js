@@ -49,6 +49,8 @@ beforeEach(() => {
   // back empty, which is the normal first-write case.
   mockPrisma.$queryRaw.mockResolvedValue([]);
   mockPrisma.$transaction.mockImplementation(async (fn) => fn(mockTx));
+  // The pack row exists, so the header update matches it.
+  mockPrisma.rfid_content_pack.updateMany.mockResolvedValue({ count: 1 });
 });
 
 describe('updateContentPack item write', () => {
@@ -126,5 +128,31 @@ describe('updateContentPack item write', () => {
     await rfidService.updateContentPack({ id: PACK_ID, items: ITEMS }, 1);
 
     expect(mockTx.content_item.createMany).toHaveBeenCalled();
+  });
+});
+
+/**
+ * updateMany reports success when it matches nothing, so a PUT for an id that
+ * does not exist used to answer {code:0} having changed nothing — and then run
+ * the item write anyway, deleting and reinserting content_item rows against a
+ * pack that isn't there. The admin UI never hit it (it only sends ids it just
+ * listed); API and MCP callers can send anything.
+ */
+describe('updateContentPack on an id that does not exist', () => {
+  beforeEach(() => {
+    mockPrisma.rfid_content_pack.updateMany.mockResolvedValue({ count: 0 });
+  });
+
+  it('throws 404 instead of reporting success', async () => {
+    await expect(rfidService.updateContentPack({ id: 999999, name: 'nope' }, 1))
+      .rejects.toMatchObject({ statusCode: 404 });
+  });
+
+  it('does not touch content_item', async () => {
+    await expect(rfidService.updateContentPack({ id: 999999, items: ITEMS }, 1)).rejects.toThrow();
+
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    expect(mockTx.content_item.deleteMany).not.toHaveBeenCalled();
+    expect(mockTx.content_item.createMany).not.toHaveBeenCalled();
   });
 });

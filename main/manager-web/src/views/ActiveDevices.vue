@@ -1,6 +1,5 @@
 <template>
   <div class="active-devices">
-    <HeaderBar />
     <el-main class="main-content">
       <!-- Page Title -->
       <div class="page-header">
@@ -217,11 +216,10 @@
 
 <script>
 import Api from '@/apis/api';
-import HeaderBar from '@/components/HeaderBar.vue';
 
 export default {
   name: 'ActiveDevices',
-  components: { HeaderBar },
+  components: { },
   data() {
     return {
       isLoading: false,

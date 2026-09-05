@@ -1,6 +1,5 @@
 <template>
   <div class="welcome">
-    <HeaderBar />
 
     <div class="main-wrapper">
       <div class="content-panel">
@@ -103,11 +102,10 @@
 
 <script>
 import Api from "@/apis/api";
-import HeaderBar from "@/components/HeaderBar.vue";
 
 export default {
   name: "RoleConfigPage",
-  components: { HeaderBar },
+  components: { },
   data() {
     return {
       form: {
@@ -127,13 +125,10 @@ export default {
           llmModelId: "",
           vllmModelId: "",
           memModelId: "Memory_mem_local_short",
-          intentModelId: "",
-        },
-      },
+          intentModelId: "" } },
       templates: [],
       loadingTemplate: false,
-      selectedTemplate: null,
-    };
+      selectedTemplate: null };
   },
   methods: {
     goToHome() {
@@ -161,8 +156,7 @@ export default {
         summaryMemory: this.form.summaryMemory,
         langCode: this.form.langCode,
         language: this.form.language,
-        sort: this.form.sort,
-      };
+        sort: this.form.sort };
 
       Api.agent.updateAgentConfig(
         this.$route.query.agentId,
@@ -183,8 +177,7 @@ export default {
         {
           confirmButtonText: "Reset",
           cancelButtonText: "Cancel",
-          type: "warning",
-        }
+          type: "warning" }
       )
         .then(() => {
           // Reload from server
@@ -223,8 +216,7 @@ export default {
           llmModelId: template.llmModelId || this.form.model.llmModelId,
           vllmModelId: template.vllmModelId || this.form.model.vllmModelId,
           memModelId: template.memModelId || this.form.model.memModelId,
-          intentModelId: template.intentModelId || this.form.model.intentModelId,
-        };
+          intentModelId: template.intentModelId || this.form.model.intentModelId };
 
         this.$message.success(`Template "${template.agentName}" applied`);
       } catch (error) {
@@ -247,23 +239,19 @@ export default {
               llmModelId: data.data.llmModelId,
               vllmModelId: data.data.vllmModelId,
               memModelId: data.data.memModelId,
-              intentModelId: data.data.intentModelId,
-            },
-          };
+              intentModelId: data.data.intentModelId } };
         } else {
           this.$message.error(data.msg || "Failed to load configuration");
         }
       });
-    },
-  },
+    } },
   mounted() {
     const agentId = this.$route.query.agentId;
     if (agentId) {
       this.fetchAgentConfig(agentId);
     }
     this.fetchTemplates();
-  },
-};
+  } };
 </script>
 
 <style scoped lang="scss">
