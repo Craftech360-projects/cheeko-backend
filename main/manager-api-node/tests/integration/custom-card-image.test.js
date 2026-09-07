@@ -28,6 +28,14 @@ jest.mock('../../src/middleware/firebaseAuth', () => ({
 
 // Only the ffmpeg conversion is stubbed. toDeviceFrame is pure and is what
 // decides whether an upload is a pre-packed panel frame, so it stays real.
+// The MP3 fixture below is a magic-byte header, not a real recording, and these
+// tests are about routes, multipart and versioning rather than encoding. The
+// converter runs against real ffmpeg in tests/unit/customCard.audio.test.js.
+jest.mock('../../src/utils/audioTranscode', () => ({
+  ...jest.requireActual('../../src/utils/audioTranscode'),
+  toDeviceMp3: jest.fn(async (buffer) => ({ buffer, durationMs: 3000 }))
+}));
+
 jest.mock('../../src/utils/lvglImage', () => ({
   ...jest.requireActual('../../src/utils/lvglImage'),
   toLvglRgb565Bin: jest.fn(async () => Buffer.alloc(12)),
