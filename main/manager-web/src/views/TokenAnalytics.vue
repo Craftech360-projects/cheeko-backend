@@ -273,9 +273,9 @@
           <span>Daily Usage Summary</span>
         </div>
         <ListToolbar
-          :count="dailySummary.length"
+          :count="visibleRows.length"
           count-noun="days"
-          :total="dailySummary.length"
+          :total="visibleRows.length"
           :sort-options="sortOptions"
           :sort-by.sync="sortBy"
           :sort-dir.sync="sortDir"
@@ -420,7 +420,6 @@ export default {
         { label: 'Cost', value: 'cost_inr' },
         { label: 'Devices', value: 'unique_devices' }
       ],
-      groupOptions: [{ label: 'None', value: '' }],
 
       isLoading: false,
       dateRange: this.getDefaultDateRange(),

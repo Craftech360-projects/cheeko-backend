@@ -15,8 +15,6 @@
       :sort-options="sortOptions"
       :sort-by.sync="sortBy"
       :sort-dir.sync="sortDir"
-      :group-options="groupOptions"
-      :group-by.sync="groupBy"
       :selecting.sync="selecting"
       :selected-count="selectedCount"
       :all-selected="isAllSelected"
@@ -202,10 +200,6 @@ export default {
         { label: 'User name', value: 'mobile' },
         { label: 'User ID', value: 'userid' },
         { label: 'Device count', value: 'deviceCount' },
-        { label: 'Status', value: 'status' }
-      ],
-      groupOptions: [
-        { label: 'None', value: '' },
         { label: 'Status', value: 'status' }
       ],
       filterStatus: '',

@@ -1,5 +1,5 @@
 /**
- * Sort · View · Select behaviour shared by every list screen.
+ * Search · Sort · View · Select behaviour shared by every list screen.
  *
  * A view opts in with:
  *
@@ -23,9 +23,6 @@ export default {
       sortBy: '',
       sortDir: 'desc',
 
-      groupOptions: [],
-      groupBy: '',
-
       views: [{ label: 'Table', value: 'table' }],
       view: 'table',
 
@@ -46,7 +43,7 @@ export default {
       return this.rows || [];
     },
 
-    /** Search → group → sort. The order matters: sorting a filtered set is cheaper. */
+    /** Search then sort. The order matters: sorting a filtered set is cheaper. */
     visibleRows() {
       let out = this.sourceRows.slice();
 
@@ -60,11 +57,6 @@ export default {
 
       if (this.sortBy) {
         out.sort((a, b) => this.compareRows(a, b, this.sortBy, this.sortDir));
-      }
-
-      if (this.groupBy) {
-        // Grouping is a secondary sort: rows stay sorted inside each group.
-        out.sort((a, b) => this.compareRows(a, b, this.groupBy, 'asc'));
       }
 
       return out;

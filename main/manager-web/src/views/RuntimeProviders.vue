@@ -66,9 +66,9 @@
                   <span class="tab-count">{{ providerCount(type.value) }}</span>
                 </span>
                 <ListToolbar
-                  :count="(providers[type.value] || []).length"
+                  :count="visibleProviders(type.value).length"
                   count-noun="providers"
-                  :total="(providers[type.value] || []).length"
+                  :total="visibleProviders(type.value).length"
                   :sort-options="sortOptions"
                   :sort-by.sync="sortBy"
                   :sort-dir.sync="sortDir"

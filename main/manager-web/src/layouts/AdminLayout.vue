@@ -337,7 +337,7 @@ export default {
   display: block;
   max-width: 100%;
   width: auto;
-  height: 28px;
+  height: 40px;
   object-fit: contain;
 }
 

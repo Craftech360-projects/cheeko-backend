@@ -12,9 +12,9 @@
         </div>
 
         <ListToolbar
-            :count="voicePrintList.length"
+            :count="visibleRows.length"
             count-noun="voice prints"
-            :total="voicePrintList.length"
+            :total="visibleRows.length"
             :sort-options="sortOptions"
             :sort-by.sync="sortBy"
             :sort-dir.sync="sortDir"

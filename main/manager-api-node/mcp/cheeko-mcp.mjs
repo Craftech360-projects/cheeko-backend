@@ -77,10 +77,16 @@ const MIME = {
 };
 
 /**
- * What to send for a local file. The pack upload endpoint stores bytes as-is,
- * and the toy only renders LVGL .bin, so PNG/JPEG default to converting —
- * except when the upload is a pack thumbnail (contentPackId set), which the
- * web dashboard shows and therefore wants as a real image.
+ * What to send for a local file. The toy only renders LVGL .bin, so PNG/JPEG
+ * default to converting — except when the upload is a pack thumbnail
+ * (contentPackId set), which the web dashboard shows and therefore wants as a
+ * real image.
+ *
+ * The pack upload endpoint now applies the same rule server-side with the same
+ * converter, so converting here is belt-and-braces: it keeps this server
+ * working against an older API, and a .bin the endpoint recognises is passed
+ * through rather than decoded twice. It does mean `convert: false` no longer
+ * gets a PNG stored as a PNG unless contentPackId is set.
  */
 export function uploadPlan(filePath, { convert, contentPackId } = {}) {
   const ext = path.extname(filePath).toLowerCase();
@@ -248,12 +254,12 @@ export function buildServer({ api, canWrite, hasUserToken = false }) {
     }, (data) => api('/admin/rfid/content-pack', { method: 'PUT', body: data }));
 
     server.registerTool('upload_pack_file', {
-      description: 'Upload a local audio, image or .bin file to the content CDN and return its URL for use in update_content_pack items. PNG/JPEG are converted to the LVGL .bin the toy renders unless convert=false or contentPackId is set (thumbnails stay real images).',
+      description: 'Upload a local audio, image or .bin file to the content CDN and return its URL for use in update_content_pack items. PNG/JPEG are converted to the LVGL .bin the toy renders; only a pack thumbnail (contentPackId set) stays a real image, because the API converts item artwork server-side as well.',
       inputSchema: z.object({
         path: z.string().describe('Absolute path on this machine'),
         category: z.string().optional().describe('CDN subfolder, e.g. the pack code. Default "uploads"'),
         contentPackId: z.number().int().optional().describe('Set to use this file as that pack\'s thumbnail'),
-        convert: z.boolean().optional().describe('Force PNG/JPEG -> .bin on or off')
+        convert: z.boolean().optional().describe('Convert PNG/JPEG -> .bin here rather than letting the API do it. Turning it off does not keep a PNG a PNG: the API converts item artwork too.')
       })
     }, async ({ path: filePath, category, contentPackId, convert }) => {
       const plan = uploadPlan(filePath, { convert, contentPackId });

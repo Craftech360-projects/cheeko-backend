@@ -19,12 +19,14 @@
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
+const path = require('path');
 const rfidService = require('../services/rfid.service');
 const bulkImportService = require('../services/bulkImport.service');
 const uploadService = require('../services/upload.service');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { requireAuth, requireAdmin } = require('../middleware/auth');
 const { success, badRequest, notFound } = require('../utils/response');
+const { toLvglRgb565Bin } = require('../utils/lvglImage');
 const logger = require('../utils/logger');
 
 const parseBoolQuery = (value) => {
@@ -72,6 +74,50 @@ const contentPackUpload = multer({
     }
   },
 });
+
+/**
+ * Is this buffer a web image the toy cannot render?
+ *
+ * Sniffed rather than read off the extension because the extension is whatever
+ * the admin's file happened to be called, and it is the bytes that decide
+ * whether ffmpeg has a picture to convert.
+ */
+const sniffWebImage = (buffer) => {
+  if (!buffer || buffer.length < 12) return false;
+  if (buffer.toString('hex', 0, 8) === '89504e470d0a1a0a') return true;             // PNG
+  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return true;  // JPEG
+  if (buffer.toString('ascii', 0, 4) === 'GIF8') return true;                       // GIF
+  if (buffer.toString('ascii', 0, 4) === 'RIFF'
+    && buffer.toString('ascii', 8, 12) === 'WEBP') return true;                     // WebP
+  return false;
+};
+
+/**
+ * Turn a picked picture into the artwork the toy actually draws.
+ *
+ * The firmware has no JPEG decoder and reads only pre-decoded LVGL RGB565
+ * frames (see utils/lvglImage), so a PNG stored as-is leaves the screen blank.
+ * Admins were running the firmware's converter by hand and uploading the .bin;
+ * doing it here means the file they picked is the file they upload.
+ *
+ * Two things are deliberately left alone: a .bin — or anything else that is not
+ * a web image — passes through untouched, so an already-converted upload is
+ * never decoded a second time, and a pack thumbnail is dashboard artwork rather
+ * than device artwork, so it stays a real image an <img> can show.
+ */
+const toDeviceArtwork = async (file, { isPackThumbnail }) => {
+  if (isPackThumbnail || !sniffWebImage(file.buffer)) {
+    return { buffer: file.buffer, filename: file.originalname, mimeType: file.mimetype };
+  }
+
+  const ext = path.extname(file.originalname || '');
+  const base = path.basename(file.originalname || 'image', ext);
+  return {
+    buffer: await toLvglRgb565Bin(file.buffer),
+    filename: `${base}.bin`,
+    mimeType: 'application/octet-stream'
+  };
+};
 
 // =============================================
 // Card Mapping Routes (PRD-specified)
@@ -3685,7 +3731,12 @@ router.get('/content-pack/code/:packCode',
  *   post:
  *     tags: [RFID Content Pack]
  *     summary: Upload content pack media file to S3/CDN
- *     description: Upload audio/image/bin file for content pack item and return CDN URL
+ *     description: |
+ *       Upload an audio/image/.bin file for a content pack item and return its CDN URL.
+ *       A PNG/JPEG/GIF/WebP is converted server-side to the LVGL RGB565 .bin the toy
+ *       renders and stored with a .bin extension; a file that is already a .bin is
+ *       stored untouched. A pack thumbnail (purpose=thumbnail, or contentPackId
+ *       set) stays a web image, because the dashboard shows it in an <img>.
  *     security:
  *       - bearerAuth: []
  *     requestBody:
@@ -3703,6 +3754,17 @@ router.get('/content-pack/code/:packCode',
  *               category:
  *                 type: string
  *                 description: Optional folder under rfidcontent (e.g., audio, images)
+ *               purpose:
+ *                 type: string
+ *                 enum: [thumbnail]
+ *                 description: >
+ *                   Send `thumbnail` for a pack's cover art so it is stored as a web
+ *                   image. Anything else is item artwork and is converted to .bin.
+ *               contentPackId:
+ *                 type: string
+ *                 description: >
+ *                   When set, the resulting URL is saved as this pack's thumbnail, and
+ *                   the upload is treated as a thumbnail.
  *     responses:
  *       200:
  *         description: Uploaded successfully
@@ -3718,19 +3780,42 @@ router.post('/content-pack/upload',
     }
 
     const category = req.body?.category || 'uploads';
+    const contentPackId = req.body?.contentPackId;
+
+    // Which picture this is, not which pack it belongs to. `contentPackId` was
+    // the first answer and was wrong: the dialog has no pack id until the pack
+    // is saved, so the cover art of a brand-new pack came through looking like
+    // item artwork and was converted to a .bin the preview <img> cannot show.
+    // It still counts, because an upload carrying one is stored as that pack's
+    // thumbnail below — but `purpose` is what a client should send.
+    const isPackThumbnail = req.body?.purpose === 'thumbnail' || Boolean(contentPackId);
+
+    let artwork;
+    try {
+      artwork = await toDeviceArtwork(req.file, { isPackThumbnail });
+    } catch (error) {
+      // A header that says PNG over a body that is not one. That is the admin's
+      // file being wrong, so it is a 400; ffmpeg missing or timing out is ours
+      // and stays a 500.
+      if (error.decodeFailed) {
+        logger.warn('RFID content pack image conversion failed:', { error: error.message });
+        return badRequest(res, 'That image could not be read. Please try a different PNG or JPEG.');
+      }
+      throw error;
+    }
 
     try {
       const result = await uploadService.uploadContentFile(
-        req.file.buffer,
-        req.file.originalname,
+        artwork.buffer,
+        artwork.filename,
         'rfidcontent',
         category,
-        req.file.mimetype
+        artwork.mimeType
       );
 
-      if (req.body?.contentPackId) {
+      if (contentPackId) {
         await rfidService.updateContentPack({
-          id: req.body.contentPackId,
+          id: contentPackId,
           thumbnailUrl: result.url
         }, req.user?.id);
       }

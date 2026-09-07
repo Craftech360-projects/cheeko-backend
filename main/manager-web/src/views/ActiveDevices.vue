@@ -21,14 +21,12 @@
       </div>
 
       <ListToolbar
-        :count="devices.length"
+        :count="visibleRows.length"
         count-noun="devices"
-        :total="devices.length"
+        :total="visibleRows.length"
         :sort-options="sortOptions"
         :sort-by.sync="sortBy"
         :sort-dir.sync="sortDir"
-        :group-options="groupOptions"
-        :group-by.sync="groupBy"
         :selecting.sync="selecting"
         :selected-count="selectedCount"
         :all-selected="allSelected"
@@ -247,10 +245,6 @@ export default {
         { label: 'Kid name', value: 'kid_name' },
         { label: 'Parent name', value: 'parent_name' },
         { label: 'MAC', value: 'mac_address' }
-      ],
-      groupOptions: [
-        { label: 'None', value: '' },
-        { label: 'Parent', value: 'parent_name' }
       ],
       searchFields: ['kid_name', 'parent_name', 'mac_address'],
       isLoading: false,

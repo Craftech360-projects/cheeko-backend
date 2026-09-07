@@ -62,8 +62,6 @@
           :sort-options="sortOptions"
           :sort-by.sync="sortBy"
           :sort-dir.sync="sortDir"
-          :group-options="groupOptions"
-          :group-by.sync="groupBy"
           :selecting.sync="selecting"
           :selected-count="selectedCount"
           :all-selected="allSelected"
@@ -273,10 +271,6 @@ export default {
         { label: 'Agent name', value: 'agentName' },
         { label: 'Owner', value: 'ownerUsername' },
         { label: 'Devices', value: 'deviceCount' }
-      ],
-      groupOptions: [
-        { label: 'None', value: '' },
-        { label: 'Owner', value: 'ownerUsername' }
       ],
       searchFields: ['agentName', 'ownerUsername', 'parentName', 'parentEmail', 'parentPhone'],
       addDeviceDialogVisible: false,

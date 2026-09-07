@@ -35,15 +35,26 @@
         </el-form-item>
 
         <el-form-item label="Thumbnail Url" prop="thumbnailUrl" class="form-item">
-          <el-input v-model="form.thumbnailUrl" placeholder="https://..." class="custom-input">
-            <template slot="append">
-              <el-button
-                icon="el-icon-upload2"
-                :loading="uploadingMedia"
-                @click="pickPackThumbnailFile"
-              ></el-button>
-            </template>
-          </el-input>
+          <div class="thumbnail-field">
+            <el-input v-model="form.thumbnailUrl" placeholder="https://..." class="custom-input">
+              <template slot="append">
+                <el-button
+                  icon="el-icon-upload2"
+                  :loading="uploadingMedia"
+                  @click="pickPackThumbnailFile"
+                ></el-button>
+              </template>
+            </el-input>
+            <div v-if="form.thumbnailUrl" class="thumbnail-preview-box">
+              <img v-if="!thumbnailPreviewError"
+                   :src="form.thumbnailUrl"
+                   alt="Thumbnail preview"
+                   @error="thumbnailPreviewError = true"/>
+              <div v-else class="thumbnail-preview-error">
+                <i class="el-icon-picture-outline"></i>
+              </div>
+            </div>
+          </div>
         </el-form-item>
 
         <el-form-item label="Content Type" prop="contentType" class="form-item">
@@ -358,6 +369,7 @@ export default {
       storyMode: false,
       stories: [],  // [{title: '', items: [{title, audioUrl, imageUrl, text}]}]
       pendingUpload: null, // { mode: 'flat'|'story'|'packThumbnail', storyIndex, itemIndex, field: 'audioUrl'|'imageUrl'|'thumbnailUrl' }
+      thumbnailPreviewError: false,
       uploadingMedia: false,
       importing: false,
       importDone: 0,
@@ -607,7 +619,11 @@ export default {
       await this.uploadFileToS3(file, 'image');
       event.target.value = '';
     },
-    async uploadOne(file, category, contentPackId) {
+    // `purpose` is 'thumbnail' for the pack's cover art and absent for item
+    // artwork. The API converts item pictures to the LVGL .bin the toy draws,
+    // and the cover is shown in an <img> here, so it has to say which it is —
+    // contentPackId cannot stand in for it, being null until the pack is saved.
+    async uploadOne(file, category, { contentPackId, purpose } = {}) {
       const token = this.getAuthToken();
       if (!token) {
         throw new Error('Authentication token missing. Please login again.');
@@ -619,6 +635,9 @@ export default {
       formData.append('category', category);
       if (contentPackId) {
         formData.append('contentPackId', contentPackId);
+      }
+      if (purpose) {
+        formData.append('purpose', purpose);
       }
 
       const response = await fetch(`${Api.getServiceUrl()}/admin/rfid/content-pack/upload`, {
@@ -652,14 +671,17 @@ export default {
         return;
       }
 
-      const packId = this.pendingUpload.mode === 'packThumbnail' ? this.form.id : null;
+      const isPackThumbnail = this.pendingUpload.mode === 'packThumbnail';
 
       this.uploadingMedia = true;
       try {
         targetItem[this.pendingUpload.field] = await this.uploadOne(
           file,
           type === 'audio' ? 'audio' : 'images',
-          packId
+          {
+            contentPackId: isPackThumbnail ? this.form.id : null,
+            purpose: isPackThumbnail ? 'thumbnail' : undefined
+          }
         );
         this.$message.success(`${type === 'audio' ? 'Audio' : 'Image'} uploaded successfully.`);
       } catch (error) {
@@ -1025,6 +1047,10 @@ export default {
     }
   },
   watch: {
+    'form.thumbnailUrl'() {
+      // A new URL deserves a fresh load attempt, not the previous one's error state
+      this.thumbnailPreviewError = false;
+    },
     visible(newVal) {
       if (newVal) {
         this.dialogKey = Date.now();
@@ -1263,6 +1289,38 @@ export default {
       margin-top: 8px;
 
       :deep(.el-input) { flex: 1; min-width: 0; }
+    }
+
+    .thumbnail-field {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+
+      :deep(.el-input) { flex: 1; min-width: 0; }
+    }
+
+    .thumbnail-preview-box {
+      width: 60px;
+      height: 60px;
+      border-radius: $radius-md;
+      border: 1px solid $border-color;
+      background: $surface-sunk;
+      flex-shrink: 0;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+
+      img {
+        max-width: 100%;
+        max-height: 100%;
+        object-fit: contain;
+      }
+
+      .thumbnail-preview-error {
+        color: $text-light;
+        font-size: 20px;
+      }
     }
 
     .custom-input,

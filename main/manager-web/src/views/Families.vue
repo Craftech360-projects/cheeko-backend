@@ -17,8 +17,6 @@
       :sort-options="sortOptions"
       :sort-by.sync="sortBy"
       :sort-dir.sync="sortDir"
-      :group-options="groupOptions"
-      :group-by.sync="groupBy"
       :views="views"
       :view.sync="view"
       :selecting.sync="selecting"
@@ -198,11 +196,6 @@ export default {
         { label: 'Grade', value: 'grade' },
         { label: 'Toys', value: 'pairedDeviceCount' },
         { label: 'Household toys', value: 'deviceCount' }
-      ],
-      groupOptions: [
-        { label: 'None', value: '' },
-        { label: 'Grade', value: 'grade' },
-        { label: 'Parent', value: 'parentName' }
       ],
       views: [
         { label: 'Table', value: 'table' },
