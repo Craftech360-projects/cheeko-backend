@@ -1,6 +1,6 @@
 <template>
   <el-dialog :title="title" :visible.sync="dialogVisible" :close-on-click-modal="dismissOnBackdrop"
-    @open="markPristine" @close="handleClose" @open="handleOpen">
+    @open="markPristine(); handleOpen()" @close="handleClose">
     <el-form ref="form" :model="form" :rules="rules" label-width="120px">
       <el-form-item label="Firmware Name" prop="firmwareName">
         <el-input v-model="form.firmwareName" placeholder="Enter firmware name (board + version)"></el-input>
