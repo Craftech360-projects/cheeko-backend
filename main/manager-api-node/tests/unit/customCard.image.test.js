@@ -11,6 +11,17 @@ const zlib = require('zlib');
 // The conversion shells out to ffmpeg. The wiring tests below care about which
 // URL lands on which item, not about pixels, so they run against a stub; the
 // converter itself is exercised for real further down.
+// Conversion shells out to ffmpeg, and the audio fixtures below are magic-byte
+// headers rather than real recordings. These tests care about which bytes land
+// on which item, not about encoding; the converter itself is exercised for real
+// in customCard.audio.test.js.
+const CONVERTED_AUDIO = Buffer.alloc(2048, 0x11);
+const CONVERTED_MS = 4200;
+jest.mock('../../src/utils/audioTranscode', () => ({
+  ...jest.requireActual('../../src/utils/audioTranscode'),
+  toDeviceMp3: jest.fn(async () => ({ buffer: Buffer.alloc(2048, 0x11), durationMs: 4200 }))
+}));
+
 jest.mock('../../src/utils/lvglImage', () => ({
   ...jest.requireActual('../../src/utils/lvglImage'),
   toLvglRgb565Bin: jest.fn(async () => Buffer.alloc(12))

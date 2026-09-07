@@ -15,6 +15,17 @@
 const path = require('path');
 const { LVGL_FRAME_BYTES, RAW_FRAME_BYTES } = jest.requireActual('../../src/utils/lvglImage');
 
+// Conversion shells out to ffmpeg, and the audio fixtures below are magic-byte
+// headers rather than real recordings. These tests care about which bytes land
+// on which item, not about encoding; the converter itself is exercised for real
+// in customCard.audio.test.js.
+const CONVERTED_AUDIO = Buffer.alloc(2048, 0x11);
+const CONVERTED_MS = 4200;
+jest.mock('../../src/utils/audioTranscode', () => ({
+  ...jest.requireActual('../../src/utils/audioTranscode'),
+  toDeviceMp3: jest.fn(async () => ({ buffer: Buffer.alloc(2048, 0x11), durationMs: 4200 }))
+}));
+
 jest.mock('../../src/utils/lvglImage', () => ({
   ...jest.requireActual('../../src/utils/lvglImage'),
   // PATCH never converts, so reaching ffmpeg at all is the failure this catches.
@@ -259,19 +270,27 @@ describe('an audio-only edit', () => {
     expect(mockUpload.deleteCustomCardObject).toHaveBeenCalledWith(AUDIO_KEY);
   });
 
-  it('records the new size and leaves the title alone', async () => {
+  it('records the converted size and running time, and leaves the title alone', async () => {
     await patch({ audioFile: MP3('some-other-name.mp3') });
 
-    expect(Number(itemOne().audio_size_bytes)).toBe(MP3().buffer.length);
+    // The stored file is the conversion, not the upload, so the size that goes
+    // in the row is the converted one — the upload's length is not persisted
+    // anywhere and an app showing it would be describing a file nobody holds.
+    expect(Number(itemOne().audio_size_bytes)).toBe(CONVERTED_AUDIO.length);
+    expect(Number(itemOne().audio_size_bytes)).not.toBe(MP3().buffer.length);
+    expect(Number(itemOne().audio_duration_ms)).toBe(CONVERTED_MS);
     // The parent owns the title now. Replacing the audio must not silently
     // rename the recording after the file that happened to carry it.
     expect(itemOne().title).toBe('Bedtime story');
   });
 
-  it('retires the old recording when the format changes the key', async () => {
+  it('stores a WAV upload as an MP3, and retires the object it replaces', async () => {
     await patch({ audioFile: WAV() });
 
-    expect(itemOne().audio_url).toBe(`${CDN}/customcard_kid42/audio-2.wav`);
+    // A `.wav` URL here would be the bug: the bytes are an MP3 after conversion,
+    // and the toy picks its decoder off the name it downloads.
+    expect(itemOne().audio_url).toBe(`${CDN}/customcard_kid42/audio-2.mp3`);
+    expect(mockUpload.uploadCustomCardAudio.mock.calls[0][3]).toBe('audio/mpeg');
     expect(mockUpload.deleteCustomCardObject).toHaveBeenCalledWith(AUDIO_KEY);
   });
 

@@ -29,6 +29,14 @@ jest.mock('../../src/middleware/firebaseAuth', () => ({
 
 // Only the ffmpeg conversion is stubbed; toDeviceFrame decides whether an upload
 // is a pre-packed panel frame and is pure, so it stays real.
+// The MP3 fixture below is a magic-byte header, not a real recording, and these
+// tests are about routes, multipart and versioning rather than encoding. The
+// converter runs against real ffmpeg in tests/unit/customCard.audio.test.js.
+jest.mock('../../src/utils/audioTranscode', () => ({
+  ...jest.requireActual('../../src/utils/audioTranscode'),
+  toDeviceMp3: jest.fn(async (buffer) => ({ buffer, durationMs: 3000 }))
+}));
+
 jest.mock('../../src/utils/lvglImage', () => ({
   ...jest.requireActual('../../src/utils/lvglImage'),
   toLvglRgb565Bin: jest.fn(async () => Buffer.alloc(12)),
@@ -207,8 +215,12 @@ describe('the multipart parts', () => {
     expect(res.status).toBe(200);
     expect(item()).toEqual(expect.objectContaining({
       title: 'All three',
-      audio_url: AUDIO_URL,   // overwritten in place
-      image_url: IMAGE_URL,
+      // Both objects take a fresh key. A stable URL was the bug: same pack, same
+      // item, same URL gave no client any way to tell the recording had changed
+      // — see the unit suite's "takes a fresh key, so the URL itself carries the
+      // change".
+      audio_url: 'https://cdn.test/customcard_kid42/audio-new.mp3',
+      image_url: 'https://cdn.test/customcard_kid42/image-new.bin',
     }));
     // One request, one bump.
     expect(res.body.data.contentPack.version).toBe('5');
