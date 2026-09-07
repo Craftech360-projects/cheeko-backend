@@ -4,7 +4,9 @@
     width="520px"
     class="rfid-dialog-wrapper"
     :append-to-body="true"
-    :close-on-click-modal="false"
+    :close-on-click-modal="dismissOnBackdrop"
+    @open="markPristine"
+    @close="cancel"
     :key="dialogKey"
     custom-class="custom-rfid-dialog"
     :show-close="false"
@@ -133,16 +135,14 @@
       />
 
       <div class="dialog-footer">
+        <el-button size="small" @click="cancel">Cancel</el-button>
         <el-button
+          size="small"
           type="primary"
-          @click="submit"
-          class="save-btn"
           :loading="saving"
-          :disabled="saving">
+          :disabled="saving"
+          @click="submit">
           Save
-        </el-button>
-        <el-button @click="cancel" class="cancel-btn">
-          Cancel
         </el-button>
       </div>
     </div>
@@ -151,8 +151,10 @@
 
 <script>
 import Api from "@/apis/api";
+import dialogDismiss from '@/mixins/dialogDismiss';
 
 export default {
+  mixins: [dialogDismiss],
   props: {
     title: {
       type: String,
@@ -375,26 +377,30 @@ export default {
 </script>
 
 <style>
+
+/* Dialog chrome. Not scoped: el-dialog mounts on body. Shared verbatim by
+   every RFID dialog so the overlay reads the same wherever it opens. */
 .custom-rfid-dialog {
-  border-radius: 16px !important;
+  border-radius: 10px !important;
   overflow: hidden;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15) !important;
-  border: none !important;
+  border: 1px solid var(--border-color) !important;
+  box-shadow: var(--shadow-overlay) !important;
 }
 .custom-rfid-dialog .el-dialog__header {
   display: none;
 }
 .custom-rfid-dialog .el-dialog__body {
   padding: 0 !important;
-  border-radius: 16px;
 }
 </style>
 
 <style scoped lang="scss">
+@import '@/styles/theme.scss';
+
 .rfid-dialog-wrapper {
   .dialog-container {
     padding: 24px 32px;
-    background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+    background: $surface;
   }
 
   .dialog-header {
@@ -405,7 +411,7 @@ export default {
 
   .dialog-title {
     font-size: 20px;
-    color: #1e293b;
+    color: $text-dark;
     margin: 0;
     padding: 0;
     font-weight: 600;
@@ -419,8 +425,8 @@ export default {
     height: 32px;
     border-radius: 50%;
     border: none;
-    background: #f1f5f9;
-    color: #64748b;
+    background: $divider-color;
+    color: $text-gray;
     cursor: pointer;
     display: flex;
     align-items: center;
@@ -431,7 +437,7 @@ export default {
 
     &:hover {
       color: #ffffff;
-      background: #ef4444;
+      background: $danger;
       transform: rotate(90deg);
     }
   }
@@ -441,13 +447,13 @@ export default {
       margin-bottom: 20px;
 
       :deep(.el-form-item__label) {
-        color: #475569;
+        color: $text-body;
         font-weight: 500;
         font-size: 14px;
       }
     .field-hint {
         font-size: 12px;
-        color: #94a3b8;
+        color: $text-light;
         margin-top: 4px;
     }
     }
@@ -456,14 +462,14 @@ export default {
       :deep(.el-input__inner) {
         background-color: #ffffff;
         border-radius: 8px;
-        border: 1px solid #e2e8f0;
+        border: 1px solid $border-color;
         height: 42px;
         font-size: 14px;
-        color: #334155;
+        color: $text-body;
 
         &:focus {
-          border-color: #3b82f6;
-          box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+          border-color: $text-light;
+          box-shadow: none;
         }
       }
     }
@@ -474,14 +480,14 @@ export default {
       :deep(.el-input__inner) {
         background-color: #ffffff;
         border-radius: 8px;
-        border: 1px solid #e2e8f0;
+        border: 1px solid $border-color;
         height: 42px;
         font-size: 14px;
-        color: #334155;
+        color: $text-body;
 
         &:focus {
-          border-color: #3b82f6;
-          box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+          border-color: $text-light;
+          box-shadow: none;
         }
       }
     }
@@ -490,14 +496,14 @@ export default {
       :deep(.el-textarea__inner) {
         background-color: #ffffff;
         border-radius: 8px;
-        border: 1px solid #e2e8f0;
+        border: 1px solid $border-color;
         padding: 12px 14px;
         font-size: 14px;
-        color: #334155;
+        color: $text-body;
 
         &:focus {
-          border-color: #3b82f6;
-          box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+          border-color: $text-light;
+          box-shadow: none;
         }
       }
     }
@@ -505,40 +511,11 @@ export default {
 
   .dialog-footer {
     display: flex;
-    justify-content: center;
-    padding: 16px 0 0;
-    margin-top: 16px;
-
-    .save-btn {
-      width: 120px;
-      height: 42px;
-      font-size: 14px;
-      font-weight: 500;
-      border-radius: 8px;
-      background: #3b82f6;
-      color: white;
-      border: none;
-
-      &:hover {
-        background: #2563eb;
-      }
-    }
-
-    .cancel-btn {
-      width: 120px;
-      height: 42px;
-      font-size: 14px;
-      font-weight: 500;
-      border-radius: 8px;
-      background: #ffffff;
-      color: #64748b;
-      border: 1px solid #e2e8f0;
-      margin-left: 16px;
-
-      &:hover {
-        background: #f8fafc;
-      }
-    }
+    justify-content: flex-end;
+    gap: 8px;
+    padding-top: 18px;
+    margin-top: 22px;
+    border-top: 1px solid $border-color;
   }
 }
 
@@ -548,7 +525,7 @@ export default {
   margin-top: 5px;
 }
 .type-option {
-  border: 1px solid #dcdfe6;
+  border: 1px solid $border-color;
   border-radius: 6px;
   padding: 10px 16px;
   cursor: pointer;
@@ -556,19 +533,19 @@ export default {
   align-items: center;
   gap: 8px;
   transition: all 0.2s;
-  color: #606266;
+  color: $text-body;
   background: #fff;
   flex: 1;
   justify-content: center;
 }
 .type-option:hover {
-  color: #409eff;
-  border-color: #c6e2ff;
+  color: $info;
+  border-color: $text-light;
 }
 .type-option.active {
-  color: #409eff;
-  border-color: #409eff;
-  background: #ecf5ff;
+  color: $info;
+  border-color: $info;
+  background: $row-selected;
   font-weight: 500;
 }
 .type-option i {
@@ -579,7 +556,7 @@ export default {
   margin-top: 10px;
   width: 96px;
   height: 72px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid $border-color;
   border-radius: 6px;
   background: #ffffff;
   overflow: hidden;

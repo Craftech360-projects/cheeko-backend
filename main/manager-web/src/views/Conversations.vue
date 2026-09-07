@@ -2,7 +2,7 @@
   <div class="conversations-page">
     <div class="page-head">
       <div>
-        <h2 class="page-title">Conversations</h2>
+        <h1 class="page-title">Conversations</h1>
         <p class="page-subtitle">What kids talk about, with summarised sessions · first names only</p>
       </div>
       <el-radio-group v-model="range" size="small" @change="load">
@@ -86,7 +86,7 @@
           <template v-if="transcript">
             <p class="transcript-headline">{{ transcript.headline }}</p>
             <div class="transcript-lines">
-              <div v-for="(line, i) in transcript.lines" :key="i" class="line" :class="line.speaker === 'Cheeko' ? 'cheeko' : 'kid'">
+              <div v-for="(line, i) in transcript.lines" :key="i" class="line" :class="line.role === 'assistant' ? 'agent' : 'kid'">
                 <span class="line-speaker">{{ line.speaker }}</span>
                 <span class="line-text">{{ line.text }}</span>
               </div>
@@ -177,14 +177,21 @@ export default {
 
 .page-title {
   margin: 0;
-  font-size: 20px;
+  font-family: $font-display;
+  font-size: 34px;
+  font-weight: 400;
+  line-height: 1.05;
+  letter-spacing: -0.025em;
   color: $text-dark;
+
 }
 
 .page-subtitle {
-  margin: 2px 0 0;
-  font-size: 12px;
+  margin: 7px 0 0;
+  font-size: 13px;
   color: $text-gray;
+  max-width: 62ch;
+
 }
 
 .kpi-row {
@@ -195,19 +202,23 @@ export default {
 }
 
 .card {
-  background: #fff;
+  background: $surface;
   border: 1px solid $border-color;
-  border-radius: 12px;
-  padding: 14px 16px;
-  box-shadow: 0 4px 14px rgba(61, 69, 102, 0.05);
+  border-radius: $radius-lg;
+  padding: 22px 24px;
+  box-shadow: none;
   min-width: 0;
+
 }
 
 .kpi-value {
-  font-size: 20px;
-  font-weight: 700;
+  font-family: $font-display;
+  font-size: 40px;
+  font-weight: 400;
+  line-height: 1;
+  letter-spacing: -0.03em;
   color: $text-dark;
-  font-variant-numeric: tabular-nums;
+
 
   &.muted-val {
     font-size: 14px;
@@ -217,23 +228,30 @@ export default {
 }
 
 .kpi-unit {
-  font-size: 13px;
+  font-size: 16px;
   color: $text-gray;
-  font-weight: 500;
+  letter-spacing: 0;
+  margin-left: 4px;
+
 }
 
 .kpi-delta {
   font-size: 11px;
   font-weight: 600;
 
-  &.good { color: #006300; }
-  &.bad { color: #d03b3b; }
+  &.good { color: $success; }
+  &.bad { color: $danger; }
 }
 
 .kpi-label {
-  font-size: 11px;
-  color: $text-gray;
-  margin-top: 2px;
+  font-family: $font-mono;
+  font-size: 9.5px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.11em;
+  color: $text-light;
+  margin-top: 10px;
+
 }
 
 .two-col {
@@ -244,9 +262,11 @@ export default {
 }
 
 .card-subtitle {
-  margin: 0 0 10px;
-  font-size: 13px;
+  margin: 0 0 16px;
+  font-size: 13.5px;
+  font-weight: 590;
   color: $text-dark;
+
 }
 
 .topic-cloud {
@@ -323,7 +343,7 @@ export default {
 
 .mini-tag {
   font-size: 10px;
-  background: #f0f1f7;
+  background: $divider-color;
   color: $text-gray;
   border-radius: 6px;
   padding: 1px 6px;
@@ -353,14 +373,15 @@ export default {
   margin-bottom: 4px;
   font-size: 12.5px;
 
-  &.cheeko { background: rgba($primary, 0.08); }
+  &.agent { background: rgba($primary, 0.08); }
   &.kid { background: #f4f5fa; }
 }
 
 .line-speaker {
   font-weight: 700;
   flex-shrink: 0;
-  width: 52px;
+  width: 72px;
+  word-break: break-word;
   color: $text-gray;
   font-size: 11px;
   padding-top: 1px;
@@ -373,14 +394,18 @@ export default {
 }
 
 .card-empty {
+  padding: 32px 0;
   text-align: center;
-  color: $text-gray;
+  color: $text-light;
   font-size: 12.5px;
-  padding: 40px 0;
+
 }
 
 .mono {
-  font-family: 'Consolas', 'Menlo', monospace;
+  font-family: $font-mono;
+  font-size: 11.5px;
+  letter-spacing: -0.01em;
+
 }
 
 @media (max-width: 1100px) {

@@ -1,5 +1,6 @@
 <template>
-  <el-dialog :visible.sync="dialogVisible" :close-on-click-modal="false" width="57%" center custom-class="custom-dialog" :show-close="false"
+  <el-dialog :visible.sync="dialogVisible" :close-on-click-modal="dismissOnBackdrop"
+    @open="markPristine" width="57%" center custom-class="custom-dialog" :show-close="false"
     class="center-dialog" >
     <div style="margin: 0 18px; text-align: left; padding: 10px; border-radius: 10px;">
       <div style="font-size: 30px; color: #3d4566; margin-top: -10px; margin-bottom: 10px; text-align: center;">
@@ -92,9 +93,11 @@
 </template>
 
 <script>
+import dialogDismiss from '@/mixins/dialogDismiss';
 import Api from '@/apis/api';
 
 export default {
+  mixins: [dialogDismiss],
   name: "ModelEditDialog",
   props: {
     visible: { type: Boolean, default: false },
@@ -339,6 +342,8 @@ export default {
 </script>
 
 <style lang="scss" scoped>
+@import '@/styles/theme.scss';
+
 .custom-dialog {
   position: relative;
   border-radius: 20px;
@@ -380,8 +385,8 @@ export default {
 }
 
 .custom-close-btn:hover {
-  color: #409EFF;
-  border-color: #409EFF;
+  color: $info;
+  border-color: $info;
 }
 
 .custom-select .el-input__suffix {
@@ -420,7 +425,7 @@ export default {
 }
 
 .custom-form .el-form-item__label {
-  color: #3d4566;
+  color: $text-dark;
   font-weight: normal;
   text-align: right;
   padding-right: 20px;
@@ -451,7 +456,7 @@ export default {
 }
 
 .save-btn:hover {
-  background: linear-gradient(to right, #237ff4, #9c40d5);
+  background: $surface;
   color: white;
   border: none;
 }
@@ -498,7 +503,7 @@ export default {
 }
 
 .custom-form .el-form-item__label {
-  color: #3d4566;
+  color: $text-dark;
   font-weight: normal;
   text-align: right;
   padding-right: 20px;

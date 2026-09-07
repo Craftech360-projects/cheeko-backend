@@ -1,109 +1,142 @@
 <template>
     <div class="welcome">
 
-        <div class="operation-bar">
-            <h2 class="page-title">Firmware Management</h2>
-            <div class="right-operations">
-                <el-input placeholder="Enter firmware name to search" v-model="searchName" class="search-input"
-                    @keyup.enter.native="handleSearch" clearable />
-                <el-button class="btn-search" @click="handleSearch">Search</el-button>
+        <div class="page-head">
+            <div>
+                <h1 class="page-title">OTA Firmware</h1>
+                <p class="page-lead">Firmware builds, who is on them and what is still rolling out.</p>
+            </div>
+            <div class="page-actions">
+                <el-button size="small" type="primary" @click="showAddDialog">Upload firmware</el-button>
             </div>
         </div>
+
+        <ListToolbar
+            :count="total"
+            count-noun="builds"
+            :total="total"
+            :sort-options="sortOptions"
+            :sort-by.sync="sortBy"
+            :sort-dir.sync="sortDir"
+            :group-options="groupOptions"
+            :group-by.sync="groupBy"
+            :selecting.sync="selecting"
+            :selected-count="selectedCount"
+            :all-selected="isAllSelected"
+            :search.sync="searchName"
+            search-placeholder="Enter firmware name to search"
+            @select-all-matching="selectAllRows"
+            @clear-selection="clearSelection"
+        >
+            <template #bulk>
+                <el-button @click="downloadSelected">Download</el-button>
+                <el-button type="danger" @click="deleteSelectedParams">Archive build</el-button>
+            </template>
+        </ListToolbar>
 
         <div class="main-wrapper">
             <div class="content-panel">
                 <div class="content-area">
                     <!-- Connected Devices Summary Card -->
-                    <el-card class="device-summary-card" shadow="never" style="margin-bottom: 20px;">
-                        <div slot="header" class="clearfix">
-                            <span style="font-weight: bold;">Connected Devices Overview</span>
-                            <el-button style="float: right; padding: 3px 0" type="text" @click="fetchConnectedDevices">
-                                <i class="el-icon-refresh"></i> Refresh
-                            </el-button>
+                    <div class="bento g4">
+                        <div class="card kpi">
+                            <div class="kpi-label">Connected devices</div>
+                            <div class="kpi-value">{{ connectedDevices.total || 0 }}</div>
+                            <div class="kpi-delta"><a class="refresh-link" @click="fetchConnectedDevices">Refresh</a></div>
                         </div>
-                        <div class="device-stats">
-                            <el-row :gutter="20">
-                                <el-col :span="24">
-                                    <div class="stat-item">
-                                        <div class="stat-value">{{ connectedDevices.total || 0 }}</div>
-                                        <div class="stat-label">Total Devices</div>
-                                    </div>
-                                </el-col>
-                            </el-row>
+                        <div class="card kpi">
+                            <div class="kpi-label">Builds stored</div>
+                            <div class="kpi-value">{{ total }}</div>
                         </div>
-                    </el-card>
+                        <div class="card kpi">
+                            <div class="kpi-label">Forced builds</div>
+                            <div class="kpi-value">{{ forcedCount }}</div>
+                        </div>
+                        <div class="card kpi">
+                            <div class="kpi-label">Firmware types</div>
+                            <div class="kpi-value">{{ (firmwareTypes || []).length }}</div>
+                        </div>
+                    </div>
                     
                     <el-card class="params-card" shadow="never">
-                        <el-table ref="paramsTable" :data="paramsList" class="transparent-table" v-loading="loading"
+                        <el-table ref="paramsTable" :data="visibleRows" class="transparent-table" v-loading="loading"
                             element-loading-text="Loading..." element-loading-spinner="el-icon-loading"
-                            element-loading-background="rgba(255, 255, 255, 0.7)"
+                            element-loading-background="rgba(250, 249, 247, 0.75)"
+                            :row-class-name="otaRowClass"
+                            @sort-change="onTableSortChange"
                             :header-cell-class-name="headerCellClassName">
-                            <el-table-column label="Select" align="center" width="120">
+                            <el-table-column v-if="selecting" label="" align="center" width="52">
                                 <template slot-scope="scope">
                                     <el-checkbox v-model="scope.row.selected"></el-checkbox>
                                 </template>
                             </el-table-column>
-                            <el-table-column label="Firmware Name" prop="firmwareName" align="center"></el-table-column>
-                            <el-table-column label="Firmware Type" prop="type" align="center">
+                            <el-table-column label="Firmware Name" prop="firmwareName" min-width="190" sortable="custom">
+                                <template slot-scope="scope">
+                                    <div class="rowid">
+                                        <span class="rowid-mark accent"><i class="el-icon-cpu"></i></span>
+                                        <span class="cell-key">{{ scope.row.firmwareName }}</span>
+                                    </div>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="Firmware Type" prop="type" min-width="140" sortable="custom">
                                 <template slot-scope="scope">
                                     {{ getFirmwareTypeName(scope.row.type) }}
                                 </template>
                             </el-table-column>
-                            <el-table-column label="Version" prop="version" align="center"></el-table-column>
-                            <el-table-column label="Force Update" prop="forceUpdate" align="center" width="140">
+                            <el-table-column label="Version" prop="version" width="120" sortable="custom">
+                                <template slot-scope="scope"><span class="mono">{{ scope.row.version }}</span></template>
+                            </el-table-column>
+                            <el-table-column label="Force Update" prop="forceUpdate" width="150" sortable="custom">
                                 <template slot-scope="scope">
                                     <el-tooltip :content="getForceUpdateTooltip(scope.row)" placement="top">
                                         <el-switch
                                             v-model="scope.row.forceUpdate"
                                             :active-value="1"
                                             :inactive-value="0"
-                                            active-color="#13ce66"
-                                            inactive-color="#dcdfe6"
+                                            active-color="#16130F"
+                                            inactive-color="#E7E2D9"
                                             @change="handleForceUpdateToggle(scope.row)"
                                             :disabled="isSwitchDisabled(scope.row)">
                                         </el-switch>
                                     </el-tooltip>
-                                    <span v-if="scope.row.forceUpdate === 1" style="color: #13ce66; font-size: 12px; margin-left: 5px;">
-                                        ✓ Active
-                                    </span>
+                                    <span v-if="scope.row.forceUpdate === 1" class="chip ok force-chip">Forced</span>
                                 </template>
                             </el-table-column>
-                            <el-table-column label="File Size" prop="size" align="center">
+                            <el-table-column label="File Size" prop="size" width="110" align="right" sortable="custom">
                                 <template slot-scope="scope">
                                     {{ formatFileSize(scope.row.size) }}
                                 </template>
                             </el-table-column>
-                            <el-table-column label="Remark" prop="remark" align="center"
-                                show-overflow-tooltip></el-table-column>
-                            <el-table-column label="Create Time" prop="createDate" align="center">
+                            <el-table-column label="Remark" prop="remark" min-width="180" show-overflow-tooltip>
+                                <template slot-scope="scope">{{ scope.row.remark || '—' }}</template>
+                            </el-table-column>
+                            <el-table-column label="Create Time" prop="createDate" min-width="150" sortable="custom">
                                 <template slot-scope="scope">
-                                    {{ formatDate(scope.row.createDate) }}
+                                    <span class="mono">{{ formatDate(scope.row.createDate) }}</span>
                                 </template>
                             </el-table-column>
-                            <el-table-column label="Update Time" prop="updateDate" align="center">
+                            <el-table-column label="Update Time" prop="updateDate" min-width="150" sortable="custom">
                                 <template slot-scope="scope">
-                                    {{ formatDate(scope.row.updateDate) }}
+                                    <span class="mono">{{ formatDate(scope.row.updateDate) }}</span>
                                 </template>
                             </el-table-column>
-                            <el-table-column label="Actions" align="center">
+                            <el-table-column label="Actions" align="right" width="200">
                                 <template slot-scope="scope">
-                                    <el-button size="mini" type="text"
-                                        @click="downloadFirmware(scope.row)">Download</el-button>
-                                    <el-button size="mini" type="text" @click="editParam(scope.row)">Edit</el-button>
-                                    <el-button size="mini" type="text" @click="deleteParam(scope.row)">Delete</el-button>
+                                    <div class="row-actions">
+                                        <el-button type="text" @click="downloadFirmware(scope.row)">Download</el-button>
+                                        <el-button type="text" @click="editParam(scope.row)">Edit</el-button>
+                                        <el-button type="text" class="delete-btn" @click="deleteParam(scope.row)">Delete</el-button>
+                                    </div>
                                 </template>
                             </el-table-column>
+                            <template slot="empty">
+                                <div class="ds-empty"><b>No firmware builds yet.</b>Upload a build to start a rollout.</div>
+                            </template>
                         </el-table>
 
                         <div class="table_bottom">
                             <div class="ctrl_btn">
-                                <el-button size="mini" type="primary" class="select-all-btn" @click="handleSelectAll">
-                                    {{ isAllSelected ? 'Deselect All' : 'Select All' }}
-                                </el-button>
-                                <el-button size="mini" type="success" @click="showAddDialog"
-                                    style="background: #5bc98c;border: None;">Add</el-button>
-                                <el-button size="mini" type="danger" icon="el-icon-delete"
-                                    @click="deleteSelectedParams">Delete</el-button>
+                                <span class="muted">Showing {{ visibleRows.length }} of {{ total }} builds</span>
                             </div>
                             <div class="custom-pagination">
                                 <el-select v-model="pageSize" @change="handlePageSizeChange" class="page-size-select">
@@ -146,12 +179,30 @@ import Api from "@/apis/api";
 import FirmwareDialog from "@/components/FirmwareDialog.vue";
 import VersionFooter from "@/components/VersionFooter.vue";
 import { formatDate, formatFileSize } from "@/utils/format";
+import ListToolbar from "@/components/ListToolbar.vue";
+import listControls from "@/mixins/listControls";
 
 export default {
   name: 'OtaManagement',
-    components: { FirmwareDialog, VersionFooter },
+    components: { FirmwareDialog, VersionFooter, ListToolbar },
+    mixins: [listControls],
     data() {
         return {
+            // list controls — selection stays on `row.selected`
+            sortBy: 'updateDate',
+            sortDir: 'desc',
+            sortOptions: [
+                { label: 'Update time', value: 'updateDate' },
+                { label: 'Create time', value: 'createDate' },
+                { label: 'Firmware name', value: 'firmwareName' },
+                { label: 'Version', value: 'version' },
+                { label: 'File size', value: 'size' }
+            ],
+            groupOptions: [
+                { label: 'None', value: '' },
+                { label: 'Firmware type', value: 'type' }
+            ],
+            searchTimer: null,
             searchName: "",
             loading: false,
             paramsList: [],
@@ -187,7 +238,25 @@ export default {
         this.fetchConnectedDevices();
     },
 
+    beforeDestroy() {
+        if (this.searchTimer) clearTimeout(this.searchTimer);
+    },
+    watch: {
+        searchName() {
+            if (this.searchTimer) clearTimeout(this.searchTimer);
+            this.searchTimer = setTimeout(() => this.handleSearch(), 350);
+        }
+    },
     computed: {
+        sourceRows() {
+            return this.paramsList;
+        },
+        selectedCount() {
+            return this.paramsList.filter(row => row.selected).length;
+        },
+        forcedCount() {
+            return this.paramsList.filter(row => row.forceUpdate === 1).length;
+        },
         pageCount() {
             return Math.ceil(this.total / this.pageSize);
         },
@@ -245,6 +314,20 @@ export default {
         handleSearch() {
             this.currentPage = 1;
             this.fetchFirmwareList();
+        },
+        otaRowClass({ row }) {
+            return row.selected ? 'selected-row' : '';
+        },
+        selectAllRows() {
+            this.isAllSelected = true;
+            this.paramsList.forEach(row => { this.$set(row, 'selected', true); });
+        },
+        clearSelection() {
+            this.isAllSelected = false;
+            this.paramsList.forEach(row => { this.$set(row, 'selected', false); });
+        },
+        downloadSelected() {
+            this.paramsList.filter(row => row.selected).forEach(row => this.downloadFirmware(row));
         },
         handleSelectAll() {
             this.isAllSelected = !this.isAllSelected;
@@ -537,399 +620,30 @@ export default {
 </script>
 
 <style lang="scss" scoped>
-.welcome {
-    min-height: 506px;
-    height: 100vh;
-    display: flex;
-    position: relative;
-    flex-direction: column;
-    background-size: cover;
-    background: linear-gradient(to bottom right, #fff5eb, #fff7f0, #ffe8d6) center;
-    -webkit-background-size: cover;
-    -o-background-size: cover;
-    overflow: hidden;
-}
+@import '@/styles/theme.scss';
 
-.main-wrapper {
-    margin: 5px 22px;
-    border-radius: 15px;
-    min-height: calc(100vh - 24vh);
-    height: auto;
-    max-height: 80vh;
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
-    position: relative;
-    background: rgba(237, 242, 255, 0.5);
-    display: flex;
-    flex-direction: column;
-}
-
-.operation-bar {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 16px 24px;
-}
-
-.page-title {
-    font-size: 24px;
-    margin: 0;
-}
-
-.right-operations {
-    display: flex;
-    gap: 10px;
-    margin-left: auto;
-}
-
-.search-input {
-    width: 240px;
-}
-
-.btn-search {
-    background: linear-gradient(135deg, #6b8cff, #a966ff);
-    border: none;
-    color: white;
-}
-
-.content-panel {
-    flex: 1;
-    display: flex;
-    overflow: hidden;
-    height: 100%;
-    border-radius: 15px;
-    background: transparent;
-    border: 1px solid #fff;
-}
-
-.content-area {
-    flex: 1;
-    height: 100%;
-    min-width: 600px;
-    overflow: auto;
-    background-color: white;
-    display: flex;
-    flex-direction: column;
-}
-
-.device-summary-card {
-    background: white;
-    border: none;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-    
-    ::v-deep .el-card__header {
-        background: linear-gradient(135deg, #f5f7fa 0%, #f0f3f8 100%);
-        padding: 12px 20px;
-        border-bottom: 1px solid #e4e7ed;
-    }
-    
-    .device-stats {
-        padding: 10px 0;
-        
-        .stat-item {
-            text-align: center;
-            padding: 10px;
-            
-            .stat-value {
-                font-size: 28px;
-                font-weight: bold;
-                color: #409eff;
-                margin-bottom: 5px;
-            }
-            
-            .stat-label {
-                font-size: 14px;
-                color: #606266;
-                margin-bottom: 8px;
-            }
-            
-            .version-list {
-                margin-top: 8px;
-                text-align: left;
-            }
-        }
-    }
-}
+// Page chrome lives in styles/ds.scss.
 
 .params-card {
-    background: white;
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    border: none;
+    background: $surface;
+    border: 1px solid $border-color;
+    border-radius: $radius-lg;
     box-shadow: none;
-    overflow: hidden;
 
-    ::v-deep .el-card__body {
-        padding: 15px;
-        display: flex;
-        flex-direction: column;
-        flex: 1;
-        overflow: hidden;
-    }
+    ::v-deep .el-card__body { padding: 0; }
 }
 
-.table_bottom {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-top: 10px;
-    padding-bottom: 10px;
+.table_bottom { border-top: 1px solid $border-color; }
+
+.force-chip { margin-left: 8px; }
+
+.refresh-link {
+    color: $text-gray;
+    cursor: pointer;
+    border-bottom: 1px solid $border-color;
+
+    &:hover { color: $text-dark; }
 }
 
-.ctrl_btn {
-    display: flex;
-    gap: 8px;
-    padding-left: 26px;
-
-    .el-button {
-        min-width: 72px;
-        height: 32px;
-        padding: 7px 12px 7px 10px;
-        font-size: 12px;
-        border-radius: 4px;
-        line-height: 1;
-        font-weight: 500;
-        border: none;
-        transition: all 0.3s ease;
-        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
-
-        &:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
-        }
-    }
-
-    .el-button--primary {
-        background: #5f70f3;
-        color: white;
-    }
-
-    .el-button--danger {
-        background: #fd5b63;
-        color: white;
-    }
-}
-
-.custom-pagination {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-
-    .el-select {
-        margin-right: 8px;
-    }
-
-    .pagination-btn:first-child,
-    .pagination-btn:nth-child(2),
-    .pagination-btn:nth-last-child(2),
-    .pagination-btn:nth-child(3) {
-        min-width: 60px;
-        height: 32px;
-        padding: 0 12px;
-        border-radius: 4px;
-        border: 1px solid #e4e7ed;
-        background: #dee7ff;
-        color: #606266;
-        font-size: 14px;
-        cursor: pointer;
-        transition: all 0.3s ease;
-
-        &:hover {
-            background: #d7dce6;
-        }
-
-        &:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-        }
-    }
-
-    .pagination-btn:not(:first-child):not(:nth-child(3)):not(:nth-child(2)):not(:nth-last-child(2)) {
-        min-width: 28px;
-        height: 32px;
-        padding: 0;
-        border-radius: 4px;
-        border: 1px solid transparent;
-        background: transparent;
-        color: #606266;
-        font-size: 14px;
-        cursor: pointer;
-        transition: all 0.3s ease;
-
-        &:hover {
-            background: rgba(245, 247, 250, 0.3);
-        }
-    }
-
-    .pagination-btn.active {
-        background: #5f70f3 !important;
-        color: #ffffff !important;
-        border-color: #5f70f3 !important;
-
-        &:hover {
-            background: #6d7cf5 !important;
-        }
-    }
-}
-
-.total-text {
-    margin-left: 10px;
-    color: #606266;
-    font-size: 14px;
-}
-
-.page-size-select {
-    width: 100px;
-    margin-right: 10px;
-
-    :deep(.el-input__inner) {
-        height: 32px;
-        line-height: 32px;
-        border-radius: 4px;
-        border: 1px solid #e4e7ed;
-        background: #dee7ff;
-        color: #606266;
-        font-size: 14px;
-    }
-
-    :deep(.el-input__suffix) {
-        right: 6px;
-        width: 15px;
-        height: 20px;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        top: 6px;
-        border-radius: 4px;
-    }
-
-    :deep(.el-input__suffix-inner) {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 100%;
-    }
-
-    :deep(.el-icon-arrow-up:before) {
-        content: "";
-        display: inline-block;
-        border-left: 6px solid transparent;
-        border-right: 6px solid transparent;
-        border-top: 9px solid #606266;
-        position: relative;
-        transform: rotate(0deg);
-        transition: transform 0.3s;
-    }
-}
-
-:deep(.transparent-table) {
-    background: white;
-    flex: 1;
-    width: 100%;
-    display: flex;
-    flex-direction: column;
-
-    .el-table__body-wrapper {
-        flex: 1;
-        overflow-y: auto;
-        max-height: none !important;
-    }
-
-    .el-table__header-wrapper {
-        flex-shrink: 0;
-    }
-
-    .el-table__header th {
-        background: white !important;
-        color: black;
-        font-weight: 600;
-        height: 40px;
-        padding: 8px 0;
-        font-size: 14px;
-        border-bottom: 1px solid #e4e7ed;
-    }
-
-    .el-table__body tr {
-        background-color: white;
-
-        td {
-            border-top: 1px solid rgba(0, 0, 0, 0.04);
-            border-bottom: 1px solid rgba(0, 0, 0, 0.04);
-            padding: 8px 0;
-            height: 40px;
-            color: #606266;
-            font-size: 14px;
-        }
-    }
-
-    .el-table__row:hover>td {
-        background-color: #f5f7fa !important;
-    }
-
-    &::before {
-        display: none;
-    }
-}
-
-:deep(.el-table .el-button--text) {
-    color: #7079aa !important;
-}
-
-:deep(.el-table .el-button--text:hover) {
-    color: #5a64b5 !important;
-}
-
-:deep(.el-checkbox__inner) {
-    background-color: #eeeeee !important;
-    border-color: #cccccc !important;
-}
-
-:deep(.el-checkbox__inner:hover) {
-    border-color: #cccccc !important;
-}
-
-:deep(.el-checkbox__input.is-checked .el-checkbox__inner) {
-    background-color: #5f70f3 !important;
-    border-color: #5f70f3 !important;
-}
-
-:deep(.el-loading-mask) {
-    background-color: rgba(255, 255, 255, 0.6) !important;
-    backdrop-filter: blur(2px);
-}
-
-:deep(.el-loading-spinner .path) {
-    stroke: #6b8cff;
-}
-
-.el-table {
-    --table-max-height: calc(100vh - 40vh);
-    max-height: var(--table-max-height);
-
-    .el-table__body-wrapper {
-        max-height: calc(var(--table-max-height) - 40px);
-    }
-}
-
-@media (min-width: 1144px) {
-    .table_bottom {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-top: 40px;
-    }
-
-    :deep(.transparent-table) {
-        .el-table__body tr {
-            td {
-                padding-top: 16px;
-                padding-bottom: 16px;
-            }
-
-            &+tr {
-                margin-top: 10px;
-            }
-        }
-    }
-}
+.delete-btn { color: $danger !important; }
 </style>

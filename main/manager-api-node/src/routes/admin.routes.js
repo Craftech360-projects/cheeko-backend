@@ -36,7 +36,7 @@ const deviceAnalyticsService = require('../services/deviceAnalytics.service');
 const mobileService = require('../services/mobile.service');
 const founderDashboardService = require('../services/founderDashboard.service');
 const { asyncHandler } = require('../middleware/errorHandler');
-const { requireAuth, requireSuperAdmin } = require('../middleware/auth');
+const { requireAuth, requireAdmin, requireSuperAdmin } = require('../middleware/auth');
 const { success, badRequest, notFound } = require('../utils/response');
 
 /**
@@ -832,6 +832,47 @@ router.put('/users/:id/super-admin',
 );
 
 // ==================== KID PROFILES ====================
+
+/**
+ * @swagger
+ * /admin/kids:
+ *   get:
+ *     tags: [Admin - User Management]
+ *     summary: List every kid profile across all families
+ *     description: >
+ *       Paginated roster of all registered children with the toys linked to
+ *       them. Open to any admin account, not just super admins.
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 50
+ *     responses:
+ *       200:
+ *         description: Paged kid profiles
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Admin access required
+ */
+router.get('/kids',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const payload = await adminService.listAllKidProfiles({
+      page: req.query.page,
+      limit: req.query.limit,
+    });
+    success(res, payload);
+  })
+);
 
 /**
  * @swagger

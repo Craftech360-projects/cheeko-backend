@@ -1,90 +1,143 @@
 // ============================================
-// Cheeko Dashboard Theme
-// Logo-matched color palette
+// Cheeko Admin Theme — warm monochrome, one accent
+// See docs/design/UI_REDESIGN_SCREENS.md
+//
+// Every variable name from the previous theme is kept so existing scoped
+// styles keep compiling; the values are what changed.
 // ============================================
 
-// Primary Brand Colors (Orange from Cheeko logo)
-$primary: #FF9100;
-$primary-dark: #D47800;
-$primary-light: #FFD7A3;
+// ---- Accent -------------------------------------------------------------
+// The Cheeko ember: the brand orange desaturated out of the 100% band so it
+// can carry meaning (current row, live series, the one primary action)
+// instead of coating headers and shadows.
+$primary: #B3560F;
+$primary-dark: #8A420B;
+$primary-light: #F6EDE3;
+$accent-wash: #F6EDE3;
 
-// Secondary Accent Colors
-$secondary-blue: #4AA9FF;
-$secondary-deep-blue: #0066CC;
-$secondary-pink: #FF5BA5;
-$secondary-purple: #8A57FF;
+// ---- Legacy secondary accents ------------------------------------------
+// Kept as names only. The system has ONE accent; anything that still reaches
+// for these resolves to a neutral or a semantic ink rather than a new hue.
+$secondary-blue: #2C5B7A;
+$secondary-deep-blue: #2C5B7A;
+$secondary-pink: #993129;
+$secondary-purple: #4A453E;
 
-// Neutrals
-$text-dark: #1E1E1E;
-$text-gray: #6F6F6F;
-$text-light: #9E9E9E;
+// ---- Ink ----------------------------------------------------------------
+// Four steps, each one readable on the surfaces it lands on. The muted end of
+// the scale used to bottom out at #A8A199, which is 2.6:1 on white: fine as a
+// hairline, unreadable as the 9-11px labels it was actually carrying. Every
+// step here clears WCAG AA (4.5:1) on the sunk surface, which is the
+// darkest ground any of them lands on.
+$text-dark: #16130F; // never pure black — 16.7:1
+$text-gray: #635C54; //  5.9:1
+$text-light: #756E67; //  4.5:1 — the floor, not a whisper
+$text-body: #4A453E; //  8.6:1
 $white: #FFFFFF;
-$background-soft: #F7F9FC;
-$border-color: #E3E6EF;
-$divider-color: #E3E6EF;
 
-// Status Colors
-$success: #67C23A;
-$warning: #E6A23C;
-$danger: #F56C6C;
-$info: #4AA9FF;
+// ---- Surfaces (one warm gray family — no cool grays) --------------------
+$background-soft: #FAF9F7; // page canvas
+$surface: #FFFFFF; // cards, tables, top bar
+$surface-sunk: #F5F3EF; // inset wells, avatars, chart bars
+$surface-rail: #F7F5F1; // sidebar
+$border-color: #E7E2D9; // every structural 1px line
+$divider-color: #F0ECE5; // row dividers inside a card
+$row-selected: #FBF7F2;
 
-// Gradients
-$gradient-header: linear-gradient(90deg, #FF9100 0%, #FF5BA5 50%, #4AA9FF 100%);
-$gradient-hero: linear-gradient(135deg, #FF9100, #FF5BA5, #4AA9FF);
-$gradient-subtle: linear-gradient(135deg, #FFD7A3, #F7F0FF);
-$gradient-orange: linear-gradient(135deg, #FF9100, #D47800);
+// ---- Status (pastel tint + ink) ----------------------------------------
+$success: #33613A;
+$warning: #8A5D06;
+$danger: #993129;
+$info: #2C5B7A;
 
-// Shadows
-$shadow-sm: 0 2px 8px rgba(255, 145, 0, 0.1);
-$shadow-md: 0 4px 16px rgba(255, 145, 0, 0.15);
-$shadow-lg: 0 8px 24px rgba(255, 145, 0, 0.2);
-$shadow-card: 0 2px 12px rgba(0, 0, 0, 0.08);
+$success-bg: #EDF2EC;
+$warning-bg: #FBF3DE;
+$danger-bg: #FBEBE9;
+$info-bg: #E9EFF4;
 
-// Border Radius
+// ---- Type ---------------------------------------------------------------
+// The stacks the app used before the redesign. There is no separate display
+// face: headings are set in the same sans as the body, which is why
+// $font-display resolves to $font-sans rather than a serif.
+$font-sans: Avenir, Helvetica, Arial, sans-serif;
+$font-display: $font-sans;
+$font-mono: 'Consolas', 'Menlo', monospace;
+
+// ---- Gradients ----------------------------------------------------------
+// The system uses none. These resolve to flat fills so any straggling
+// reference degrades to a surface colour rather than a rainbow band.
+$gradient-header: none;
+$gradient-hero: none;
+$gradient-subtle: none;
+$gradient-orange: none;
+
+// ---- Shadows ------------------------------------------------------------
+// Structure comes from 1px rules, not elevation. Only overlays get a shadow,
+// and it is ultra-diffuse and under 6% opacity.
+$shadow-sm: none;
+$shadow-md: none;
+$shadow-lg: none;
+$shadow-card: none;
+$shadow-overlay: 0 2px 24px rgba(22, 19, 15, 0.06);
+
+// ---- Radius -------------------------------------------------------------
 $radius-sm: 4px;
 $radius-md: 8px;
-$radius-lg: 16px;
-$radius-xl: 24px;
+$radius-lg: 10px;
+$radius-xl: 12px;
 $radius-round: 50%;
 
-// CSS Custom Properties (for use in components without SCSS)
+// CSS Custom Properties (for components without SCSS)
 :root {
-  // Primary
   --primary: #{$primary};
   --primary-dark: #{$primary-dark};
   --primary-light: #{$primary-light};
+  --accent-wash: #{$accent-wash};
 
-  // Secondary
   --secondary-blue: #{$secondary-blue};
   --secondary-deep-blue: #{$secondary-deep-blue};
   --secondary-pink: #{$secondary-pink};
   --secondary-purple: #{$secondary-purple};
 
-  // Neutrals
   --text-dark: #{$text-dark};
   --text-gray: #{$text-gray};
   --text-light: #{$text-light};
+  --text-body: #{$text-body};
   --white: #{$white};
+
   --background-soft: #{$background-soft};
+  --surface: #{$surface};
+  --surface-sunk: #{$surface-sunk};
+  --surface-rail: #{$surface-rail};
   --border-color: #{$border-color};
   --divider-color: #{$divider-color};
+  --row-selected: #{$row-selected};
 
-  // Status
   --success: #{$success};
   --warning: #{$warning};
   --danger: #{$danger};
   --info: #{$info};
+  --success-bg: #{$success-bg};
+  --warning-bg: #{$warning-bg};
+  --danger-bg: #{$danger-bg};
+  --info-bg: #{$info-bg};
 
-  // Gradients
+  --font-display: #{$font-display};
+  --font-sans: #{$font-sans};
+  --font-mono: #{$font-mono};
+
   --gradient-header: #{$gradient-header};
   --gradient-hero: #{$gradient-hero};
   --gradient-subtle: #{$gradient-subtle};
   --gradient-orange: #{$gradient-orange};
 
-  // Shadows
   --shadow-sm: #{$shadow-sm};
   --shadow-md: #{$shadow-md};
   --shadow-lg: #{$shadow-lg};
   --shadow-card: #{$shadow-card};
+  --shadow-overlay: #{$shadow-overlay};
+
+  --radius-sm: #{$radius-sm};
+  --radius-md: #{$radius-md};
+  --radius-lg: #{$radius-lg};
 }

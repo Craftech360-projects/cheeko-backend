@@ -1,5 +1,6 @@
 <template>
-  <el-dialog :title="title" :visible.sync="dialogVisible" :close-on-click-modal="false" @close="handleClose" @open="handleOpen">
+  <el-dialog :title="title" :visible.sync="dialogVisible" :close-on-click-modal="dismissOnBackdrop"
+    @open="markPristine" @close="handleClose" @open="handleOpen">
     <el-form ref="form" :model="form" :rules="rules" label-width="120px">
       <el-form-item label="Firmware Name" prop="firmwareName">
         <el-input v-model="form.firmwareName" placeholder="Enter firmware name (board + version)"></el-input>
@@ -37,9 +38,11 @@
 </template>
 
 <script>
+import dialogDismiss from '@/mixins/dialogDismiss';
 import Api from '@/apis/api';
 
 export default {
+  mixins: [dialogDismiss],
   name: 'FirmwareDialog',
   props: {
     visible: {
@@ -211,6 +214,8 @@ export default {
 </script>
 
 <style lang="scss" scoped>
+@import '@/styles/theme.scss';
+
 ::v-deep .el-dialog {
   border-radius: 20px;
 }
@@ -222,7 +227,7 @@ export default {
 .el-upload__tip {
   line-height: 1.2;
   padding-top: 2%;
-  color: #909399;
+  color: $text-light;
 }
 
 .hint-text {

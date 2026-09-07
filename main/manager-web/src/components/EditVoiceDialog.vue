@@ -1,5 +1,7 @@
 <template>
-  <el-dialog :visible.sync="dialogVisible" width="900px" @close="handleClose" class="compact-dialog" :append-to-body="true">
+  <el-dialog
+    :close-on-click-modal="dismissOnBackdrop"
+    @open="markPristine" :visible.sync="dialogVisible" width="900px" @close="handleClose" class="compact-dialog" :append-to-body="true">
     <el-form :model="voiceForm" :rules="rules" ref="voiceForm" label-width="80px">
       <el-row :gutter="20">
         <el-col :span="12">
@@ -51,7 +53,9 @@
 </template>
 
 <script>
+import dialogDismiss from '@/mixins/dialogDismiss';
 export default {
+  mixins: [dialogDismiss],
   name: 'EditVoiceDialog',
   props: {
     showDialog: Boolean,
@@ -84,6 +88,10 @@ export default {
     }
   },
   methods: {
+    dirtyState() {
+      return this.voiceForm;
+    },
+
     handleClose() {
       this.dialogVisible = false
       this.$emit('update:showDialog', false)

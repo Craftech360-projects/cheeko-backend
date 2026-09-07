@@ -1,22 +1,22 @@
 <template>
   <div class="overview-page">
-    <div class="overview-header">
+    <div class="page-head">
       <div>
-        <h2 class="overview-title">Good to see you, {{ firstName }}</h2>
-        <p class="overview-subtitle">{{ todayLabel }} · IST</p>
+        <h1 class="page-title">Good to see you, {{ firstName }}</h1>
+        <p class="page-lead">{{ todayLabel }} · IST · fleet health, family activity and spend.</p>
       </div>
-      <el-radio-group v-model="range" size="small" @change="loadOverview">
-        <el-radio-button label="today">Today</el-radio-button>
-        <el-radio-button label="7d">7 days</el-radio-button>
-        <el-radio-button label="30d">30 days</el-radio-button>
-      </el-radio-group>
-    </div>
-
-    <!-- Live strip: toys connected in the last 5 minutes -->
-    <div class="live-strip" v-if="onlineNow !== null">
-      <span class="live-dot" :class="{ on: onlineNow > 0 }"></span>
-      <span v-if="onlineNow > 0">{{ onlineNow }} toy{{ onlineNow === 1 ? '' : 's' }} online now</span>
-      <span v-else>No toys connected right now</span>
+      <div class="page-actions">
+        <div class="live-strip" v-if="onlineNow !== null">
+          <span class="live-dot" :class="{ on: onlineNow > 0 }"></span>
+          <span v-if="onlineNow > 0">{{ onlineNow }} online now</span>
+          <span v-else>None online</span>
+        </div>
+        <el-radio-group v-model="range" size="small" @change="loadOverview">
+          <el-radio-button label="today">Today</el-radio-button>
+          <el-radio-button label="7d">7d</el-radio-button>
+          <el-radio-button label="30d">30d</el-radio-button>
+        </el-radio-group>
+      </div>
     </div>
 
     <div v-loading="loading" class="overview-body">
@@ -246,162 +246,143 @@ export default {
 <style lang="scss" scoped>
 @import '@/styles/theme.scss';
 
-.overview-page {
-  max-width: 1280px;
-}
+.overview-page { max-width: 1440px; }
 
-.overview-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 16px;
-}
-
-.overview-title {
-  margin: 0;
-  font-size: 20px;
-  color: $text-dark;
-}
-
-.overview-subtitle {
-  margin: 2px 0 0;
-  font-size: 12px;
-  color: $text-gray;
-}
-
+// ---------- Live strip ----------
 .live-strip {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  background: #fff;
+  background: $surface;
   border: 1px solid $border-color;
-  border-radius: 16px;
-  padding: 6px 14px;
-  font-size: 12px;
-  font-weight: 600;
-  color: $text-dark;
-  margin-bottom: 12px;
+  border-radius: $radius-sm;
+  height: 32px;
+  padding: 0 12px;
+  font-size: 12.5px;
+  color: $text-body;
+  white-space: nowrap;
 }
 
 .live-dot {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
-  background: #c4c8d8;
+  background: #C9C2B7;
 
   &.on {
-    background: #0ca30c;
-    box-shadow: 0 0 0 3px rgba(12, 163, 12, 0.15);
+    background: $success;
+    box-shadow: 0 0 0 3px rgba(51, 97, 58, 0.12);
   }
 }
 
+// ---------- Layout ----------
 .kpi-row {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
-  gap: 12px;
-  margin-bottom: 16px;
+  gap: 14px;
+  margin-bottom: 14px;
 }
+
+@media (max-width: 1280px) { .kpi-row { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 800px) { .kpi-row { grid-template-columns: 1fr; } }
 
 .section-row {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
-  margin-bottom: 16px;
+  gap: 14px;
+  margin-bottom: 14px;
+  align-items: start;
 
   .span-2 { grid-column: span 2; }
 }
 
-.card {
-  background: #fff;
-  border: 1px solid $border-color;
-  border-radius: 12px;
-  padding: 14px 16px;
-  min-width: 0;
-  box-shadow: 0 4px 14px rgba(61, 69, 102, 0.05);
+@media (max-width: 1100px) {
+  .section-row {
+    grid-template-columns: 1fr;
+
+    .span-2 { grid-column: span 1; }
+  }
+}
+
+.section-title {
+  margin: 30px 0 14px;
+  font-family: $font-display;
+  font-size: 22px;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  color: $text-dark;
 }
 
 .card-title {
-  margin: 0 0 10px;
-  font-size: 14px;
+  margin: 0 0 16px;
+  font-size: 13.5px;
+  font-weight: 590;
   color: $text-dark;
 }
 
 .card-subtitle {
-  margin: 0 0 10px;
-  font-size: 13px;
+  margin: 0 0 16px;
+  font-size: 13.5px;
+  font-weight: 590;
   color: $text-dark;
+
+  .muted { font-weight: 400; color: $text-light; font-size: 11.5px; }
 }
 
-.section-title {
-  margin: 4px 0 10px;
-  font-size: 14px;
-  color: $text-dark;
-}
-
-.card-empty {
-  padding: 24px 0;
-  text-align: center;
-  font-size: 12px;
-  color: $text-gray;
-
-  &.ok { color: #0ca30c; }
-}
-
-.muted {
-  color: $text-gray;
-  font-weight: 400;
-}
-
+// ---------- Today's split ----------
 .split-total {
-  font-size: 20px;
-  font-weight: 700;
+  font-family: $font-display;
+  font-size: 32px;
+  font-weight: 400;
+  letter-spacing: -0.03em;
   color: $text-dark;
-  font-variant-numeric: tabular-nums;
-  margin-bottom: 8px;
+  margin-bottom: 16px;
 }
 
 .split-bar {
   display: flex;
-  height: 12px;
-  border-radius: 6px;
+  height: 6px;
+  border-radius: 999px;
   overflow: hidden;
-  background: #f0f1f7;
-
-  .split-segment + .split-segment {
-    border-left: 2px solid #fff;
-  }
+  background: $surface-sunk;
+  margin-bottom: 18px;
 }
 
+.split-segment { height: 100%; }
+
 .split-legend {
-  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
 }
 
 .split-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: $text-dark;
-  padding: 3px 0;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid $divider-color;
+  font-size: 12.5px;
+
+  &:last-child { border-bottom: 0; }
 }
 
 .split-dot {
   width: 8px;
   height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
+  border-radius: 2px;
+  flex: 0 0 auto;
 }
 
-.split-label {
-  flex: 1;
-}
+.split-label { color: $text-body; }
 
 .split-mins {
+  margin-left: auto;
+  font-family: $font-mono;
+  font-size: 11px;
   color: $text-gray;
-  font-variant-numeric: tabular-nums;
 }
 
+// ---------- Leaderboards ----------
 .mini-leaderboard {
   display: flex;
   flex-direction: column;
@@ -410,82 +391,90 @@ export default {
 .mini-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 0;
-  border-bottom: 1px solid #f4f5fa;
+  gap: 10px;
+  padding: 11px 0;
+  border-bottom: 1px solid $divider-color;
   font-size: 12.5px;
 
-  &:last-child { border-bottom: none; }
+  &:last-child { border-bottom: 0; }
 }
 
 .mini-rank {
   width: 22px;
   height: 22px;
-  border-radius: 50%;
-  background: rgba($primary, 0.14);
-  color: $primary-dark;
-  font-weight: 700;
-  font-size: 11px;
-  display: inline-flex;
+  border-radius: $radius-sm;
+  background: $surface-sunk;
+  color: $text-gray;
+  font-family: $font-mono;
+  font-size: 10px;
+  font-weight: 600;
+  display: flex;
   align-items: center;
   justify-content: center;
-  flex-shrink: 0;
-  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
 }
 
 .mini-name {
-  flex: 1;
   color: $text-dark;
+  font-weight: 520;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+
+  .muted { font-weight: 400; color: $text-light; }
 }
 
 .mini-value {
+  margin-left: auto;
+  font-family: $font-mono;
+  font-size: 11px;
   color: $text-gray;
   white-space: nowrap;
-  font-variant-numeric: tabular-nums;
 }
 
+.attention-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: $text-light;
+
+  &.warning { background: $warning; }
+  &.serious { background: $primary; }
+  &.critical { background: $danger; }
+}
+
+// ---------- Topics ----------
 .topic-cloud {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
 
-.topic-tag {
-  background: rgba($primary, 0.1);
-  border-color: transparent;
-  color: $primary-dark;
-}
+.topic-tag { margin: 0; }
 
 .footnote {
-  margin: 8px 0 0;
-  font-size: 11px;
-  color: $text-gray;
+  margin: 14px 0 0;
+  font-size: 11.5px;
+  color: $text-light;
 
   &.sample {
-    font-style: italic;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    font-family: $font-display;
+    font-size: 15px;
+    line-height: 1.5;
+    color: $text-body;
+    padding-top: 14px;
+    border-top: 1px solid $divider-color;
   }
 }
 
-.attention-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
+.card-empty {
+  padding: 32px 0;
+  text-align: center;
+  color: $text-light;
+  font-size: 12.5px;
 
-  &.warning { background: #fab219; }
-  &.serious { background: #ec835a; }
-  &.critical { background: #d03b3b; }
-}
-
-@media (max-width: 1100px) {
-  .kpi-row { grid-template-columns: repeat(2, 1fr); }
-  .section-row { grid-template-columns: 1fr; .span-2 { grid-column: auto; } }
+  &.ok { color: $success; }
 }
 </style>

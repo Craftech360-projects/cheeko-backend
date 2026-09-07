@@ -193,17 +193,6 @@ const adminRoutes = [
     }
   },
   {
-    path: '/bulk-import',
-    name: 'BulkImport',
-    component: function () {
-      return import('../views/BulkImport.vue')
-    },
-    meta: {
-      requiresAuth: true,
-      title: 'RFID Bulk Import'
-    }
-  },
-  {
     path: '/kid-profiles',
     name: 'KidProfiles',
     component: function () {
@@ -211,6 +200,7 @@ const adminRoutes = [
     },
     meta: {
       requiresAuth: true,
+      superAdminOnly: true,
       title: 'Kid Profiles'
     }
   },
@@ -235,17 +225,6 @@ const adminRoutes = [
     meta: {
       requiresAuth: true,
       title: 'Device Management'
-    }
-  },
-  {
-    path: '/content-library',
-    name: 'ContentLibrary',
-    component: function () {
-      return import('../views/ContentLibrary.vue')
-    },
-    meta: {
-      requiresAuth: true,
-      title: 'Content Library'
     }
   },
   {

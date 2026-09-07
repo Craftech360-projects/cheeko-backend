@@ -1,19 +1,16 @@
 <template>
   <div class="game-analytics">
     <el-main class="main-content">
-      <!-- Page Title -->
-      <div class="page-header">
-        <h1>Game Analytics Dashboard</h1>
-        <p class="subtitle">Monitor learning sessions, game performance, and engagement metrics</p>
-      </div>
-
-      <!-- Date Range Filter -->
-      <el-card class="filter-card" shadow="never">
-        <div class="filter-row">
-          <span class="filter-label">Date Range:</span>
+      <div class="page-head">
+        <div>
+          <h1 class="page-title">Game Analytics</h1>
+          <p class="page-lead">Mode-by-mode play volume, accuracy and abandonment.</p>
+        </div>
+        <div class="page-actions">
           <el-date-picker
             v-model="dateRange"
             type="daterange"
+            size="small"
             range-separator="to"
             start-placeholder="Start date"
             end-placeholder="End date"
@@ -22,48 +19,44 @@
             @change="fetchData"
             :picker-options="datePickerOptions"
           />
-          <el-button type="primary" @click="fetchData" :loading="isLoading">
-            <i class="el-icon-refresh"></i> Refresh
-          </el-button>
-          <el-button type="success" @click="exportToCsv" :disabled="isLoading">
-            <i class="el-icon-download"></i> Export CSV
-          </el-button>
+          <el-button size="small" @click="fetchData" :loading="isLoading">Refresh</el-button>
+          <el-button size="small" @click="exportToCsv" :disabled="isLoading">Export CSV</el-button>
         </div>
-      </el-card>
+      </div>
 
       <!-- Overall Stats Cards -->
       <div class="stats-grid">
-        <el-card class="stat-card" shadow="hover">
+        <div class="stat-card card kpi">
           <div class="stat-icon sessions"><i class="el-icon-video-play"></i></div>
           <div class="stat-content">
             <div class="stat-value">{{ formatNumber(summary.total_sessions || 0) }}</div>
             <div class="stat-label">Total Sessions</div>
           </div>
-        </el-card>
+        </div>
 
-        <el-card class="stat-card" shadow="hover">
+        <div class="stat-card card kpi">
           <div class="stat-icon time"><i class="el-icon-time"></i></div>
           <div class="stat-content">
             <div class="stat-value">{{ formatDurationHours(summary.total_time_seconds || 0) }}</div>
             <div class="stat-label">Time Spent</div>
           </div>
-        </el-card>
+        </div>
 
-        <el-card class="stat-card" shadow="hover">
+        <div class="stat-card card kpi">
           <div class="stat-icon accuracy"><i class="el-icon-success"></i></div>
           <div class="stat-content">
             <div class="stat-value accuracy-value">{{ summary.avg_accuracy || 0 }}%</div>
             <div class="stat-label">Avg Accuracy</div>
           </div>
-        </el-card>
+        </div>
 
-        <el-card class="stat-card" shadow="hover">
+        <div class="stat-card card kpi">
           <div class="stat-icon devices"><i class="el-icon-cpu"></i></div>
           <div class="stat-content">
             <div class="stat-value">{{ formatNumber(summary.active_device_count || 0) }}</div>
             <div class="stat-label">Active Devices</div>
           </div>
-        </el-card>
+        </div>
       </div>
 
       <!-- Charts Section Row 1 -->
@@ -229,8 +222,29 @@
         <div slot="header" class="card-header">
           <span>Top 10 Active Devices</span>
         </div>
+        <ListToolbar
+          :count="topDevices.length"
+          count-noun="devices"
+          :total="topDevices.length"
+          :sort-options="sortOptions"
+          :sort-by.sync="sortBy"
+          :sort-dir.sync="sortDir"
+          :group-options="groupOptions"
+          :group-by.sync="groupBy"
+          :selecting.sync="selecting"
+          :selected-count="selectedCount"
+          :all-selected="allSelected"
+          :search.sync="listSearch"
+          search-placeholder="Device MAC or alias"
+          @select-all-matching="selectAllMatching"
+          @clear-selection="clearSelection"
+        />
         <el-table
-          :data="topDevices"
+          ref="table"
+          :data="visibleRows"
+          :row-class-name="rowClass"
+          @sort-change="onTableSortChange"
+          @selection-change="onSelectionChange"
           v-loading="isLoading"
           stripe
           style="width: 100%"
@@ -337,13 +351,32 @@
 </template>
 
 <script>
+import ListToolbar from '@/components/ListToolbar.vue';
+import listControls from '@/mixins/listControls';
 import Api from '@/apis/api';
+import { STATUS_COLORS } from '@/components/charts/presets';
 
 export default {
   name: 'GameAnalytics',
-  components: { },
+  mixins: [listControls],
+  components: { ListToolbar, },
   data() {
     return {
+      // list controls
+      sortBy: 'session_count',
+      sortDir: 'desc',
+      sortOptions: [
+        { label: 'Sessions', value: 'session_count' },
+        { label: 'Device alias', value: 'alias' },
+        { label: 'Owner', value: 'owner_name' },
+        { label: 'Accuracy', value: 'accuracy' }
+      ],
+      groupOptions: [
+        { label: 'None', value: '' },
+        { label: 'Owner', value: 'owner_name' }
+      ],
+      searchFields: ['alias', 'owner_name', 'mac_address'],
+
       isLoading: false,
       dateRange: this.getDefaultDateRange(),
       summary: {},
@@ -398,6 +431,9 @@ export default {
     };
   },
   computed: {
+    sourceRows() {
+      return this.topDevices || [];
+    },
     hasGameData() {
       return Object.keys(this.gameAccuracy).length > 0;
     },
@@ -447,9 +483,9 @@ export default {
       let offset = 0;
 
       const segments = [
-        { type: 'easy', value: easy, color: '#52c41a' },
-        { type: 'medium', value: medium, color: '#faad14' },
-        { type: 'hard', value: hard, color: '#f5222d' }
+        { type: 'easy', value: easy, color: STATUS_COLORS.good },
+        { type: 'medium', value: medium, color: STATUS_COLORS.warning },
+        { type: 'hard', value: hard, color: STATUS_COLORS.critical }
       ].filter(s => s.value > 0);
 
       return segments.map(segment => {
@@ -740,143 +776,113 @@ export default {
 <style scoped lang="scss">
 @import '@/styles/theme.scss';
 
+// Warm monochrome on the page canvas. Colour is reserved for the ordinal
+// scales that actually mean something: difficulty and accuracy.
 .game-analytics {
-  min-height: 100vh;
-  background: linear-gradient(145deg, #f0f7ff, #f5faff);
+  min-height: 0;
 }
 
 .main-content {
-  padding: 20px;
+  padding: 0;
   max-width: 1400px;
   margin: 0 auto;
 }
 
-.page-header {
-  margin-bottom: 20px;
-
-  h1 {
-    color: #3d4566;
-    font-size: 28px;
-    font-weight: 700;
-    margin: 0 0 8px 0;
-  }
-
-  .subtitle {
-    color: #818cae;
-    font-size: 14px;
-    margin: 0;
-  }
-}
-
-.filter-card {
-  margin-bottom: 20px;
-  border-radius: 12px;
-
-  .filter-row {
-    display: flex;
-    align-items: center;
-    gap: 15px;
-    flex-wrap: wrap;
-  }
-
-  .filter-label {
-    font-weight: 500;
-    color: #3d4566;
-  }
-}
-
+// ---------- KPI row -------------------------------------------------------
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 16px;
-  margin-bottom: 20px;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 14px;
+  margin-bottom: 14px;
 }
 
+// .card and .kpi in ds.scss already carry the rule, the display numerals and
+// the mono label. Only the icon and the layout are local.
 .stat-card {
-  border-radius: 12px;
-  border: none;
-
-  ::v-deep .el-card__body {
-    display: flex;
-    align-items: center;
-    gap: 15px;
-    padding: 20px;
-  }
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
 
   .stat-icon {
-    width: 50px;
-    height: 50px;
-    border-radius: 12px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 24px;
-
-    &.sessions { background: rgba(#1890ff, 0.1); color: #1890ff; }
-    &.time { background: rgba(#722ed1, 0.1); color: #722ed1; }
-    &.accuracy { background: rgba(#52c41a, 0.1); color: #52c41a; }
-    &.devices { background: rgba($primary, 0.1); color: $primary; }
+    flex: 0 0 auto;
+    margin-top: 3px;
+    font-size: 14px;
+    color: $text-light;
   }
 
   .stat-content {
     flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column-reverse;
   }
 
-  .stat-value {
-    font-size: 24px;
-    font-weight: 700;
-    color: #3d4566;
-
-    &.accuracy-value {
-      color: #52c41a;
-    }
+  .stat-value.accuracy-value {
+    color: $text-dark;
   }
 
   .stat-label {
-    font-size: 13px;
-    color: #818cae;
-    margin-top: 4px;
+    margin-bottom: 12px;
   }
 }
 
-.table-card, .chart-card {
-  border-radius: 12px;
-  border: none;
-  margin-bottom: 20px;
+// ---------- Cards ---------------------------------------------------------
+.table-card,
+.chart-card {
+  background: $surface;
+  border: 1px solid $border-color;
+  border-radius: $radius-lg;
+  margin-bottom: 14px;
+
+  ::v-deep .el-card__header {
+    padding: 16px 22px;
+    border-bottom: 1px solid $divider-color;
+  }
 
   .card-header {
-    font-size: 16px;
-    font-weight: 600;
-    color: #3d4566;
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: 16px;
+    font-size: 13.5px;
+    font-weight: 590;
+    letter-spacing: -0.01em;
+    color: $text-dark;
+  }
+}
+
+// ds.scss strips the body padding off every `shadow="never"` card so a table
+// can sit flush to the rule. A chart is not a table, so it takes it back.
+.chart-card.el-card {
+  ::v-deep > .el-card__body {
+    padding: 20px 22px;
   }
 }
 
 .charts-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
-  gap: 20px;
-  margin-bottom: 20px;
+  gap: 14px;
+  margin-bottom: 14px;
 }
 
-/* Bar Chart Styles */
+// ---------- Bar charts ----------------------------------------------------
 .bar-chart-container {
   display: flex;
-  gap: 10px;
+  gap: 12px;
   height: 250px;
-  padding: 10px 0;
+  padding: 6px 0;
 
   .chart-y-axis {
     display: flex;
     flex-direction: column;
     justify-content: space-between;
-    font-size: 11px;
-    color: #818cae;
-    width: 50px;
+    width: 54px;
+    padding: 4px 0;
     text-align: right;
-    padding: 5px 0;
+    font-family: $font-mono;
+    font-size: 9.5px;
+    color: $text-light;
   }
 }
 
@@ -886,8 +892,8 @@ export default {
   align-items: flex-end;
   gap: 4px;
   padding-bottom: 25px;
-  border-bottom: 1px solid #e8e8e8;
-  border-left: 1px solid #e8e8e8;
+  border-bottom: 1px solid $border-color;
+  border-left: 1px solid $border-color;
   position: relative;
   overflow-x: auto;
 }
@@ -899,12 +905,10 @@ export default {
   display: flex;
   flex-direction: column;
   align-items: center;
-  cursor: pointer;
+  cursor: default;
   transition: opacity 0.2s;
 
-  &:hover {
-    opacity: 0.8;
-  }
+  &:hover { opacity: 0.72; }
 
   .bars {
     display: flex;
@@ -918,29 +922,25 @@ export default {
   }
 
   .bar {
-    width: 20px;
-    border-radius: 3px 3px 0 0;
+    width: 18px;
+    border-radius: 2px 2px 0 0;
     transition: height 0.3s ease;
     min-height: 2px;
 
-    &.session-bar {
-      background: linear-gradient(180deg, #1890ff, #40a9ff);
-    }
-
-    &.ttft-bar {
-      background: linear-gradient(180deg, #722ed1, #9254de);
-    }
+    &.session-bar { background: $text-dark; }
+    &.ttft-bar { background: $primary; }
   }
 
   .bar-label {
-    font-size: 10px;
-    color: #818cae;
+    position: absolute;
+    bottom: -20px;
     margin-top: 8px;
+    font-family: $font-mono;
+    font-size: 9px;
+    color: $text-light;
     white-space: nowrap;
     transform: rotate(-45deg);
     transform-origin: top left;
-    position: absolute;
-    bottom: -20px;
   }
 }
 
@@ -950,92 +950,97 @@ export default {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  color: #bfbfbf;
+  gap: 10px;
+  color: $text-light;
 
-  i {
-    font-size: 48px;
-    margin-bottom: 15px;
-  }
+  i { font-size: 24px; }
 
   p {
-    font-size: 14px;
     margin: 0;
+    font-size: 12.5px;
   }
 }
 
-/* Game Performance Chart */
+// ---------- Accuracy by game type ----------------------------------------
 .game-performance-chart {
-  padding: 20px 0;
-
   .game-bar {
     display: flex;
     align-items: center;
-    gap: 15px;
-    margin-bottom: 20px;
+    gap: 14px;
+    padding: 11px 0;
+
+    & + .game-bar {
+      border-top: 1px solid $divider-color;
+    }
 
     .game-info {
-      width: 140px;
+      width: 150px;
+      flex: 0 0 auto;
 
       .game-name {
         display: block;
-        font-weight: 500;
-        color: #3d4566;
-        font-size: 14px;
+        font-size: 12.5px;
+        color: $text-body;
       }
 
       .game-stats {
-        font-size: 12px;
-        color: #818cae;
+        font-family: $font-mono;
+        font-size: 10px;
+        color: $text-light;
       }
     }
 
     .bar-track {
       flex: 1;
-      height: 24px;
-      background: #f0f0f0;
-      border-radius: 12px;
+      height: 5px;
+      background: $surface-sunk;
+      border-radius: 3px;
       overflow: hidden;
 
       .bar-fill {
         height: 100%;
-        border-radius: 12px;
+        border-radius: 3px;
         transition: width 0.5s ease;
 
-        &.high { background: linear-gradient(90deg, #52c41a, #73d13d); }
-        &.medium { background: linear-gradient(90deg, #faad14, #ffc53d); }
-        &.low { background: linear-gradient(90deg, #f5222d, #ff4d4f); }
+        // Accuracy is a quality reading, so the fill carries the verdict.
+        &.high { background: $success; }
+        &.medium { background: $warning; }
+        &.low { background: $danger; }
       }
     }
 
     .accuracy-percent {
-      width: 50px;
-      font-weight: 600;
-      color: #3d4566;
+      width: 44px;
+      flex: 0 0 auto;
+      font-family: $font-mono;
+      font-size: 11.5px;
+      color: $text-dark;
       text-align: right;
     }
   }
 
   .no-game-data {
     text-align: center;
-    color: #818cae;
-    padding: 40px;
+    color: $text-light;
+    font-size: 12.5px;
+    padding: 40px 0;
   }
 }
 
-/* Difficulty Distribution */
+// ---------- Difficulty distribution --------------------------------------
 .distribution-container {
   display: flex;
   align-items: center;
   gap: 40px;
-  padding: 20px;
+  padding: 8px 0;
   flex-wrap: wrap;
   justify-content: center;
 }
 
 .donut-chart {
   position: relative;
-  width: 180px;
-  height: 180px;
+  width: 170px;
+  height: 170px;
 
   .donut-svg {
     transform: rotate(-90deg);
@@ -1056,15 +1061,21 @@ export default {
 
     .total-label {
       display: block;
-      font-size: 12px;
-      color: #818cae;
+      font-family: $font-mono;
+      font-size: 9.5px;
+      text-transform: uppercase;
+      letter-spacing: 0.11em;
+      color: $text-light;
     }
 
     .total-value {
       display: block;
-      font-size: 20px;
-      font-weight: 700;
-      color: #3d4566;
+      margin-top: 6px;
+      font-family: $font-display;
+      font-size: 24px;
+      font-weight: 400;
+      letter-spacing: -0.02em;
+      color: $text-dark;
     }
   }
 }
@@ -1072,94 +1083,78 @@ export default {
 .distribution-legend {
   display: flex;
   flex-direction: column;
-  gap: 12px;
 
   .legend-row {
     display: flex;
     align-items: center;
-    gap: 12px;
-    font-size: 14px;
+    gap: 14px;
+    padding: 9px 0;
+    font-size: 12.5px;
+
+    & + .legend-row {
+      border-top: 1px solid $divider-color;
+    }
 
     .legend-color {
-      width: 14px;
-      height: 14px;
-      border-radius: 3px;
+      width: 8px;
+      height: 8px;
+      border-radius: 2px;
 
-      &.easy { background: #52c41a; }
-      &.medium { background: #faad14; }
-      &.hard { background: #f5222d; }
+      &.easy { background: $success; }
+      &.medium { background: $warning; }
+      &.hard { background: $danger; }
     }
 
     .legend-text {
-      color: #3d4566;
-      min-width: 60px;
+      color: $text-body;
+      min-width: 64px;
     }
 
     .legend-value {
-      color: #3d4566;
-      font-weight: 500;
+      font-family: $font-mono;
+      font-size: 12px;
+      color: $text-dark;
       min-width: 50px;
       text-align: right;
     }
 
     .legend-percent {
-      color: #818cae;
-      min-width: 50px;
+      font-family: $font-mono;
+      font-size: 11px;
+      color: $text-light;
+      min-width: 48px;
       text-align: right;
     }
   }
 }
 
-/* Table Styles */
+// ---------- Table cells ---------------------------------------------------
 .device-alias {
-  font-weight: 500;
-  color: #1890ff;
+  color: $text-dark;
 }
 
 .owner-name {
-  font-weight: 500;
-  color: #3d4566;
+  color: $text-body;
 }
 
 .mac-address {
-  font-family: 'Courier New', monospace;
-  font-size: 12px;
-  background: #f5f5f5;
-  padding: 2px 6px;
-  border-radius: 4px;
+  font-family: $font-mono;
+  font-size: 11px;
+  color: $text-gray;
+  background: transparent;
+  padding: 0;
 }
 
 .accuracy-badge {
-  padding: 2px 8px;
-  border-radius: 10px;
-  font-weight: 500;
-  font-size: 12px;
+  font-family: $font-mono;
+  font-size: 11px;
+  color: $text-body;
 
-  &.high {
-    background: rgba(#52c41a, 0.1);
-    color: #52c41a;
-  }
-  &.medium {
-    background: rgba(#faad14, 0.1);
-    color: #d48806;
-  }
-  &.low {
-    background: rgba(#f5222d, 0.1);
-    color: #f5222d;
-  }
+  &.high { color: $success; }
+  &.medium { color: $warning; }
+  &.low { color: $danger; }
 }
 
-::v-deep .el-table {
-  border-radius: 8px;
-
-  th {
-    background: #fafafa !important;
-    color: #3d4566;
-    font-weight: 600;
-  }
-}
-
-/* Responsive */
 @media (max-width: 768px) {
   .charts-grid {
     grid-template-columns: 1fr;
@@ -1167,14 +1162,13 @@ export default {
 
   .distribution-container {
     flex-direction: column;
+    gap: 24px;
   }
 
   .bar-group {
     min-width: 20px;
 
-    .bar {
-      width: 14px;
-    }
+    .bar { width: 12px; }
   }
 
   .game-performance-chart .game-bar {
@@ -1182,7 +1176,7 @@ export default {
 
     .game-info {
       width: 100%;
-      margin-bottom: 5px;
+      margin-bottom: 6px;
     }
 
     .bar-track {

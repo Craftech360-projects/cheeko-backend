@@ -1,38 +1,71 @@
 <template>
   <div class="welcome">
 
-    <div class="operation-bar">
-      <h2 class="page-title">Device Management</h2>
-      <div class="right-operations">
-        <el-input placeholder="Enter device model or MAC address to search" v-model="searchKeyword" class="search-input"
-                  @keyup.enter.native="handleSearch" clearable/>
-        <el-button class="btn-search" @click="handleSearch">Search</el-button>
+    <div class="page-head">
+      <div>
+        <h1 class="page-title">Agent Devices</h1>
+        <p class="page-lead">Toys bound to this agent, with the playlists and firmware they carry.</p>
       </div>
     </div>
+
+    <ListToolbar
+      :count="deviceList.length"
+      count-noun="devices"
+      :total="deviceList.length"
+      :sort-options="sortOptions"
+      :sort-by.sync="sortBy"
+      :sort-dir.sync="sortDir"
+      :group-options="groupOptions"
+      :group-by.sync="groupBy"
+      :selecting.sync="selecting"
+      :selected-count="selectedCount"
+      :all-selected="isAllSelected"
+      :search.sync="searchKeyword"
+      search-placeholder="Device model or MAC address"
+      @select-all-matching="selectAllRows"
+      @clear-selection="clearSelection"
+    >
+      <template #bulk>
+        <el-button @click="bulkExport">Export</el-button>
+      </template>
+    </ListToolbar>
 
     <div class="main-wrapper">
       <div class="content-panel">
         <div class="content-area">
           <el-card class="device-card" shadow="never">
-            <el-table ref="deviceTable" :data="paginatedDeviceList" class="transparent-table"
+            <el-table ref="deviceTable" :data="visibleRows" class="transparent-table"
                       :header-cell-class-name="headerCellClassName" v-loading="loading"
+                      :row-class-name="deviceRowClass"
+                      @sort-change="onTableSortChange"
                       element-loading-text="Loading..."
-                      element-loading-spinner="el-icon-loading" element-loading-background="rgba(255, 255, 255, 0.7)">
-              <el-table-column label="Select" align="center" width="120">
+                      element-loading-spinner="el-icon-loading" element-loading-background="rgba(250, 249, 247, 0.75)">
+              <el-table-column v-if="selecting" label="" align="center" width="52">
                 <template slot-scope="scope">
                   <el-checkbox v-model="scope.row.selected"></el-checkbox>
                 </template>
               </el-table-column>
-              <el-table-column label="Device Model" prop="model" align="center">
+              <el-table-column label="Device Model" prop="model" min-width="160" sortable="custom">
                 <template slot-scope="scope">
-                  {{ getFirmwareTypeName(scope.row.model) }}
+                  <div class="rowid">
+                    <span class="rowid-mark accent"><i class="el-icon-cpu"></i></span>
+                    <span class="cell-key">{{ getFirmwareTypeName(scope.row.model) }}</span>
+                  </div>
                 </template>
               </el-table-column>
-              <el-table-column label="Firmware Version" prop="firmwareVersion" align="center"></el-table-column>
-              <el-table-column label="MAC Address" prop="macAddress" align="center"></el-table-column>
-              <el-table-column label="Bind Time" prop="bindTime" align="center"></el-table-column>
-              <el-table-column label="Last Conversation" prop="lastConversation" align="center"></el-table-column>
-              <el-table-column label="Remark" align="center">
+              <el-table-column label="Firmware Version" prop="firmwareVersion" min-width="150" sortable="custom">
+                <template slot-scope="scope"><span class="mono">{{ scope.row.firmwareVersion }}</span></template>
+              </el-table-column>
+              <el-table-column label="MAC Address" prop="macAddress" min-width="170" sortable="custom">
+                <template slot-scope="scope"><span class="mono">{{ scope.row.macAddress }}</span></template>
+              </el-table-column>
+              <el-table-column label="Bind Time" prop="bindTime" min-width="160" sortable="custom">
+                <template slot-scope="scope"><span class="mono">{{ scope.row.bindTime }}</span></template>
+              </el-table-column>
+              <el-table-column label="Last Conversation" prop="lastConversation" min-width="170" sortable="custom">
+                <template slot-scope="scope"><span class="mono">{{ scope.row.lastConversation }}</span></template>
+              </el-table-column>
+              <el-table-column label="Remark" min-width="180">
                 <template #default="{ row }">
                   <el-input
                       v-show="row.isEdit"
@@ -57,7 +90,7 @@
               </el-table-column>
               <el-table-column label="OTA Upgrade" align="center">
                 <template slot-scope="scope">
-                  <el-switch v-model="scope.row.otaSwitch" size="mini" active-color="#13ce66" inactive-color="#ff4949"
+                  <el-switch v-model="scope.row.otaSwitch" size="mini" active-color="#16130F" inactive-color="#E7E2D9"
                              @change="handleOtaSwitchChange(scope.row)"></el-switch>
                 </template>
               </el-table-column>
@@ -210,7 +243,8 @@
     </el-dialog>
 
     <!-- Content Picker Dialog -->
-    <el-dialog title="Add Content to Playlist" :visible.sync="contentPickerVisible" width="700px" top="5vh" append-to-body>
+    <el-dialog title="Add Content to Playlist" :visible.sync="contentPickerVisible" width="700px" top="5vh" append-to-body
+      :close-on-click-modal="!selectedContent.length">
       <div class="content-picker-header">
         <el-input v-model="contentSearchQuery" placeholder="Search content..." size="small" clearable @input="searchContent" style="width: 250px;">
           <i slot="prefix" class="el-icon-search"></i>
@@ -263,17 +297,35 @@
 </template>
 
 <script>
+import ListToolbar from '@/components/ListToolbar.vue';
+import listControls from '@/mixins/listControls';
 import Api from '@/apis/api';
 import AddDeviceDialog from "@/components/AddDeviceDialog.vue";
 import ManualAddDeviceDialog from "@/components/ManualAddDeviceDialog.vue";
 
 export default {
-  components: {
+  mixins: [listControls],
+  components: { ListToolbar,
     AddDeviceDialog,
     ManualAddDeviceDialog
   },
   data() {
     return {
+      // list controls — selection stays on `row.selected`
+      sortBy: 'lastConversation',
+      sortDir: 'desc',
+      sortOptions: [
+        { label: 'Last conversation', value: 'lastConversation' },
+        { label: 'Bind time', value: 'bindTime' },
+        { label: 'MAC address', value: 'macAddress' },
+        { label: 'Firmware', value: 'firmwareVersion' }
+      ],
+      groupOptions: [
+        { label: 'None', value: '' },
+        { label: 'Firmware', value: 'firmwareVersion' },
+        { label: 'Model', value: 'model' }
+      ],
+      searchTimer: null,
       addDeviceDialogVisible: false,
       manualAddDeviceDialogVisible: false,
       searchKeyword: "",
@@ -308,6 +360,12 @@ export default {
       addingToPlaylist: false };
   },
   computed: {
+    sourceRows() {
+      return this.deviceList;
+    },
+    selectedCount() {
+      return this.deviceList.filter(row => row.selected).length;
+    },
     filteredDeviceList() {
       const keyword = this.activeSearchKeyword.toLowerCase();
       if (!keyword) return this.deviceList;
@@ -360,6 +418,35 @@ export default {
     this.getFirmwareTypes()
   },
   methods: {
+    deviceRowClass({ row }) {
+      return row.selected ? 'selected-row' : '';
+    },
+    selectAllRows() {
+      this.isAllSelected = true;
+      this.deviceList.forEach(row => { this.$set(row, 'selected', true); });
+    },
+    clearSelection() {
+      this.isAllSelected = false;
+      this.deviceList.forEach(row => { this.$set(row, 'selected', false); });
+    },
+    bulkExport() {
+      const rows = this.deviceList.filter(row => row.selected);
+      if (!rows.length) {
+        this.$message.warning('Nothing to export.');
+        return;
+      }
+      const cols = ['macAddress', 'model', 'firmwareVersion', 'bindTime', 'lastConversation', 'remark'];
+      const escape = value => `"${String(value === null || value === undefined ? '' : value).replace(/"/g, '""')}"`;
+      const csv = [cols.join(',')]
+        .concat(rows.map(row => cols.map(col => escape(row[col])).join(',')))
+        .join('\n');
+      const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'agent-devices.csv';
+      link.click();
+      URL.revokeObjectURL(url);
+    },
     async getFirmwareTypes() {
       try {
         const res = await Api.dict.getDictDataByType('FIRMWARE_TYPE')
@@ -829,13 +916,14 @@ export default {
 </script>
 
 <style scoped>
+
 .welcome {
   min-height: 506px;
-  height: 100vh;
+  min-height: 0;
   display: flex;
   position: relative;
   flex-direction: column;
-  background: linear-gradient(to bottom right, #fff5eb, #fff7f0, #ffe8d6);
+  background: transparent;
   background-size: cover;
   -webkit-background-size: cover;
   -o-background-size: cover;
@@ -847,7 +935,7 @@ export default {
   min-height: calc(100vh - 24vh);
   height: auto;
   max-height: 80vh;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
+  box-shadow: none;
   position: relative;
   background: rgba(237, 242, 255, 0.5);
   display: flex;
@@ -862,9 +950,14 @@ export default {
 }
 
 .page-title {
-  font-size: 24px;
   margin: 0;
-  color: #2c3e50;
+  font-family: $font-display;
+  font-size: 34px;
+  font-weight: 400;
+  line-height: 1.05;
+  letter-spacing: -0.025em;
+  color: $text-dark;
+
 }
 
 .right-operations {
@@ -879,14 +972,14 @@ export default {
 }
 
 .btn-search {
-  background: linear-gradient(135deg, #6b8cff, #a966ff);
+  background: $surface;
   border: none;
   color: white;
 }
 
 ::v-deep .search-input .el-input__inner {
   border-radius: 4px;
-  border: 1px solid #DCDFE6;
+  border: 1px solid $border-color;
   background-color: white;
   transition: border-color 0.2s;
 }
@@ -901,8 +994,8 @@ export default {
   line-height: 32px;
   border-radius: 4px;
   border: 1px solid #e4e7ed;
-  background: #dee7ff;
-  color: #606266;
+  background: $surface-sunk;
+  color: $text-body;
   font-size: 14px;
 }
 
@@ -929,14 +1022,14 @@ export default {
   display: inline-block;
   border-left: 6px solid transparent;
   border-right: 6px solid transparent;
-  border-top: 9px solid #606266;
+  border-top: 9px solid $text-body;
   position: relative;
   transform: rotate(0deg);
   transition: transform 0.3s;
 }
 
 ::v-deep .search-input .el-input__inner:focus {
-  border-color: #6b8cff;
+  border-color: $text-light;
   outline: none;
 }
 
@@ -1003,26 +1096,26 @@ export default {
   font-weight: 500;
   border: none;
   transition: all 0.3s ease;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+  box-shadow: none;
 }
 
 .ctrl_btn .el-button:hover {
   transform: translateY(-1px);
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+  box-shadow: none;
 }
 
 .ctrl_btn .el-button--primary {
-  background: #5f70f3;
+  background: $text-dark;
   color: white;
 }
 
 .ctrl_btn .el-button--success {
-  background: #5bc98c;
+  background: $success;
   color: white;
 }
 
 .ctrl_btn .el-button--danger {
-  background: #fd5b63;
+  background: $danger;
   color: white;
 }
 
@@ -1045,8 +1138,8 @@ export default {
   padding: 0 12px;
   border-radius: 4px;
   border: 1px solid #e4e7ed;
-  background: #dee7ff;
-  color: #606266;
+  background: $surface-sunk;
+  color: $text-body;
   font-size: 14px;
   cursor: pointer;
   transition: all 0.3s ease;
@@ -1056,7 +1149,7 @@ export default {
 .custom-pagination .pagination-btn:nth-child(2):hover,
 .custom-pagination .pagination-btn:nth-last-child(2):hover,
 .custom-pagination .pagination-btn:nth-child(3):hover {
-  background: #d7dce6;
+  background: $border-color;
 }
 
 .custom-pagination .pagination-btn:disabled {
@@ -1071,7 +1164,7 @@ export default {
   border-radius: 4px;
   border: 1px solid transparent;
   background: transparent;
-  color: #606266;
+  color: $text-body;
   font-size: 14px;
   cursor: pointer;
   transition: all 0.3s ease;
@@ -1082,9 +1175,9 @@ export default {
 }
 
 .custom-pagination .pagination-btn.active {
-  background: #5f70f3 !important;
+  background: $text-dark !important;
   color: #ffffff !important;
-  border-color: #5f70f3 !important;
+  border-color: $text-dark !important;
 }
 
 .custom-pagination .pagination-btn.active:hover {
@@ -1092,7 +1185,7 @@ export default {
 }
 
 .custom-pagination .total-text {
-  color: #909399;
+  color: $text-light;
   font-size: 14px;
   margin-left: 10px;
 }
@@ -1179,8 +1272,8 @@ export default {
 }
 
 :deep(.el-checkbox__input.is-checked .el-checkbox__inner) {
-  background-color: #5f70f3 !important;
-  border-color: #5f70f3 !important;
+  background-color: $text-dark !important;
+  border-color: $text-dark !important;
 }
 
 ::v-deep .el-table--border::after,
@@ -1201,7 +1294,7 @@ export default {
 
 .playlist-count {
   font-size: 13px;
-  color: #909399;
+  color: $text-light;
 }
 
 .playlist-item-title {
@@ -1211,7 +1304,7 @@ export default {
 }
 
 .music-icon {
-  color: #409EFF;
+  color: $info;
   font-size: 16px;
 }
 
@@ -1221,7 +1314,7 @@ export default {
 }
 
 .remove-btn {
-  color: #F56C6C !important;
+  color: $danger !important;
 }
 
 .remove-btn:hover {
@@ -1242,11 +1335,11 @@ export default {
 }
 
 ::v-deep .el-tabs__item.is-active {
-  color: #5f70f3;
+  color: $text-dark;
 }
 
 ::v-deep .el-tabs__active-bar {
-  background-color: #5f70f3;
+  background-color: $text-dark;
 }
 
 .playlist-actions {
@@ -1270,12 +1363,12 @@ export default {
 
 .content-icon {
   font-size: 24px;
-  color: #909399;
+  color: $text-light;
 }
 
 .content-desc {
   font-size: 12px;
-  color: #909399;
+  color: $text-light;
   margin-top: 2px;
 }
 
@@ -1290,6 +1383,6 @@ export default {
 
 .selected-count {
   font-size: 13px;
-  color: #606266;
+  color: $text-body;
 }
 </style>

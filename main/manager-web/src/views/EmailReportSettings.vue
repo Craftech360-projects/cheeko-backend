@@ -2,9 +2,11 @@
   <div class="welcome">
     <!-- Common Header -->
     <div class="role-config-container">
-      <div class="header-bar">
-        <h2 class="page-title">Email Report Settings</h2>
-        <p class="page-description">Configure daily email reports for system activity summaries</p>
+      <div class="page-head">
+        <div>
+          <h1 class="page-title">Email Reports</h1>
+          <p class="page-lead">Who receives the nightly family digest, when it goes out and what is in it.</p>
+        </div>
       </div>
 
       <el-card class="settings-card" shadow="never">
@@ -118,8 +120,21 @@
           </el-button>
         </div>
 
-        <el-table :data="historyList" class="transparent-table" v-loading="historyLoading" empty-text="No email history">
-          <el-table-column label="Date" prop="reportDate" min-width="120">
+        <ListToolbar
+          :count="historyList.length"
+          count-noun="sends"
+          :total="historyList.length"
+          :sort-options="sortOptions"
+          :sort-by.sync="sortBy"
+          :sort-dir.sync="sortDir"
+          :selecting="false"
+          :selectable="false"
+          :search.sync="listSearch"
+          search-placeholder="Enter email address"
+        />
+        <el-table ref="table" :data="visibleRows" class="transparent-table" v-loading="historyLoading"
+          empty-text="No email history" @sort-change="onTableSortChange">
+          <el-table-column label="Date" prop="reportDate" min-width="140" sortable="custom">
             <template slot-scope="scope">
               {{ formatDate(scope.row.reportDate) }}
             </template>
@@ -128,7 +143,7 @@
             <template slot-scope="scope">
               <span>{{ (scope.row.recipients || []).length }} recipient(s)</span>
               <el-tooltip v-if="scope.row.recipients && scope.row.recipients.length > 0" :content="scope.row.recipients.join(', ')" placement="top">
-                <i class="el-icon-info" style="margin-left: 4px; color: #909399;"></i>
+                <i class="el-icon-info" style="margin-left: 4px; color: #A8A199;"></i>
               </el-tooltip>
             </template>
           </el-table-column>
@@ -178,7 +193,8 @@
     </div>
 
     <!-- Test Email Dialog -->
-    <el-dialog title="Send Test Email" :visible.sync="testEmailDialogVisible" width="400px">
+    <el-dialog title="Send Test Email" :visible.sync="testEmailDialogVisible" width="400px"
+      :close-on-click-modal="!testEmailRecipient">
       <el-form>
         <el-form-item label="Recipient Email">
           <el-input v-model="testEmailRecipient" placeholder="Enter email address" />
@@ -289,14 +305,25 @@
 </template>
 
 <script>
+import ListToolbar from '@/components/ListToolbar.vue';
+import listControls from '@/mixins/listControls';
 import Api from '@/apis/api';
 
 export default {
   name: 'EmailReportSettings',
-  components: {
+  mixins: [listControls],
+  components: { ListToolbar,
     },
   data() {
     return {
+      // list controls
+      sortBy: 'reportDate',
+      sortDir: 'desc',
+      sortOptions: [
+        { label: 'Date', value: 'reportDate' },
+        { label: 'Status', value: 'status' }
+      ],
+      searchFields: ['recipients', 'status'],
       config: {
         enabled: false,
         scheduleHour: 8,
@@ -333,6 +360,11 @@ export default {
   created() {
     this.fetchConfig();
     this.fetchHistory();
+  },
+  computed: {
+    sourceRows() {
+      return this.historyList || [];
+    }
   },
   methods: {
     fetchConfig() {
@@ -534,9 +566,11 @@ export default {
 </script>
 
 <style lang="scss" scoped>
+@import '@/styles/theme.scss';
+
 .welcome {
-  background: linear-gradient(135deg, #667eea11 0%, #764ba211 100%);
-  min-height: 100vh;
+  background: transparent;
+  min-height: 0;
 }
 
 .role-config-container {
@@ -549,13 +583,13 @@ export default {
   margin-bottom: 20px;
 
   .page-title {
-    color: #3d4566;
+    color: $text-dark;
     font-size: 24px;
     margin: 0 0 8px 0;
   }
 
   .page-description {
-    color: #909399;
+    color: $text-light;
     font-size: 14px;
     margin: 0;
   }
@@ -583,7 +617,7 @@ export default {
 
     h3 {
       margin: 0;
-      color: #3d4566;
+      color: $text-dark;
       font-size: 16px;
     }
   }
@@ -593,7 +627,7 @@ export default {
   max-width: 600px;
 
   .form-hint {
-    color: #909399;
+    color: $text-light;
     font-size: 12px;
     margin-left: 12px;
   }
@@ -641,7 +675,7 @@ export default {
 
     h3 {
       margin: 0;
-      color: #3d4566;
+      color: $text-dark;
       font-size: 16px;
     }
   }
@@ -652,7 +686,7 @@ export default {
 
   :deep(.el-table__header-wrapper th) {
     background: #f8f9fa !important;
-    color: #606266;
+    color: $text-body;
     font-weight: 600;
   }
 
@@ -661,17 +695,17 @@ export default {
   }
 
   :deep(.el-table__row:hover td) {
-    background: #f5f7fa !important;
+    background: $surface-sunk !important;
   }
 }
 
 .error-text {
-  color: #f56c6c;
+  color: $danger;
   font-size: 13px;
 }
 
 .success-text {
-  color: #909399;
+  color: $text-light;
 }
 
 .pagination-container {
@@ -695,7 +729,7 @@ export default {
 .preview-loading {
   text-align: center;
   padding: 40px;
-  color: #909399;
+  color: $text-light;
 
   i {
     font-size: 24px;
@@ -720,14 +754,14 @@ export default {
 
   h4 {
     margin: 0 0 12px 0;
-    color: #3d4566;
+    color: $text-dark;
     font-size: 14px;
     font-weight: 600;
   }
 
   p {
     margin: 0;
-    color: #606266;
+    color: $text-body;
     font-size: 13px;
   }
 }
@@ -755,7 +789,7 @@ export default {
   .stat-label {
     display: block;
     font-size: 11px;
-    color: #909399;
+    color: $text-light;
     text-transform: uppercase;
     margin-top: 4px;
   }
@@ -768,7 +802,7 @@ export default {
 .no-data {
   text-align: center;
   padding: 40px;
-  color: #909399;
+  color: $text-light;
 
   i {
     font-size: 48px;

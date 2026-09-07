@@ -1,137 +1,219 @@
 @import '@/styles/theme.scss';
 
+// ============================================================
+// Auth split canvas
+// An ink editorial panel against a white form column. Replaces the
+// full-bleed orange gradient.
+// ============================================================
 .welcome {
-  min-width: 1200px;
-  min-height: 675px;
-  height: 100vh;
+  min-width: 0;
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 1.05fr 0.95fr;
+  background: $surface;
+}
+
+// ---------- Left: editorial panel ----------
+.auth-art {
+  background: $text-dark;
+  color: #EDE9E2;
+  padding: 56px 60px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  position: relative;
+  overflow: hidden;
+}
+
+.auth-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+
+  img {
+    width: 44px;
+    height: 44px;
+    object-fit: contain;
+  }
+}
+
+.auth-meta {
+  font-family: $font-mono;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #8A837A;
+}
+
+.auth-quote {
+  font-family: $font-display;
+  font-size: 44px;
+  font-weight: 400;
+  line-height: 1.15;
+  letter-spacing: -0.03em;
+  max-width: 15ch;
+  color: #EDE9E2;
+  margin: 0;
+}
+
+// ---------- Right: form column ----------
+.auth-form {
+  background: $surface;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(145deg, #fff7f0, #ffb347, #ff9100, #fff7f0);
-  background-size: cover;
-  /* 确保背景图像覆盖整个元素 */
-  background-position: center;
-  /* 从顶部中心对齐 */
-  -webkit-background-size: cover;
-  /* 兼容老版本WebKit浏览器 */
-  -o-background-size: cover;
-  /* 兼容老版本Opera浏览器 */
+  padding: 56px;
+  min-width: 0;
 }
 
-.login-text {
-  font-weight: 700;
+.auth-box {
+  width: 392px;
+  max-width: 100%;
+}
+
+.auth-title {
+  font-family: $font-display;
   font-size: 32px;
-  text-align: left;
-  color: #3d4566;
-}
-
-.login-welcome {
   font-weight: 400;
-  font-size: 9px;
-  text-align: left;
-  color: #818cae;
-  align-self: flex-end;
-  margin-bottom: 7px;
+  letter-spacing: -0.025em;
+  color: $text-dark;
+  margin: 0;
 }
 
-.login-box {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  right: 18%;
-  background-color: #fff;
-  border-radius: 20px;
-  padding: 35px 0;
-  width: 450px;
-  box-sizing: border-box;
+.auth-lead {
+  color: $text-gray;
+  font-size: 13px;
+  margin: 8px 0 34px;
 }
 
-.el-dropdown-link {
-  font-weight: 400;
-  font-size: 14px;
-  text-align: left;
-  color: #979db1;
-}
-
-.input-icon {
-  width: 19px;
-  height: 22px;
-  flex-shrink: 0;
-}
-
-.login-btn {
-  height: 35px;
-  background: $primary;
-  border-radius: 10px;
-  font-weight: 400;
-  font-size: 14px;
-  cursor: pointer;
-  color: #fff;
-  line-height: 35px;
-  margin: 15px 30px 15px 30px;
-
-  &:hover {
-    background: $primary-dark;
-  }
-}
-
+// Fields
 .input-box {
+  margin-top: 18px;
+
+  .micro-label {
+    margin-bottom: 7px;
+  }
+
+  ::v-deep .el-input__inner {
+    height: 48px;
+    line-height: 48px;
+  }
+}
+
+.input-row {
   display: flex;
-  margin-top: 20px;
-  align-items: center;
-  border-radius: 10px;
-  background: #f6f8fb;
-  border: 1px solid #e4e6ef;
+  align-items: flex-end;
+  gap: 12px;
+  margin-top: 18px;
+
+  > .input-box {
+    margin-top: 0;
+    flex: 1;
+    min-width: 0;
+  }
+}
+
+.captcha-img {
+  // The captcha is a 150x40 SVG, so it stays crisp when scaled up — it was
+  // being rendered *smaller* than its native size.
+  width: 176px;
+  height: 48px;
+  border: 1px solid $border-color;
+  border-radius: $radius-sm;
+  background: $surface-sunk;
+  cursor: pointer;
+  // `contain`, never `cover`: the box and the SVG have different aspect
+  // ratios, so cover was cropping characters off both ends.
+  object-fit: contain;
+  flex: 0 0 auto;
+  padding: 2px;
+}
+
+// Primary action
+.login-btn,
+.auth-btn {
+  margin-top: 26px;
   height: 40px;
-  padding: 0 15px;
-  gap: 20px;
+  width: 100%;
+  border: 0;
+  border-radius: $radius-sm;
+  background: $text-dark;
+  color: $white;
+  font-size: 13.5px;
+  font-weight: 500;
+  font-family: $font-sans;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 0.15s ease, transform 0.1s ease;
+
+  &:hover { background: lighten($text-dark, 12%); }
+  &:active { transform: scale(0.99); }
 }
 
-::v-deep {
-  .el-tabs__nav-wrap::after {
-    height: 1px;
-  }
+// Secondary links under the form
+.auth-alt {
+  margin-top: 22px;
+  font-size: 12.5px;
+  color: $text-gray;
+  text-align: center;
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
 
-  .el-tabs__nav-wrap::before {
-    content: "";
-    position: absolute;
-    left: 0;
-    top: 0;
-    width: 100%;
-    height: 1px;
-    background-color: #e4e7ed;
-    z-index: 1;
-  }
+  a,
+  .link {
+    color: $text-dark;
+    text-decoration: none;
+    border-bottom: 1px solid $border-color;
+    cursor: pointer;
 
-  .el-tabs__item {
-    height: 65px;
-    line-height: 65px;
-    font-weight: 700;
-    color: #3d4566;
-  }
-
-  .el-tabs__item.is-active {
-    color: $primary;
-  }
-
-  .el-tabs__nav-scroll {
-    padding: 0 30px;
-  }
-
-  .el-input__inner {
-    border: none;
-    background-color: transparent;
-    height: 56px;
-    padding: 0;
+    &:hover { border-bottom-color: $text-light; }
   }
 }
 
-.login-person {
-  width: 500px;
-  color: #fff;
-  position: absolute;
-  top: 50%;
-  left: 25%;
-  transform: translate(-50%, -50%);
-  z-index: 1;
+.auth-legal {
+  margin-top: 26px;
+  padding-top: 18px;
+  border-top: 1px solid $divider-color;
+  font-size: 11.5px;
+  color: $text-light;
+  line-height: 1.6;
+
+  .link {
+    color: $text-gray;
+    cursor: pointer;
+    border-bottom: 1px solid $border-color;
+  }
+}
+
+.login-type-container {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 18px;
+}
+
+.auth-footer {
+  margin-top: 30px;
+  text-align: center;
+
+  ::v-deep .copyright { color: $text-light; font-size: 11px; }
+}
+
+// ---------- Responsive ----------
+@media (max-width: 900px) {
+  .welcome { grid-template-columns: 1fr; }
+
+  .auth-art {
+    padding: 32px 24px;
+    gap: 24px;
+    min-height: 220px;
+  }
+
+  .auth-quote { font-size: 30px; max-width: none; }
+
+  .auth-form { padding: 32px 24px; }
 }

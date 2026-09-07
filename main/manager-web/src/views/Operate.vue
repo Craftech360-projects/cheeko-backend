@@ -1,13 +1,13 @@
 <template>
   <div class="operate-page">
-    <div class="operate-header">
+    <div class="page-head">
       <div>
-        <h2 class="page-title">Operate</h2>
-        <p class="page-subtitle">Fleet health at a glance · IST</p>
+        <h1 class="page-title">Fleet &amp; Ops</h1>
+        <p class="page-subtitle">Connectivity, firmware spread and the incidents worth acting on today · IST</p>
       </div>
-      <div class="header-links">
-        <el-button size="small" icon="el-icon-monitor" @click="$router.push('/all-devices')">All devices</el-button>
-        <el-button size="small" icon="el-icon-upload" @click="$router.push('/ota-management')">OTA firmware</el-button>
+      <div class="page-actions">
+        <el-button size="small" @click="$router.push('/all-devices')">All devices</el-button>
+        <el-button size="small" @click="$router.push('/ota-management')">OTA firmware</el-button>
       </div>
     </div>
 
@@ -78,18 +78,6 @@
         </div>
       </div>
 
-      <!-- Recent events -->
-      <h3 class="section-title">Recent fleet events</h3>
-      <div class="card">
-        <div v-if="recentEvents.length" class="event-list">
-          <div v-for="(event, i) in recentEvents" :key="i" class="event-row">
-            <span class="event-type" :class="{ error: event.severity === 'critical' }">{{ event.source }}</span>
-            <span class="event-text"><b>{{ event.title }}</b> — {{ event.detail }} <span class="mono muted">{{ event.macAddress }}</span></span>
-            <span class="event-time">{{ shortDate(event.createdAt) }}</span>
-          </div>
-        </div>
-        <div v-else class="card-empty">No recent device events.</div>
-      </div>
     </div>
   </div>
 </template>
@@ -105,18 +93,13 @@ export default {
       kpis: {},
       firmwareCoverage: [],
       otaRollout: null,
-      watchlist: [],
-      recentEvents: []
+      watchlist: []
     };
   },
   created() {
     this.loadOperate();
   },
   methods: {
-    shortDate(value) {
-      if (!value) return '—';
-      return new Date(value).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
-    },
     attentionLevel(item) {
       return item.severity || 'warning';
     },
@@ -129,7 +112,6 @@ export default {
           this.firmwareCoverage = (data.data.sections && data.data.sections.firmwareCoverage) || [];
           this.otaRollout = (data.data.sections && data.data.sections.otaRollout) || null;
           this.watchlist = (data.data.sections && data.data.sections.watchlist) || [];
-          this.recentEvents = (data.data.sections && data.data.sections.recentEvents) || [];
         } else {
           this.$message.error(data.msg || 'Failed to load fleet health');
         }
@@ -146,7 +128,7 @@ export default {
   max-width: 1280px;
 }
 
-.operate-header {
+.page-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -156,14 +138,21 @@ export default {
 
 .page-title {
   margin: 0;
-  font-size: 20px;
+  font-family: $font-display;
+  font-size: 34px;
+  font-weight: 400;
+  line-height: 1.05;
+  letter-spacing: -0.025em;
   color: $text-dark;
+
 }
 
 .page-subtitle {
-  margin: 2px 0 0;
-  font-size: 12px;
+  margin: 7px 0 0;
+  font-size: 13px;
   color: $text-gray;
+  max-width: 62ch;
+
 }
 
 .kpi-row {
@@ -174,28 +163,37 @@ export default {
 }
 
 .card {
-  background: #fff;
+  background: $surface;
   border: 1px solid $border-color;
-  border-radius: 12px;
-  padding: 14px 16px;
-  box-shadow: 0 4px 14px rgba(61, 69, 102, 0.05);
+  border-radius: $radius-lg;
+  padding: 22px 24px;
+  box-shadow: none;
   min-width: 0;
+
 }
 
 .kpi-value {
-  font-size: 22px;
-  font-weight: 700;
+  font-family: $font-display;
+  font-size: 40px;
+  font-weight: 400;
+  line-height: 1;
+  letter-spacing: -0.03em;
   color: $text-dark;
-  font-variant-numeric: tabular-nums;
 
-  &.good { color: #0ca30c; }
-  &.bad { color: #d03b3b; }
+
+  &.good { color: $success; }
+  &.bad { color: $danger; }
 }
 
 .kpi-label {
-  font-size: 11.5px;
-  color: $text-gray;
-  margin-top: 2px;
+  font-family: $font-mono;
+  font-size: 9.5px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.11em;
+  color: $text-light;
+  margin-top: 10px;
+
 }
 
 .two-col {
@@ -206,9 +204,11 @@ export default {
 }
 
 .card-subtitle {
-  margin: 0 0 10px;
-  font-size: 13px;
+  margin: 0 0 16px;
+  font-size: 13.5px;
+  font-weight: 590;
   color: $text-dark;
+
 
   &.spacing-top { margin-top: 16px; }
 }
@@ -228,7 +228,7 @@ export default {
 .force-badge {
   font-size: 10.5px;
   font-weight: 600;
-  color: #d03b3b;
+  color: $danger;
   background: rgba(208, 59, 59, 0.1);
   border-radius: 8px;
   padding: 2px 8px;
@@ -262,14 +262,14 @@ export default {
   font-size: 12px;
   color: $text-dark;
 
-  &.latest { color: #0a7a0a; font-weight: 700; }
+  &.latest { color: $success; font-weight: 700; }
 }
 
 .fw-bar {
   flex: 1;
   height: 8px;
   border-radius: 4px;
-  background: #f0f1f7;
+  background: $divider-color;
   overflow: hidden;
 
   .fw-fill {
@@ -310,9 +310,9 @@ export default {
   border-radius: 50%;
   flex-shrink: 0;
 
-  &.warning { background: #fab219; }
-  &.serious { background: #ec835a; }
-  &.critical { background: #d03b3b; }
+  &.warning { background: $warning; }
+  &.serious { background: $primary; }
+  &.critical { background: $danger; }
 }
 
 .watch-main {
@@ -343,66 +343,29 @@ export default {
   color: $text-gray;
 }
 
-.event-list {
-  max-height: 300px;
-  overflow-y: auto;
-}
 
-.event-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 7px 0;
-  border-bottom: 1px solid #f4f5fa;
-  font-size: 12px;
 
-  &:last-child { border-bottom: none; }
-}
 
-.event-type {
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  padding: 2px 7px;
-  border-radius: 8px;
-  background: #f0f1f7;
-  color: $text-gray;
-  flex-shrink: 0;
 
-  &.error { background: rgba(208, 59, 59, 0.1); color: #d03b3b; }
-  &.sync { background: rgba(42, 120, 214, 0.1); color: #2a78d6; }
-}
-
-.event-text {
-  flex: 1;
-  color: $text-dark;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.event-time {
-  color: $text-gray;
-  font-size: 11px;
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
 
 .section-title {
-  margin: 4px 0 10px;
-  font-size: 14px;
+  margin: 30px 0 14px;
+  font-family: $font-display;
+  font-size: 22px;
+  font-weight: 400;
+  letter-spacing: -0.02em;
   color: $text-dark;
+
 }
 
 .card-empty {
+  padding: 32px 0;
   text-align: center;
-  color: $text-gray;
+  color: $text-light;
   font-size: 12.5px;
-  padding: 20px 0;
 
-  &.ok { color: #0ca30c; }
+
+  &.ok { color: $success; }
 }
 
 .muted {
@@ -411,7 +374,10 @@ export default {
 }
 
 .mono {
-  font-family: 'Consolas', 'Menlo', monospace;
+  font-family: $font-mono;
+  font-size: 11.5px;
+  letter-spacing: -0.01em;
+
 }
 
 @media (max-width: 1100px) {

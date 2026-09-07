@@ -5,21 +5,15 @@
       <div class="content-panel">
         <div class="content-area">
           <el-card class="config-card" shadow="never">
-            <div class="config-header">
-              <div class="header-left">
-                <div class="header-icon">
-                  <img loading="lazy" src="@/assets/home/setting-user.png" alt="" />
-                </div>
-                <span class="header-title">{{ form.agentName || 'Role Configuration' }}</span>
+            <div class="page-head">
+              <div>
+                <h1 class="page-title">{{ form.agentName || 'Role Configuration' }}</h1>
+                <p class="page-lead">Voice, prompt and memory for one agent. Changes take effect on the next session.</p>
               </div>
-              <div class="header-actions">
-                <el-button type="primary" class="save-btn" @click="saveConfig">
-                  <i class="el-icon-check"></i> Save
-                </el-button>
-                <el-button class="reset-btn" @click="resetConfig">
-                  <i class="el-icon-refresh"></i> Reset
-                </el-button>
-                <button class="custom-close-btn" @click="goToHome">×</button>
+              <div class="page-actions">
+                <el-button size="small" @click="goToHome">Close</el-button>
+                <el-button size="small" class="reset-btn" @click="resetConfig">Reset</el-button>
+                <el-button size="small" type="primary" class="save-btn" @click="saveConfig">Save changes</el-button>
               </div>
             </div>
 
@@ -259,10 +253,10 @@ export default {
 
 .welcome {
   min-width: 600px;
-  height: 100vh;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  background: linear-gradient(135deg, #fff5eb 0%, #fff7f0 50%, #ffe8d6 100%);
+  background: transparent;
   overflow: hidden;
 }
 
@@ -271,7 +265,7 @@ export default {
   margin: 12px;
   margin-top: 8px;
   border-radius: 16px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+  box-shadow: none;
   background: rgba(255, 255, 255, 0.9);
   display: flex;
   overflow: hidden;
@@ -317,12 +311,12 @@ export default {
 .header-icon {
   width: 36px;
   height: 36px;
-  background: linear-gradient(135deg, $primary, darken($primary, 10%));
+  background: $surface;
   border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 4px 12px rgba($primary, 0.3);
+  box-shadow: none;
 }
 
 .header-icon img {
@@ -344,18 +338,18 @@ export default {
 }
 
 .save-btn {
-  background: linear-gradient(135deg, $primary, darken($primary, 8%));
+  background: $surface;
   border: none;
   border-radius: 8px;
   padding: 8px 16px;
   font-size: 13px;
   font-weight: 500;
-  box-shadow: 0 4px 12px rgba($primary, 0.3);
+  box-shadow: none;
   transition: all 0.3s;
 
   &:hover {
     transform: translateY(-2px);
-    box-shadow: 0 6px 16px rgba($primary, 0.4);
+    box-shadow: none;
   }
 }
 
@@ -398,7 +392,7 @@ export default {
 
 .divider {
   height: 1px;
-  background: linear-gradient(90deg, transparent, #e8e8e8, transparent);
+  background: $surface;
   margin-bottom: 12px;
 }
 
@@ -412,13 +406,13 @@ export default {
   background: white;
   border-radius: 12px;
   padding: 12px 14px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  box-shadow: none;
   border: 1px solid #f0f0f0;
   margin-bottom: 0;
   transition: all 0.3s;
 
   &:hover {
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+    box-shadow: none;
     border-color: rgba($primary, 0.2);
   }
 }
@@ -441,7 +435,7 @@ export default {
 
     &:focus {
       border-color: $primary;
-      box-shadow: 0 0 0 3px rgba($primary, 0.1);
+      box-shadow: none;
     }
   }
 }
@@ -457,7 +451,7 @@ export default {
 
     &:focus {
       border-color: $primary;
-      box-shadow: 0 0 0 3px rgba($primary, 0.1);
+      box-shadow: none;
     }
   }
 

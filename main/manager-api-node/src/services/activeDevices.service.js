@@ -123,16 +123,22 @@ const deviceRfidBreakdown = async (mac, dateISO) => {
  * role is aliased to the chat_type the UI expects (1=user, 2=agent).
  */
 const deviceChatHistory = async (mac, dateISO) => prisma.$queryRaw`
-  SELECT id,
-         session_id,
-         CASE WHEN role = 'user' THEN 1 ELSE 2 END AS chat_type,
-         content,
-         audio_id,
-         created_at
-  FROM voice_session_messages
-  WHERE mac_address ILIKE ${mac}
-    AND (created_at AT TIME ZONE ${IST})::date = ${dateISO}::date
-  ORDER BY created_at ASC, sequence ASC
+  SELECT m.id,
+         m.session_id,
+         CASE WHEN m.role = 'user' THEN 1 ELSE 2 END AS chat_type,
+         m.content,
+         m.audio_id,
+         m.created_at,
+         COALESCE(a.agent_name, sa.agent_name) AS agent_name,
+         COALESCE(k.nickname, k.name) AS kid_name
+  FROM voice_session_messages m
+  LEFT JOIN ai_agent a ON a.id = m.agent_id
+  LEFT JOIN voice_sessions s ON s.session_id = m.session_id
+  LEFT JOIN ai_agent sa ON sa.id = s.agent_id
+  LEFT JOIN kid_profile k ON k.id = s.kid_id
+  WHERE m.mac_address ILIKE ${mac}
+    AND (m.created_at AT TIME ZONE ${IST})::date = ${dateISO}::date
+  ORDER BY m.created_at ASC, m.sequence ASC
   LIMIT 500;
 `;
 

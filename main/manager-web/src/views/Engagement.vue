@@ -2,7 +2,7 @@
   <div class="engagement-page">
     <div class="page-head">
       <div>
-        <h2 class="page-title">Engagement</h2>
+        <h1 class="page-title">Engagement</h1>
         <p class="page-subtitle">Who is playing, how often, and when · IST</p>
       </div>
       <el-radio-group v-model="range" size="small" @change="load">
@@ -237,14 +237,21 @@ export default {
 
 .page-title {
   margin: 0;
-  font-size: 20px;
+  font-family: $font-display;
+  font-size: 34px;
+  font-weight: 400;
+  line-height: 1.05;
+  letter-spacing: -0.025em;
   color: $text-dark;
+
 }
 
 .page-subtitle {
-  margin: 2px 0 0;
-  font-size: 12px;
+  margin: 7px 0 0;
+  font-size: 13px;
   color: $text-gray;
+  max-width: 62ch;
+
 }
 
 .kpi-row {
@@ -255,39 +262,50 @@ export default {
 }
 
 .card {
-  background: #fff;
+  background: $surface;
   border: 1px solid $border-color;
-  border-radius: 12px;
-  padding: 14px 16px;
-  box-shadow: 0 4px 14px rgba(61, 69, 102, 0.05);
+  border-radius: $radius-lg;
+  padding: 22px 24px;
+  box-shadow: none;
   min-width: 0;
+
 }
 
 .kpi-value {
-  font-size: 21px;
-  font-weight: 700;
+  font-family: $font-display;
+  font-size: 40px;
+  font-weight: 400;
+  line-height: 1;
+  letter-spacing: -0.03em;
   color: $text-dark;
-  font-variant-numeric: tabular-nums;
+
 }
 
 .kpi-unit {
-  font-size: 13px;
+  font-size: 16px;
   color: $text-gray;
-  font-weight: 500;
+  letter-spacing: 0;
+  margin-left: 4px;
+
 }
 
 .kpi-delta {
   font-size: 11px;
   font-weight: 600;
 
-  &.good { color: #006300; }
-  &.bad { color: #d03b3b; }
+  &.good { color: $success; }
+  &.bad { color: $danger; }
 }
 
 .kpi-label {
-  font-size: 11px;
-  color: $text-gray;
-  margin-top: 2px;
+  font-family: $font-mono;
+  font-size: 9.5px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.11em;
+  color: $text-light;
+  margin-top: 10px;
+
 }
 
 .two-col {
@@ -298,9 +316,11 @@ export default {
 }
 
 .card-subtitle {
-  margin: 0 0 10px;
-  font-size: 13px;
+  margin: 0 0 16px;
+  font-size: 13.5px;
+  font-weight: 590;
   color: $text-dark;
+
 }
 
 .muted {
@@ -320,7 +340,7 @@ export default {
   border-radius: 10px;
   padding: 12px;
 
-  &.good .return-num { color: #0a7a0a; }
+  &.good .return-num { color: $success; }
 }
 
 .return-num {
@@ -337,9 +357,10 @@ export default {
 }
 
 .footnote {
-  margin: 10px 0 0;
-  font-size: 10.5px;
-  color: $text-gray;
+  margin: 14px 0 0;
+  font-size: 11.5px;
+  color: $text-light;
+
 }
 
 .heatmap-card {
@@ -400,7 +421,7 @@ export default {
 }
 
 .quiet-days {
-  color: #d03b3b;
+  color: $danger;
   font-weight: 600;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
@@ -413,18 +434,23 @@ export default {
 }
 
 .section-title {
-  margin: 4px 0 10px;
-  font-size: 14px;
+  margin: 30px 0 14px;
+  font-family: $font-display;
+  font-size: 22px;
+  font-weight: 400;
+  letter-spacing: -0.02em;
   color: $text-dark;
+
 }
 
 .card-empty {
+  padding: 32px 0;
   text-align: center;
-  color: $text-gray;
+  color: $text-light;
   font-size: 12.5px;
-  padding: 28px 0;
 
-  &.ok { color: #0ca30c; }
+
+  &.ok { color: $success; }
 }
 
 @media (max-width: 1100px) {

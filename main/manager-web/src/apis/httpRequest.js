@@ -73,10 +73,12 @@ function sendRequest() {
                 ? `${method} ${this._url} ${JSON.stringify(this._data || {})}`
                 : null
 
+            // GET carries its payload in the query string, not a body: axios drops
+            // `data` on GET, so callers using .data({...}) would send nothing.
             const raw = http.request({
                 url: this._url,
                 method,
-                data: this._data,
+                ...(isGet ? { params: this._data } : { data: this._data }),
                 headers: this._header,
                 responseType: this._responseType
             })

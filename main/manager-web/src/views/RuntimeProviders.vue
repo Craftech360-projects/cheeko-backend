@@ -1,18 +1,17 @@
 <template>
   <div class="welcome">
 
-    <div class="operation-bar">
-      <div class="title-block">
-        <span class="eyebrow">Voice Runtime Control</span>
-        <h2 class="page-title">Runtime Providers</h2>
-        <div class="page-subtitle">Manage active LLM, STT, and TTS services used by the voice runtime.</div>
+    <div class="page-head">
+      <div>
+        <h1 class="page-title">Runtime Providers</h1>
+        <p class="page-lead">The LLM, STT and TTS vendors the agent falls through, in priority order.</p>
       </div>
-      <div class="right-operations">
+      <div class="page-actions">
         <div class="runtime-health">
           <span class="health-dot"></span>
-          {{ activeServicesCount }}/3 services active
+          {{ activeServicesCount }}/{{ providerTypes.length }} active
         </div>
-        <el-button class="btn-search" icon="el-icon-refresh" :loading="loading" @click="fetchProviders">Refresh</el-button>
+        <el-button size="small" :loading="loading" @click="fetchProviders">Refresh</el-button>
       </div>
     </div>
 
@@ -66,17 +65,41 @@
                   {{ type.label }}
                   <span class="tab-count">{{ providerCount(type.value) }}</span>
                 </span>
+                <ListToolbar
+                  :count="(providers[type.value] || []).length"
+                  count-noun="providers"
+                  :total="(providers[type.value] || []).length"
+                  :sort-options="sortOptions"
+                  :sort-by.sync="sortBy"
+                  :sort-dir.sync="sortDir"
+                  :selecting.sync="selecting"
+                  :selected-count="selectedCount"
+                  :all-selected="allSelected"
+                  :search.sync="listSearch"
+                  search-placeholder="Provider or model"
+                  @select-all-matching="selectAllMatching"
+                  @clear-selection="clearSelection"
+                >
+                  <template #bulk>
+                    <el-button @click="bulkTest">Test</el-button>
+                  </template>
+                </ListToolbar>
+
                 <el-table
-                  :data="providers[type.value]"
+                  ref="table"
+                  :data="visibleProviders(type.value)"
                   class="transparent-table"
                   :row-class-name="providerRowClassName"
                   empty-text="No providers configured"
                   v-loading="loading"
+                  @sort-change="onTableSortChange"
+                  @selection-change="onSelectionChange"
                   element-loading-text="Loading..."
                   element-loading-spinner="el-icon-loading"
-                  element-loading-background="rgba(255, 255, 255, 0.7)"
+                  element-loading-background="rgba(250, 249, 247, 0.75)"
                   >
-                  <el-table-column label="Status" align="left" width="120">
+                  <el-table-column v-if="selecting" type="selection" width="44" />
+                  <el-table-column label="Status" prop="is_active" align="left" width="120" sortable="custom">
                     <template slot-scope="scope">
                       <span class="status-pill" :class="{ active: scope.row.is_active }">
                         <i :class="scope.row.is_active ? 'el-icon-success' : 'el-icon-remove-outline'"></i>
@@ -145,7 +168,8 @@
       :title="dialogTitle"
       :visible.sync="dialogVisible"
       width="560px"
-      :close-on-click-modal="false"
+      :close-on-click-modal="dismissOnBackdrop"
+      @open="markPristine"
     >
       <el-form :model="editForm" label-width="150px" label-position="left" class="provider-form">
         <el-form-item
@@ -187,14 +211,28 @@
 </template>
 
 <script>
+import dialogDismiss from '@/mixins/dialogDismiss';
+import ListToolbar from '@/components/ListToolbar.vue';
+import listControls from '@/mixins/listControls';
 import Api from "@/apis/api";
 import VersionFooter from "@/components/VersionFooter.vue";
 
 export default {
   name: 'RuntimeProviders',
-  components: { VersionFooter },
+  mixins: [listControls, dialogDismiss],
+  components: { ListToolbar, VersionFooter },
   data() {
     return {
+      // list controls
+      sortBy: 'priority',
+      sortDir: 'asc',
+      sortOptions: [
+        { label: 'Priority', value: 'priority' },
+        { label: 'Status', value: 'is_active' },
+        { label: 'Provider', value: 'provider_name' },
+        { label: 'Updated', value: 'updated_at' }
+      ],
+      searchFields: ['provider_name', 'model_name', 'model'],
       activeType: "llm",
       loading: false,
       saving: false,
@@ -292,6 +330,9 @@ export default {
     };
   },
   computed: {
+    sourceRows() {
+      return this.providers[this.activeType] || [];
+    },
     activeServicesCount() {
       return this.providerTypes.filter(type => this.activeProvider(type.value)).length;
     },
@@ -307,6 +348,28 @@ export default {
     this.fetchProviders();
   },
   methods: {
+    dirtyState() {
+      return this.editForm;
+    },
+
+    // Sort/search the visible type's providers through the shared mixin
+    visibleProviders(type) {
+      const rows = (this.providers[type] || []).slice();
+      const q = (this.listSearch || '').trim().toLowerCase();
+      const filtered = !q ? rows : rows.filter(row => this.searchFields.some(field => {
+        const value = row[field];
+        return value !== null && value !== undefined && String(value).toLowerCase().includes(q);
+      }));
+      if (this.sortBy) {
+        filtered.sort((a, b) => this.compareRows(a, b, this.sortBy, this.sortDir));
+      }
+      return filtered;
+    },
+    bulkTest() {
+      const rows = this.selectedRows;
+      if (!rows.length) return;
+      this.$message.info(`Testing ${rows.length} provider${rows.length === 1 ? '' : 's'}…`);
+    },
     fetchProviders() {
       this.loading = true;
       Api.runtimeProviders.getProviders(({ data }) => {
@@ -418,117 +481,42 @@ export default {
 </script>
 
 <style lang="scss" scoped>
+@import '@/styles/theme.scss';
+
+// Warm monochrome, one accent, structure from 1px rules. The five provider
+// types are distinguished by their name, not by five different hues.
 .welcome {
-  min-height: 506px;
-  min-height: 100vh;
+  min-height: 0;
   display: flex;
-  position: relative;
   flex-direction: column;
-  background-size: cover;
-  background:
-    radial-gradient(circle at 12% 0%, rgba(217, 119, 6, 0.13), transparent 30%),
-    radial-gradient(circle at 88% 10%, rgba(59, 130, 246, 0.16), transparent 32%),
-    linear-gradient(180deg, #fffaf2 0, #f8fbff 190px, #f3f6fb 100%);
   overflow-x: hidden;
-}
-
-.operation-bar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 18px;
-  padding: 18px 24px 16px;
-  border-bottom: 1px solid rgba(30, 64, 175, 0.08);
-}
-
-.title-block {
-  min-width: 0;
-}
-
-.eyebrow {
-  display: inline-flex;
-  align-items: center;
-  height: 24px;
-  padding: 0 10px;
-  border-radius: 999px;
-  background: #dbeafe;
-  color: #1e40af;
-  font-size: 11px;
-  font-weight: 800;
-}
-
-.page-title {
-  display: block;
-  font-size: 28px;
-  margin: 6px 0 0;
-  color: #0f172a;
-  line-height: 1.2;
-  background: linear-gradient(90deg, #0f172a, #1e40af 55%, #d97706);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-}
-
-.page-subtitle {
-  margin-top: 6px;
-  color: #475569;
-  font-size: 13px;
-}
-
-.right-operations {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-left: auto;
 }
 
 .runtime-health {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  height: 36px;
-  padding: 0 12px;
-  border: 1px solid #bfdbfe;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.78);
-  color: #1e3a8a;
-  font-size: 12px;
-  font-weight: 800;
-  box-shadow: 0 8px 22px rgba(30, 64, 175, 0.08);
+  gap: 7px;
+  height: 30px;
+  padding: 0 11px;
+  border: 1px solid $border-color;
+  border-radius: $radius-sm;
+  background: $surface;
+  font-family: $font-mono;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: $text-gray;
 }
 
 .health-dot {
-  width: 9px;
-  height: 9px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
-  background: #22c55e;
-  box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.15);
-}
-
-.btn-search {
-  min-width: 104px;
-  background: linear-gradient(135deg, #1e40af, #3b82f6 55%, #d97706);
-  border: none;
-  color: white;
-  border-radius: 8px;
-  height: 36px;
-  padding: 0 16px;
-  box-shadow: 0 10px 22px rgba(30, 64, 175, 0.24);
-
-  &:focus {
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.28), 0 10px 22px rgba(30, 64, 175, 0.24);
-  }
+  background: $success;
 }
 
 .main-wrapper {
-  margin: 0 22px 18px;
-  border-radius: 10px;
   min-height: 0;
-  height: auto;
-  max-height: none;
-  box-shadow: 0 14px 34px rgba(53, 72, 112, 0.12);
-  position: relative;
-  background: #fff;
   display: flex;
   flex-direction: column;
 }
@@ -537,29 +525,25 @@ export default {
   flex: 1;
   display: flex;
   overflow: hidden;
-  height: auto;
-  border-radius: 10px;
-  background: transparent;
-  border: 1px solid #dbeafe;
+  background: $surface;
+  border: 1px solid $border-color;
+  border-radius: $radius-lg;
 }
 
 .content-area {
   flex: 1;
-  height: auto;
   min-width: 600px;
   overflow-x: auto;
-  background-color: #fff;
   display: flex;
   flex-direction: column;
 }
 
 .providers-card {
-  background: white;
   flex: 1;
   display: flex;
   flex-direction: column;
+  background: transparent;
   border: none;
-  box-shadow: none;
   overflow: hidden;
 
   ::v-deep .el-card__body {
@@ -571,137 +555,117 @@ export default {
   }
 }
 
+// ---------- Summary strip -------------------------------------------------
 .summary-strip {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 14px;
-  padding: 14px 14px 12px;
-  border-bottom: 1px solid #dbeafe;
-  background:
-    linear-gradient(90deg, rgba(30, 64, 175, 0.04), rgba(217, 119, 6, 0.04)),
-    #ffffff;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 1px;
+  background: $divider-color;
+  border-bottom: 1px solid $border-color;
 }
 
 .summary-item {
   min-width: 0;
-  padding: 16px;
-  border: 1px solid;
-  border-radius: 10px;
+  padding: 18px 20px;
+  background: $surface;
   cursor: pointer;
-  position: relative;
-  overflow: hidden;
-  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
-
-  &::after {
-    content: "";
-    position: absolute;
-    right: -28px;
-    top: -36px;
-    width: 110px;
-    height: 110px;
-    border-radius: 50%;
-    background: currentColor;
-    opacity: 0.08;
-  }
-
-  &.llm {
-    background: linear-gradient(135deg, #fff7ed, #ffffff);
-    border-color: #fed7aa;
-    color: #c2410c;
-  }
-
-  &.stt {
-    background: linear-gradient(135deg, #eff6ff, #ffffff);
-    border-color: #bfdbfe;
-    color: #1d4ed8;
-  }
-
-  &.tts {
-    background: linear-gradient(135deg, #f5f3ff, #ffffff);
-    border-color: #ddd6fe;
-    color: #6d28d9;
-  }
-
-  &.moderation {
-    background: linear-gradient(135deg, #f0fdf4, #ffffff);
-    border-color: #bbf7d0;
-    color: #15803d;
-  }
-
-  &.image {
-    background: linear-gradient(135deg, #fdf2f8, #ffffff);
-    border-color: #fbcfe8;
-    color: #be185d;
-  }
+  transition: background-color 0.18s ease;
 
   &:hover {
-    transform: translateY(-1px);
+    background: $surface-sunk;
   }
 
   &:focus {
     outline: none;
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.28);
+    background: $surface-sunk;
   }
 
+  // The selected type is marked by a rule, not by a colour: five tinted
+  // cards would put four more hues into a one-accent system.
   &.current {
-    box-shadow: 0 14px 28px rgba(30, 64, 175, 0.14);
-    border-color: currentColor;
-  }
-
-  &.current:focus {
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.28), 0 14px 28px rgba(30, 64, 175, 0.14);
+    background: $row-selected;
+    box-shadow: inset 2px 0 0 $primary;
   }
 
   strong {
     display: block;
-    margin-top: 8px;
-    color: #111827;
-    font-size: 15px;
-    font-weight: 700;
+    font-size: 14px;
+    font-weight: 590;
+    letter-spacing: -0.01em;
+    color: $text-dark;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 }
 
-.summary-main {
-  position: relative;
-  z-index: 1;
+.summary-top {
   display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin-bottom: 14px;
+}
+
+.summary-icon {
+  display: inline-flex;
   align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  margin-top: 1px;
+  font-size: 13px;
+  color: $text-light;
+}
+
+.summary-label {
+  display: block;
+  font-family: $font-mono;
+  font-size: 9.5px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.11em;
+  color: $text-light;
+}
+
+.summary-caption {
+  display: block;
+  margin-top: 3px;
+  font-size: 11.5px;
+  color: $text-light;
+}
+
+.summary-main {
+  display: flex;
+  align-items: baseline;
   justify-content: space-between;
   gap: 10px;
 }
 
 .summary-status {
+  flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  height: 24px;
-  padding: 0 8px;
-  border-radius: 999px;
-  background: rgba(100, 116, 139, 0.1);
-  color: #64748b;
-  font-size: 11px;
-  font-weight: 800;
+  gap: 4px;
+  font-family: $font-mono;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: $text-light;
   white-space: nowrap;
 
-  &.online {
-    background: rgba(34, 197, 94, 0.15);
-    color: #15803d;
-  }
+  &.online { color: $success; }
 }
 
 .summary-meta {
-  position: relative;
-  z-index: 1;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-top: 8px;
-  color: #475569;
-  font-size: 12px;
+  margin-top: 10px;
+  font-family: $font-mono;
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: $text-light;
 
   span {
     min-width: 0;
@@ -711,48 +675,16 @@ export default {
   }
 }
 
-.summary-top {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.summary-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 9px;
-  background: rgba(255, 255, 255, 0.72);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.8), 0 6px 14px rgba(15, 23, 42, 0.08);
-}
-
-.summary-label {
-  display: block;
-  color: currentColor;
-  font-size: 12px;
-  font-weight: 900;
-  letter-spacing: 0;
-  text-transform: uppercase;
-}
-
-.summary-caption {
-  display: block;
-  margin-top: 2px;
-  color: #64748b;
-  font-size: 12px;
-  font-weight: 700;
-}
-
 .live-dot {
-  width: 7px;
-  height: 7px;
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-right: 5px;
   border-radius: 50%;
-  background: currentColor;
-  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.64);
+  background: $text-light;
 }
 
+// ---------- Tabs ----------------------------------------------------------
 .provider-tabs {
   display: flex;
   flex-direction: column;
@@ -761,71 +693,14 @@ export default {
 
   ::v-deep .el-tabs__header {
     margin: 0;
-    padding: 0 16px;
-    background: #f8fafc;
-  }
-
-  ::v-deep .el-tabs__nav-wrap::after {
-    height: 1px;
-    background: #e7ebf3;
-  }
-
-  ::v-deep .el-tabs__item {
-    height: 46px;
-    line-height: 46px;
-    color: #4b5563;
-    font-weight: 800;
-  }
-
-  ::v-deep .el-tabs__item.is-active {
-    color: #1e40af;
-  }
-
-  ::v-deep .el-tabs__active-bar {
-    height: 3px;
-    border-radius: 3px 3px 0 0;
-    background: linear-gradient(90deg, #1e40af, #3b82f6, #d97706);
+    padding: 0 22px;
   }
 
   ::v-deep .el-tabs__content {
     min-height: 0;
     flex: 1;
     overflow: auto;
-  }
-}
-
-.transparent-table {
-  width: 100%;
-
-  ::v-deep th {
-    background: #f8fafc;
-    color: #475569;
-    font-size: 12px;
-    font-weight: 900;
-    letter-spacing: 0;
-  }
-
-  ::v-deep td {
-    color: #0f172a;
-    font-size: 13px;
-    border-bottom-color: #e2e8f0;
-  }
-
-  ::v-deep .el-table__row {
-    height: 56px;
-    transition: background-color 0.18s ease;
-  }
-
-  ::v-deep .el-table__row:hover > td {
-    background: #eff6ff !important;
-  }
-
-  ::v-deep .active-provider-row {
-    background: linear-gradient(90deg, #ecfdf5, #fffbeb);
-  }
-
-  ::v-deep .active-provider-row:hover > td {
-    background: #ecfdf5 !important;
+    padding: 0 22px 4px;
   }
 }
 
@@ -836,41 +711,42 @@ export default {
 }
 
 .tab-count {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 20px;
-  height: 20px;
-  padding: 0 6px;
-  border-radius: 10px;
-  background: #dbeafe;
-  color: #1e40af;
-  font-size: 12px;
-  font-weight: 700;
+  font-family: $font-mono;
+  font-size: 9.5px;
+  color: $text-light;
+}
+
+.transparent-table {
+  width: 100%;
+
+  // The live provider for this type, tinted green because "active" here is a
+  // status, not a selection. One row per tab carries it.
+  ::v-deep .active-provider-row > td.el-table__cell {
+    background: $success-bg;
+  }
+
+  ::v-deep .active-provider-row:hover > td.el-table__cell {
+    background: darken($success-bg, 3%);
+  }
 }
 
 .status-pill {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  height: 26px;
-  padding: 0 9px;
-  border-radius: 13px;
-  background: #f1f5f9;
-  color: #475569;
-  font-size: 12px;
-  font-weight: 600;
+  font-family: $font-mono;
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: $text-light;
 
-  &.active {
-    background: linear-gradient(135deg, #dcfce7, #fef3c7);
-    color: #166534;
-    box-shadow: 0 4px 10px rgba(45, 123, 23, 0.12);
-  }
+  &.active { color: $success; }
 }
 
 .mono-value,
 .secret-value {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-family: $font-mono;
+  font-size: 11.5px;
 }
 
 .secret-cell {
@@ -886,60 +762,37 @@ export default {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #1f2937;
-  background: #f8fafc;
-  border: 1px solid #dbeafe;
-  border-radius: 7px;
-  padding: 5px 8px;
+  color: $text-body;
+  background: $surface-sunk;
+  border: 1px solid $divider-color;
+  border-radius: $radius-sm;
+  padding: 3px 7px;
 }
 
 .secret-toggle {
-  min-width: 44px;
-  padding: 0 6px;
-  font-weight: 700;
-  color: #1d4ed8;
+  min-width: 40px;
+  padding: 0 4px;
+  font-size: 11.5px;
+  color: $text-light;
+
+  &:hover { color: $text-dark; }
 }
 
 .action-button {
-  border-radius: 5px;
-  min-height: 32px;
-  padding: 7px 10px;
-  background: #fff;
-  border-color: #cbd5e1;
-
-  &:hover,
-  &:focus {
-    color: #1e40af;
-    border-color: #93c5fd;
-    background: #eff6ff;
-  }
-
-  &:active {
-    transform: translateY(1px);
-  }
-
-  &.is-disabled {
-    opacity: 0.52;
-    cursor: not-allowed;
-  }
-}
-
-.activate-button:not(.is-disabled) {
-  color: #166534;
-  border-color: #86efac;
-  background: linear-gradient(135deg, #f0fdf4, #fffbeb);
+  min-height: 28px;
 }
 
 .table-footer {
   display: flex;
   justify-content: space-between;
   gap: 16px;
-  padding: 12px 16px;
-  border-top: 1px solid #e2e8f0;
-  background: #f8fafc;
-  color: #475569;
-  font-size: 12px;
-  font-weight: 700;
+  padding: 12px 0 14px;
+  border-top: 1px solid $divider-color;
+  font-family: $font-mono;
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: $text-light;
 }
 
 .provider-form {
@@ -951,14 +804,8 @@ export default {
 }
 
 @media (max-width: 1180px) {
-  .operation-bar {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .right-operations {
-    width: 100%;
-    justify-content: space-between;
+  .content-area {
+    min-width: 0;
   }
 
   .summary-strip {
@@ -967,15 +814,8 @@ export default {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .summary-item,
-  .transparent-table ::v-deep .el-table__row,
-  .action-button {
+  .summary-item {
     transition: none;
-  }
-
-  .summary-item:hover,
-  .action-button:active {
-    transform: none;
   }
 }
 </style>

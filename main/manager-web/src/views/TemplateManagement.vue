@@ -4,38 +4,60 @@
     <div class="main-wrapper">
       <div class="content-panel">
         <div class="content-area">
-          <div class="page-header">
-            <div class="header-left">
-              <div class="header-icon">
-                <img loading="lazy" src="@/assets/home/setting-user.png" alt="" />
-              </div>
-              <span class="header-title">Agent Templates</span>
+          <div class="page-head">
+            <div>
+              <h1 class="page-title">Templates</h1>
+              <p class="page-lead">Reusable prompt and memory presets an operator can apply to any agent.</p>
             </div>
-            <div class="header-actions">
-              <el-button type="primary" size="small" @click="showAddDialog">
-                <i class="el-icon-plus"></i> Add Template
-              </el-button>
-              <button class="custom-close-btn" @click="goToHome">×</button>
+            <div class="page-actions">
+              <el-button size="small" @click="goToHome">Back to agents</el-button>
+              <el-button type="primary" size="small" @click="showAddDialog">New template</el-button>
             </div>
           </div>
 
-          <div class="divider"></div>
+          <ListToolbar
+            :count="templates.length"
+            count-noun="templates"
+            :total="templates.length"
+            :sort-options="sortOptions"
+            :sort-by.sync="sortBy"
+            :sort-dir.sync="sortDir"
+            :group-options="groupOptions"
+            :group-by.sync="groupBy"
+            :selecting.sync="selecting"
+            :selected-count="selectedCount"
+            :all-selected="allSelected"
+            :search.sync="listSearch"
+            search-placeholder="Enter template name"
+            @select-all-matching="selectAllMatching"
+            @clear-selection="clearSelection"
+          >
+            <template #bulk>
+              <el-button @click="bulkExport">Export</el-button>
+            </template>
+          </ListToolbar>
 
           <el-table
-            :data="templates"
+            ref="table"
+            :data="visibleRows"
             v-loading="loading"
             style="width: 100%"
             size="small"
-            :row-class-name="tableRowClassName"
+            :row-class-name="templateRowClass"
+            @sort-change="onTableSortChange"
+            @selection-change="onSelectionChange"
           >
-            <el-table-column prop="agentName" label="Name" min-width="120" />
-            <el-table-column prop="language" label="Language" width="100" />
-            <el-table-column label="System Prompt" min-width="200">
+            <el-table-column v-if="selecting" type="selection" width="44" />
+            <el-table-column prop="agentName" label="Name" min-width="150" sortable="custom">
+              <template slot-scope="scope"><span class="cell-key">{{ scope.row.agentName }}</span></template>
+            </el-table-column>
+            <el-table-column prop="language" label="Language" width="120" sortable="custom" />
+            <el-table-column label="System Prompt" min-width="220">
               <template slot-scope="scope">
                 <span class="truncate-text">{{ truncateText(scope.row.systemPrompt, 80) }}</span>
               </template>
             </el-table-column>
-            <el-table-column prop="sort" label="Sort" width="60" align="center" />
+            <el-table-column prop="sort" label="Sort" width="80" align="right" sortable="custom" />
             <el-table-column label="Visible" width="70" align="center">
               <template slot-scope="scope">
                 <el-tag :type="scope.row.isVisible ? 'success' : 'info'" size="mini">
@@ -68,7 +90,8 @@
       :title="editMode ? 'Edit Template' : 'Add Template'"
       :visible.sync="dialogVisible"
       width="600px"
-      :close-on-click-modal="false"
+      :close-on-click-modal="dismissOnBackdrop"
+      @open="markPristine"
     >
       <el-form
         ref="templateForm"
@@ -160,12 +183,30 @@
 </template>
 
 <script>
+import dialogDismiss from '@/mixins/dialogDismiss';
+import ListToolbar from '@/components/ListToolbar.vue';
+import listControls from '@/mixins/listControls';
 import Api from "@/apis/api";
 
 export default {
+  mixins: [listControls, dialogDismiss],
+  components: { ListToolbar },
   name: 'TemplateManagement',
   data() {
     return {
+      // list controls
+      sortBy: 'sort',
+      sortDir: 'asc',
+      sortOptions: [
+        { label: 'Sort order', value: 'sort' },
+        { label: 'Name', value: 'agentName' },
+        { label: 'Language', value: 'language' }
+      ],
+      groupOptions: [
+        { label: 'None', value: '' },
+        { label: 'Language', value: 'language' }
+      ],
+      searchFields: ['agentName', 'systemPrompt', 'language'],
       templates: [],
       loading: false,
       dialogVisible: false,
@@ -187,7 +228,33 @@ export default {
       }
     };
   },
+  computed: {
+    sourceRows() {
+      return this.templates;
+    }
+  },
   methods: {
+    templateRowClass({ row }) {
+      return this.isSelected(row) ? 'selected-row' : '';
+    },
+    bulkExport() {
+      const rows = this.selectedRows;
+      if (!rows.length) {
+        this.$message.warning('Nothing to export.');
+        return;
+      }
+      const cols = ['agentName', 'language', 'sort', 'systemPrompt'];
+      const escape = value => `"${String(value === null || value === undefined ? '' : value).replace(/"/g, '""')}"`;
+      const csv = [cols.join(',')]
+        .concat(rows.map(row => cols.map(col => escape(row[col])).join(',')))
+        .join('\n');
+      const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'templates.csv';
+      link.click();
+      URL.revokeObjectURL(url);
+    },
     getEmptyForm() {
       return {
         agentName: "",
@@ -335,10 +402,10 @@ export default {
 
 .template-management {
   min-width: 600px;
-  height: 100vh;
+  height: auto;
   display: flex;
   flex-direction: column;
-  background: linear-gradient(135deg, #fff5eb 0%, #fff7f0 50%, #ffe8d6 100%);
+  background: $surface;
   overflow: hidden;
 }
 
@@ -347,7 +414,7 @@ export default {
   margin: 12px;
   margin-top: 8px;
   border-radius: 16px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+  box-shadow: none;
   background: rgba(255, 255, 255, 0.9);
   display: flex;
   overflow: hidden;
@@ -381,12 +448,12 @@ export default {
 .header-icon {
   width: 36px;
   height: 36px;
-  background: linear-gradient(135deg, $primary, darken($primary, 10%));
+  background: $surface;
   border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 4px 12px rgba($primary, 0.3);
+  box-shadow: none;
 
   img {
     width: 18px;
@@ -430,7 +497,7 @@ export default {
 
 .divider {
   height: 1px;
-  background: linear-gradient(90deg, transparent, #e8e8e8, transparent);
+  background: $surface;
   margin-bottom: 12px;
 }
 
@@ -440,7 +507,7 @@ export default {
 }
 
 .delete-btn {
-  color: #f56c6c !important;
+  color: $danger !important;
 }
 
 .empty-state {
@@ -449,7 +516,7 @@ export default {
   align-items: center;
   justify-content: center;
   padding: 40px;
-  color: #909399;
+  color: $text-light;
 
   i {
     font-size: 48px;
@@ -469,7 +536,7 @@ export default {
   ::v-deep .el-form-item__label {
     padding-bottom: 4px;
     font-size: 13px;
-    color: #606266;
+    color: $text-body;
   }
 }
 
@@ -480,7 +547,7 @@ export default {
 
   .footer-left {
     font-size: 12px;
-    color: #606266;
+    color: $text-body;
   }
 
   .footer-right {
@@ -501,8 +568,8 @@ export default {
   }
 
   th {
-    background: #f5f7fa !important;
-    color: #606266;
+    background: $surface-sunk !important;
+    color: $text-body;
     font-weight: 600;
   }
 }

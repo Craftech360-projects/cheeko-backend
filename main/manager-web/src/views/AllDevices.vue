@@ -2,38 +2,58 @@
   <div class="welcome">
     <div class="main-content">
       <div class="content-area">
-        <div class="toolbar">
-          <div class="left-actions">
-            <el-input
-              v-model="searchKeyword"
-              placeholder="Search by MAC address, alias..."
-              prefix-icon="el-icon-search"
-              class="search-input"
-              clearable
-              @keyup.enter.native="handleSearch"
-              @clear="handleSearch"
-            />
-            <el-button type="primary" size="small" @click="handleSearch">Search</el-button>
+        <div class="page-head">
+          <div>
+            <h1 class="page-title">Devices</h1>
+            <p class="page-lead">Every toy in the fleet — board, firmware, owner and current mode.</p>
           </div>
-          <div class="right-actions">
-            <el-button size="small" @click="refreshList">
-              <i class="el-icon-refresh"></i> Refresh
-            </el-button>
+          <div class="page-actions">
+            <el-button size="small" @click="refreshList">Refresh</el-button>
           </div>
         </div>
 
+        <ListToolbar
+          :count="deviceList.length"
+          count-noun="devices"
+          :total="deviceList.length"
+          :sort-options="sortOptions"
+          :sort-by.sync="sortBy"
+          :sort-dir.sync="sortDir"
+          :group-options="groupOptions"
+          :group-by.sync="groupBy"
+          :selecting.sync="selecting"
+          :selected-count="selectedCount"
+          :all-selected="allSelected"
+          :search.sync="listSearch"
+          search-placeholder="Alias, MAC or owner"
+          @select-all-matching="selectAllMatching"
+          @clear-selection="clearSelection"
+        >
+          <template #bulk>
+            <el-button @click="bulkExport">Export</el-button>
+          </template>
+        </ListToolbar>
+
+        <div class="card pad0 devices-table">
         <el-table
-          :data="paginatedDeviceList"
+          ref="table"
+          :data="visibleRows"
           v-loading="loading"
           style="width: 100%"
-          :header-cell-style="{ background: '#f5f7fa', color: '#606266' }"
+          :row-class-name="rowClass"
+          @sort-change="onTableSortChange"
+          @selection-change="onSelectionChange"
         >
-          <el-table-column label="MAC Address" min-width="160">
+          <el-table-column v-if="selecting" type="selection" width="44" />
+          <el-table-column label="MAC Address" prop="macAddress" min-width="170" sortable="custom">
             <template slot-scope="scope">
-              <span class="mac-address">{{ scope.row.macAddress }}</span>
+              <div class="rowid">
+                <span class="rowid-mark accent"><i class="el-icon-cpu"></i></span>
+                <span class="mac-address mono">{{ scope.row.macAddress }}</span>
+              </div>
             </template>
           </el-table-column>
-          <el-table-column label="Alias" min-width="120">
+          <el-table-column label="Alias" prop="alias" min-width="130" sortable="custom">
             <template slot-scope="scope">
               <el-input
                 v-if="scope.row.isEdit"
@@ -59,7 +79,7 @@
               {{ formatDate(scope.row.lastConnectedAt) }}
             </template>
           </el-table-column>
-          <el-table-column label="Active Mode" min-width="120" align="center">
+          <el-table-column v-if="showModeColumns" label="Active Mode" min-width="120" align="center">
             <template slot-scope="scope">
               <el-tag
                 :type="getModeTagType(scope.row.activeMode)"
@@ -71,13 +91,13 @@
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="Mode" min-width="100" align="center">
+          <el-table-column v-if="showModeColumns" label="Mode" min-width="100" align="center">
             <template slot-scope="scope">
               <el-switch
                 v-model="scope.row.modeSwitch"
                 size="mini"
                 active-color="#67c23a"
-                inactive-color="#909399"
+                inactive-color="#E7E2D9"
                 active-text="Auto"
                 inactive-text="Manual"
                 @change="handleModeSwitchChange(scope.row)"
@@ -89,8 +109,8 @@
               <el-switch
                 v-model="scope.row.otaSwitch"
                 size="mini"
-                active-color="#13ce66"
-                inactive-color="#ff4949"
+                active-color="#16130F"
+                inactive-color="#E7E2D9"
                 @change="handleOtaSwitchChange(scope.row)"
               />
             </template>
@@ -131,6 +151,7 @@
             </template>
           </el-table-column>
         </el-table>
+        </div>
 
         <div class="pagination-container" v-if="filteredDeviceList.length > 0">
           <span class="total-info">Total: {{ filteredDeviceList.length }} devices</span>
@@ -152,6 +173,8 @@
     </div>
 
     <el-dialog
+      :close-on-click-modal="dismissOnBackdrop"
+      @open="markPristine"
       title="Device Settings Sync"
       :visible.sync="settingsDialogVisible"
       width="760px"
@@ -308,14 +331,37 @@
 </template>
 
 <script>
+import dialogDismiss from '@/mixins/dialogDismiss';
 import Api from '@/apis/api'
 import VersionFooter from '@/components/VersionFooter.vue'
+import ListToolbar from '@/components/ListToolbar.vue';
+import listControls from '@/mixins/listControls';
 
 export default {
   name: 'AllDevices',
-  components: { VersionFooter },
+  components: { VersionFooter, ListToolbar },
+  mixins: [listControls, dialogDismiss],
   data() {
     return {
+      // Active Mode / Mode columns hidden in the UI; logic kept intact
+      showModeColumns: false,
+      // list controls
+      rowKey: 'macAddress',
+      sortBy: 'lastConnectedAt',
+      sortDir: 'desc',
+      sortOptions: [
+        { label: 'Last connected', value: 'lastConnectedAt' },
+        { label: 'MAC address', value: 'macAddress' },
+        { label: 'Alias', value: 'alias' },
+        { label: 'Firmware', value: 'appVersion' },
+        { label: 'Owner', value: 'userName' }
+      ],
+      groupOptions: [
+        { label: 'None', value: '' },
+        { label: 'Firmware', value: 'appVersion' },
+        { label: 'Owner', value: 'userName' }
+      ],
+      searchFields: ['macAddress', 'alias', 'userName'],
       loading: false,
       deviceList: [],
       searchKeyword: '',
@@ -375,12 +421,39 @@ export default {
     paginatedDeviceList() {
       const start = (this.currentPage - 1) * this.pageSize;
       return this.filteredDeviceList.slice(start, start + this.pageSize);
+    },
+    // The toolbar's search replaces the old keyword box, so the mixin filters
+    // the already-paginated page.
+    sourceRows() {
+      return this.paginatedDeviceList;
     }
   },
   created() {
     this.loadDevices();
   },
   methods: {
+    dirtyState() {
+      return this.settingsForm;
+    },
+
+    bulkExport() {
+      const rows = this.selectedRows;
+      if (!rows.length) {
+        this.$message.warning('Nothing to export.');
+        return;
+      }
+      const cols = ['macAddress', 'alias', 'userName', 'firmwareVersion', 'lastConnectedAt'];
+      const escape = value => `"${String(value === null || value === undefined ? '' : value).replace(/"/g, '""')}"`;
+      const csv = [cols.join(',')]
+        .concat(rows.map(row => cols.map(col => escape(row[col])).join(',')))
+        .join('\n');
+      const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'devices.csv';
+      link.click();
+      URL.revokeObjectURL(url);
+    },
     loadDevices() {
       this.loading = true;
       Api.admin.getAllDevices({ page: 1, limit: 1000 }, ({ data }) => {
@@ -839,26 +912,30 @@ export default {
 </script>
 
 <style scoped lang="scss">
+@import '@/styles/theme.scss';
+
 .welcome {
-  min-height: 100vh;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  background: linear-gradient(to bottom right, #fff5eb, #fff7f0, #ffe8d6);
+  background: transparent;
 }
 
 .main-content {
+  // The layout already provides the page gutter; a second one pushed the
+  // whole page in from the rail.
   flex: 1;
-  padding: 20px 40px;
-  max-width: 1800px;
-  margin: 0 auto;
+  padding: 0;
+  max-width: 1440px;
+  margin: 0;
   width: 100%;
 }
 
 .content-area {
-  background: #fff;
-  border-radius: 12px;
-  padding: 20px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  background: transparent;
+  border-radius: 0;
+  padding: 0;
+  box-shadow: none;
 }
 
 .toolbar {
@@ -889,12 +966,12 @@ export default {
   cursor: pointer;
 
   &:hover {
-    color: #5f70f3;
+    color: $text-dark;
   }
 }
 
 .danger-btn {
-  color: #f56c6c !important;
+  color: $danger !important;
 }
 
 .pagination-container {
@@ -907,14 +984,14 @@ export default {
 }
 
 .total-info {
-  color: #909399;
+  color: $text-light;
   font-size: 14px;
 }
 
 .empty-state {
   text-align: center;
   padding: 60px 20px;
-  color: #909399;
+  color: $text-light;
 
   i {
     font-size: 48px;
@@ -943,7 +1020,7 @@ export default {
 
 .settings-section-title {
   font-weight: 600;
-  color: #303133;
+  color: $text-dark;
 }
 
 .settings-section-header {
@@ -958,7 +1035,7 @@ export default {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px 12px;
   font-size: 13px;
-  color: #606266;
+  color: $text-body;
 }
 
 .analytics-grid {
@@ -966,6 +1043,6 @@ export default {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px 12px;
   font-size: 13px;
-  color: #606266;
+  color: $text-body;
 }
 </style>

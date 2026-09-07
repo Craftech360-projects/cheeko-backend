@@ -176,6 +176,7 @@ export default {
 </script>
 
 <style scoped>
+
 .loading-container {
   display: flex;
   flex-direction: column;
@@ -195,7 +196,7 @@ export default {
 
 .no-cache-message i {
   font-size: 48px;
-  color: #E6A23C;
+  color: $warning;
   margin-bottom: 10px;
 }
 

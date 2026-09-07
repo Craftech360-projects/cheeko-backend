@@ -1,90 +1,85 @@
 <template>
   <div class="welcome">
-    <el-container style="height: 100%;">
-      <el-header>
-        <div style="display: flex;align-items: center;margin-top: 15px;margin-left: 10px;gap: 10px;">
-          <img loading="lazy" alt="" src="@/assets/cheeko-logo.svg" style="width: 65px;height: 65px;" />
-          <!-- <img loading="lazy" alt="" src="@/assets/cheeko-ai.png" style="height: 18px;" /> -->
-        </div>
-      </el-header>
-      <div class="login-person">
-        <!-- <img loading="lazy" alt="" src="@/assets/login/login-person.png" style="width: 100%;" /> -->
+    <div class="auth-art">
+      <div class="auth-brand">
+        <img loading="lazy" alt="Cheeko" src="@/assets/cheeko-logo.svg" />
+        <span class="auth-meta">Operator console</span>
       </div>
-      <el-main style="position: relative;">
-        <div class="login-box" @keyup.enter="login">
-          <div style="display: flex;align-items: center;gap: 20px;margin-bottom: 39px;padding: 0 30px;">
-            <img loading="lazy" alt="" src="@/assets/login/hi.png" style="width: 34px;height: 34px;" />
-            <div class="login-text">Login</div>
-            <div class="login-welcome">
-              WELCOME TO LOGIN
+      <p class="auth-quote">Every toy on the shelf, accounted for.</p>
+      <div class="auth-meta">Fleet · Families · Content</div>
+    </div>
+
+    <div class="auth-form">
+      <div class="auth-box" @keyup.enter="login">
+        <h1 class="auth-title">Sign in</h1>
+        <p class="auth-lead">Access to the Cheeko fleet, family and content console.</p>
+
+        <!-- Username login -->
+        <template v-if="!isMobileLogin">
+          <div class="input-box">
+            <span class="micro-label">Username</span>
+            <el-input v-model="form.username" placeholder="Enter username" />
+          </div>
+        </template>
+
+        <!-- Mobile login -->
+        <template v-else>
+          <div class="input-box">
+            <span class="micro-label">Phone number</span>
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <el-select v-model="form.areaCode" style="width: 190px;">
+                <el-option v-for="item in mobileAreaList" :key="item.key" :label="`${item.name} (${item.key})`"
+                  :value="item.key" />
+              </el-select>
+              <el-input v-model="form.mobile" placeholder="Enter phone number" />
             </div>
           </div>
-          <div style="padding: 0 30px;">
-            <!-- Username login -->
-            <template v-if="!isMobileLogin">
-              <div class="input-box">
-                <img loading="lazy" alt="" class="input-icon" src="@/assets/login/username.png" />
-                <el-input v-model="form.username" placeholder="Enter username" />
-              </div>
-            </template>
+        </template>
 
-            <!-- Mobile login -->
-            <template v-else>
-              <div class="input-box">
-                <div style="display: flex; align-items: center; width: 100%;">
-                  <el-select v-model="form.areaCode" style="width: 220px; margin-right: 10px;">
-                    <el-option v-for="item in mobileAreaList" :key="item.key" :label="`${item.name} (${item.key})`"
-                      :value="item.key" />
-                  </el-select>
-                  <el-input v-model="form.mobile" placeholder="Enter phone number" />
-                </div>
-              </div>
-            </template>
-
-            <div class="input-box">
-              <img loading="lazy" alt="" class="input-icon" src="@/assets/login/password.png" />
-              <el-input v-model="form.password" placeholder="Enter password" type="password" show-password />
-            </div>
-            <div style="display: flex; align-items: center; margin-top: 20px; width: 100%; gap: 10px;">
-              <div class="input-box" style="width: calc(100% - 130px); margin-top: 0;">
-                <img loading="lazy" alt="" class="input-icon" src="@/assets/login/shield.png" />
-                <el-input v-model="form.captcha" placeholder="Enter verification code" style="flex: 1;" />
-              </div>
-              <img loading="lazy" v-if="captchaUrl" :src="captchaUrl" alt="Verification Code"
-                style="width: 150px; height: 40px; cursor: pointer;" @click="fetchCaptcha" />
-            </div>
-            <div
-              style="font-weight: 400;font-size: 14px;text-align: left;color: var(--primary);display: flex;justify-content: space-between;margin-top: 20px;">
-              <div v-if="allowUserRegister" style="cursor: pointer;" @click="goToRegister">New User Registration</div>
-              <div style="cursor: pointer;" @click="goToForgetPassword" v-if="enableMobileRegister">Forgot Password?</div>
-            </div>
-          </div>
-          <div class="login-btn" @click="login">Login</div>
-
-          <!-- Login type switch buttons -->
-          <div class="login-type-container" v-if="enableMobileRegister">
-            <el-tooltip content="Phone Number Login" placement="bottom">
-              <el-button :type="isMobileLogin ? 'primary' : 'default'" icon="el-icon-mobile" circle
-                @click="switchLoginType('mobile')"></el-button>
-            </el-tooltip>
-            <el-tooltip content="Username Login" placement="bottom">
-              <el-button :type="!isMobileLogin ? 'primary' : 'default'" icon="el-icon-user" circle
-                @click="switchLoginType('username')"></el-button>
-            </el-tooltip>
-          </div>
-
-          <div style="font-size: 14px;color: #979db1;">
-            By logging in, you agree to
-            <div style="display: inline-block;color: var(--primary);cursor: pointer;">User Agreement</div>
-            and
-            <div style="display: inline-block;color: var(--primary);cursor: pointer;">Privacy Policy</div>
-          </div>
+        <div class="input-box">
+          <span class="micro-label">Password</span>
+          <el-input v-model="form.password" placeholder="Enter password" type="password" show-password />
         </div>
-      </el-main>
-      <el-footer>
-        <version-footer />
-      </el-footer>
-    </el-container>
+
+        <div class="input-row">
+          <div class="input-box">
+            <span class="micro-label">Verification code</span>
+            <el-input v-model="form.captcha" placeholder="Enter the code" />
+          </div>
+          <img loading="lazy" v-if="captchaUrl" :src="captchaUrl" alt="Verification code"
+            class="captcha-img" @click="fetchCaptcha" />
+        </div>
+
+        <div class="login-btn" @click="login">Sign in</div>
+
+        <div class="auth-alt">
+          <span v-if="allowUserRegister" class="link" @click="goToRegister">Create an account</span>
+          <span v-if="allowUserRegister && enableMobileRegister">·</span>
+          <span v-if="enableMobileRegister" class="link" @click="goToForgetPassword">Forgot password?</span>
+        </div>
+
+        <!-- Login type switch -->
+        <div class="login-type-container" v-if="enableMobileRegister">
+          <el-tooltip content="Phone number login" placement="bottom">
+            <el-button :type="isMobileLogin ? 'primary' : 'default'" icon="el-icon-mobile" circle
+              @click="switchLoginType('mobile')"></el-button>
+          </el-tooltip>
+          <el-tooltip content="Username login" placement="bottom">
+            <el-button :type="!isMobileLogin ? 'primary' : 'default'" icon="el-icon-user" circle
+              @click="switchLoginType('username')"></el-button>
+          </el-tooltip>
+        </div>
+
+        <div class="auth-legal">
+          By signing in you agree to the
+          <span class="link">User Agreement</span> and <span class="link">Privacy Policy</span>.
+        </div>
+
+        <div class="auth-footer">
+          <version-footer />
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -223,24 +218,4 @@ export default {
 </script>
 <style lang="scss" scoped>
 @import './auth.scss';
-
-.login-type-container {
-  margin: 10px 20px;
-}
-
-:deep(.el-button--primary) {
-  background-color: $primary;
-  border-color: $primary;
-
-  &:hover,
-  &:focus {
-    background-color: $primary-dark;
-    border-color: $primary-dark;
-  }
-
-  &:active {
-    background-color: darken($primary-dark, 5%);
-    border-color: darken($primary-dark, 5%);
-  }
-}
 </style>

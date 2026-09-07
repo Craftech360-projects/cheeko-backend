@@ -4,7 +4,9 @@
     width="560px"
     class="rfid-dialog-wrapper"
     :append-to-body="true"
-    :close-on-click-modal="false"
+    :close-on-click-modal="dismissOnBackdrop"
+    @open="markPristine"
+    @close="cancel"
     :key="dialogKey"
     custom-class="custom-rfid-dialog"
     :show-close="false"
@@ -84,16 +86,14 @@
       </el-form>
 
       <div class="dialog-footer">
+        <el-button size="small" @click="cancel">Cancel</el-button>
         <el-button
+          size="small"
           type="primary"
-          @click="submit"
-          class="save-btn"
           :loading="saving"
-          :disabled="saving">
+          :disabled="saving"
+          @click="submit">
           Save
-        </el-button>
-        <el-button @click="cancel" class="cancel-btn">
-          Cancel
         </el-button>
       </div>
     </div>
@@ -101,7 +101,9 @@
 </template>
 
 <script>
+import dialogDismiss from '@/mixins/dialogDismiss';
 export default {
+  mixins: [dialogDismiss],
   props: {
     title: {
       type: String,
@@ -175,26 +177,30 @@ export default {
 </script>
 
 <style>
+
+/* Dialog chrome. Not scoped: el-dialog mounts on body. Shared verbatim by
+   every RFID dialog so the overlay reads the same wherever it opens. */
 .custom-rfid-dialog {
-  border-radius: 16px !important;
+  border-radius: 10px !important;
   overflow: hidden;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15) !important;
-  border: none !important;
+  border: 1px solid var(--border-color) !important;
+  box-shadow: var(--shadow-overlay) !important;
 }
 .custom-rfid-dialog .el-dialog__header {
   display: none;
 }
 .custom-rfid-dialog .el-dialog__body {
   padding: 0 !important;
-  border-radius: 16px;
 }
 </style>
 
 <style scoped lang="scss">
+@import '@/styles/theme.scss';
+
 .rfid-dialog-wrapper {
   .dialog-container {
     padding: 24px 32px;
-    background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+    background: $surface;
   }
 
   .dialog-header {
@@ -205,7 +211,7 @@ export default {
 
   .dialog-title {
     font-size: 20px;
-    color: #1e293b;
+    color: $text-dark;
     margin: 0;
     padding: 0;
     font-weight: 600;
@@ -220,8 +226,8 @@ export default {
     height: 32px;
     border-radius: 50%;
     border: none;
-    background: #f1f5f9;
-    color: #64748b;
+    background: $divider-color;
+    color: $text-gray;
     cursor: pointer;
     display: flex;
     align-items: center;
@@ -229,13 +235,13 @@ export default {
     padding: 0;
     outline: none;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    box-shadow: none;
 
     &:hover {
       color: #ffffff;
-      background: #ef4444;
+      background: $danger;
       transform: rotate(90deg);
-      box-shadow: 0 4px 6px rgba(239, 68, 68, 0.2);
+      box-shadow: none;
     }
   }
 
@@ -244,7 +250,7 @@ export default {
       margin-bottom: 20px;
 
       :deep(.el-form-item__label) {
-        color: #475569;
+        color: $text-body;
         font-weight: 500;
         padding-right: 12px;
         text-align: right;
@@ -256,16 +262,16 @@ export default {
       :deep(.el-input__inner) {
         background-color: #ffffff;
         border-radius: 8px;
-        border: 1px solid #e2e8f0;
+        border: 1px solid $border-color;
         height: 42px;
         padding: 0 14px;
         transition: all 0.3s;
         font-size: 14px;
-        color: #334155;
+        color: $text-body;
 
         &:focus {
-          border-color: #3b82f6;
-          box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+          border-color: $text-light;
+          box-shadow: none;
         }
       }
     }
@@ -276,14 +282,14 @@ export default {
       :deep(.el-input__inner) {
         background-color: #ffffff;
         border-radius: 8px;
-        border: 1px solid #e2e8f0;
+        border: 1px solid $border-color;
         height: 42px;
         font-size: 14px;
-        color: #334155;
+        color: $text-body;
 
         &:focus {
-          border-color: #3b82f6;
-          box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+          border-color: $text-light;
+          box-shadow: none;
         }
       }
     }
@@ -292,14 +298,14 @@ export default {
       :deep(.el-textarea__inner) {
         background-color: #ffffff;
         border-radius: 8px;
-        border: 1px solid #e2e8f0;
+        border: 1px solid $border-color;
         padding: 12px 14px;
         font-size: 14px;
-        color: #334155;
+        color: $text-body;
 
         &:focus {
-          border-color: #3b82f6;
-          box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+          border-color: $text-light;
+          box-shadow: none;
         }
       }
     }
@@ -307,42 +313,11 @@ export default {
 
   .dialog-footer {
     display: flex;
-    justify-content: center;
-    padding: 16px 0 0;
-    margin-top: 16px;
-
-    .save-btn {
-      width: 120px;
-      height: 42px;
-      font-size: 14px;
-      font-weight: 500;
-      border-radius: 8px;
-      background: #3b82f6;
-      color: white;
-      border: none;
-
-      &:hover {
-        background: #2563eb;
-        transform: translateY(-1px);
-      }
-    }
-
-    .cancel-btn {
-      width: 120px;
-      height: 42px;
-      font-size: 14px;
-      font-weight: 500;
-      border-radius: 8px;
-      background: #ffffff;
-      color: #64748b;
-      border: 1px solid #e2e8f0;
-      margin-left: 16px;
-
-      &:hover {
-        background: #f8fafc;
-        color: #475569;
-      }
-    }
+    justify-content: flex-end;
+    gap: 8px;
+    padding-top: 18px;
+    margin-top: 22px;
+    border-top: 1px solid $border-color;
   }
 
   .flex-row {
@@ -351,6 +326,6 @@ export default {
   }
   .ml-2 { margin-left: 8px; }
   .text-sm { font-size: 12px; }
-  .text-gray { color: #94a3b8; }
+  .text-gray { color: $text-light; }
 }
 </style>

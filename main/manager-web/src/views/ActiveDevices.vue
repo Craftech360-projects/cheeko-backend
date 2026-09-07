@@ -1,42 +1,55 @@
 <template>
   <div class="active-devices">
     <el-main class="main-content">
-      <!-- Page Title -->
-      <div class="page-header">
-        <h1>Active Devices</h1>
-        <p class="subtitle">Devices with RFID taps, voice sessions, games or radio on a given day</p>
-      </div>
-
-      <!-- Date Filter -->
-      <el-card class="filter-card" shadow="never">
-        <div class="filter-row">
-          <span class="filter-label">Date:</span>
+      <div class="page-head">
+        <div>
+          <h1 class="page-title">Active Devices</h1>
+          <p class="page-lead">Everything a toy has touched today — chat, games, cards and images.</p>
+        </div>
+        <div class="page-actions">
           <el-date-picker
             v-model="selectedDate"
             type="date"
+            size="small"
             format="yyyy-MM-dd"
             value-format="yyyy-MM-dd"
             :clearable="false"
             @change="fetchData"
           />
-          <el-button type="primary" @click="fetchData" :loading="isLoading">
-            <i class="el-icon-refresh"></i> Refresh
-          </el-button>
+          <el-button size="small" @click="fetchData" :loading="isLoading">Refresh</el-button>
         </div>
-      </el-card>
+      </div>
 
-      <!-- Active Devices Table -->
+      <ListToolbar
+        :count="devices.length"
+        count-noun="devices"
+        :total="devices.length"
+        :sort-options="sortOptions"
+        :sort-by.sync="sortBy"
+        :sort-dir.sync="sortDir"
+        :group-options="groupOptions"
+        :group-by.sync="groupBy"
+        :selecting.sync="selecting"
+        :selected-count="selectedCount"
+        :all-selected="allSelected"
+        :search.sync="listSearch"
+        search-placeholder="Kid name or MAC"
+        @select-all-matching="selectAllMatching"
+        @clear-selection="clearSelection"
+      />
+
       <el-card class="table-card" shadow="never">
-        <div slot="header" class="card-header">
-          <span>Active Devices on {{ selectedDate }}</span>
-        </div>
         <el-table
-          :data="devices"
+          ref="table"
+          :data="visibleRows"
           v-loading="isLoading"
-          stripe
           style="width: 100%"
+          :row-class-name="rowClass"
+          @sort-change="onTableSortChange"
+          @selection-change="onSelectionChange"
         >
-          <el-table-column prop="mac_address" label="MAC" min-width="150">
+          <el-table-column v-if="selecting" type="selection" width="44" />
+          <el-table-column prop="mac_address" label="MAC" min-width="160" sortable="custom">
             <template slot-scope="scope">
               <code class="mac-address">{{ scope.row.mac_address }}</code>
             </template>
@@ -188,7 +201,7 @@
                     >
                       <div class="chat-bubble">
                         <div class="chat-meta">
-                          <span class="chat-speaker">{{ chatTypeLabel(row.chat_type) }}</span>
+                          <span class="chat-speaker">{{ chatSpeaker(row) }}</span>
                           <span class="chat-time">{{ formatTime(row.created_at) }}</span>
                         </div>
                         <div class="chat-content">
@@ -215,13 +228,31 @@
 </template>
 
 <script>
+import ListToolbar from '@/components/ListToolbar.vue';
+import listControls from '@/mixins/listControls';
 import Api from '@/apis/api';
 
 export default {
   name: 'ActiveDevices',
-  components: { },
+  mixins: [listControls],
+  components: { ListToolbar, },
   data() {
     return {
+      // list controls
+      rowKey: 'mac_address',
+      sortBy: 'last_activity',
+      sortDir: 'desc',
+      sortOptions: [
+        { label: 'Last activity', value: 'last_activity' },
+        { label: 'Kid name', value: 'kid_name' },
+        { label: 'Parent name', value: 'parent_name' },
+        { label: 'MAC', value: 'mac_address' }
+      ],
+      groupOptions: [
+        { label: 'None', value: '' },
+        { label: 'Parent', value: 'parent_name' }
+      ],
+      searchFields: ['kid_name', 'parent_name', 'mac_address'],
       isLoading: false,
       selectedDate: this.getToday(),
       devices: [],
@@ -243,6 +274,9 @@ export default {
     };
   },
   computed: {
+    sourceRows() {
+      return this.devices;
+    },
     drawerTitle() {
       return this.currentRow ? `Device ${this.currentRow.mac_address}` : 'Device';
     }
@@ -374,9 +408,14 @@ export default {
           ? { tag: piece.slice(1, -1) }
           : { text: piece }));
     },
-    chatTypeLabel(chatType) {
-      if (chatType === 1 || chatType === '1') return 'Child';
-      if (chatType === 2 || chatType === '2') return 'Cheeko';
+    // Speakers are named by the row: a session can hand off between characters,
+    // so the agent name travels with each message rather than being assumed.
+    chatSpeaker(row) {
+      const chatType = row.chat_type;
+      if (chatType === 1 || chatType === '1') {
+        return String(row.kid_name || '').trim().split(/\s+/)[0] || 'Child';
+      }
+      if (chatType === 2 || chatType === '2') return row.agent_name || 'Agent';
       return 'Unknown';
     },
     chatTypeClass(chatType) {
@@ -421,8 +460,8 @@ export default {
 @import '@/styles/theme.scss';
 
 .active-devices {
-  min-height: 100vh;
-  background: linear-gradient(145deg, #fff5eb, #fff7f0);
+  min-height: 0;
+  background: $surface;
 }
 
 .main-content {
@@ -435,14 +474,14 @@ export default {
   margin-bottom: 20px;
 
   h1 {
-    color: #3d4566;
+    color: $text-dark;
     font-size: 28px;
     font-weight: 700;
     margin: 0 0 8px 0;
   }
 
   .subtitle {
-    color: #818cae;
+    color: $text-light;
     font-size: 14px;
     margin: 0;
   }
@@ -461,7 +500,7 @@ export default {
 
   .filter-label {
     font-weight: 500;
-    color: #3d4566;
+    color: $text-dark;
   }
 }
 
@@ -473,7 +512,7 @@ export default {
   .card-header {
     font-size: 16px;
     font-weight: 600;
-    color: #3d4566;
+    color: $text-dark;
   }
 }
 
@@ -495,7 +534,7 @@ export default {
 
   th {
     background: #fafafa !important;
-    color: #3d4566;
+    color: $text-dark;
     font-weight: 600;
   }
 }
@@ -571,7 +610,7 @@ export default {
 .image-timestamp {
   padding: 6px 8px;
   font-size: 12px;
-  color: #818cae;
+  color: $text-light;
   text-align: center;
 }
 
@@ -665,19 +704,19 @@ export default {
   align-items: baseline;
   gap: 16px;
   font-size: 12px;
-  color: #818cae;
+  color: $text-light;
   margin-bottom: 4px;
 }
 
 .chat-speaker {
   font-weight: 600;
-  color: #3d4566;
+  color: $text-dark;
 }
 
 .chat-content {
   font-size: 14px;
   line-height: 1.5;
-  color: #3d4566;
+  color: $text-dark;
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -687,7 +726,7 @@ export default {
   margin-right: 4px;
   padding: 0 6px;
   border-radius: 8px;
-  background: rgba(#3d4566, 0.08);
+  background: rgba($text-dark, 0.08);
   font-size: 11px;
   line-height: 16px;
   color: #6b7290;

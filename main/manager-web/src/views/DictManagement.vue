@@ -1,18 +1,36 @@
 <template>
     <div class="welcome">
 
-        <div class="operation-bar">
-            <h2 class="page-title">Dictionary Management</h2>
-            <div class="action-group">
-                <div class="search-group">
-                    <el-input placeholder="Enter dictionary label to search" v-model="search" class="search-input" clearable
-                        @keyup.enter.native="handleSearch" style="width: 240px" />
-                    <el-button class="btn-search" @click="handleSearch">
-                        Search
-                    </el-button>
-                </div>
+        <div class="page-head">
+            <div>
+                <h1 class="page-title">Dictionaries</h1>
+                <p class="page-lead">Controlled vocabularies the console and the agent read from.</p>
+            </div>
+            <div class="page-actions">
+                <el-button size="small" @click="showAddDictTypeDialog">New type</el-button>
+                <el-button size="small" type="primary" @click="showAddDictDataDialog">New entry</el-button>
             </div>
         </div>
+
+        <ListToolbar
+            :count="total"
+            count-noun="entries"
+            :total="total"
+            :sort-options="sortOptions"
+            :sort-by.sync="sortBy"
+            :sort-dir.sync="sortDir"
+            :selecting.sync="selecting"
+            :selected-count="selectedCount"
+            :all-selected="isAllDictDataSelected"
+            :search.sync="search"
+            search-placeholder="Enter dictionary label to search"
+            @select-all-matching="selectAllRows"
+            @clear-selection="clearSelection"
+        >
+            <template #bulk>
+                <el-button type="danger" @click="batchDeleteDictData">Delete entries</el-button>
+            </template>
+        </ListToolbar>
 
         <!-- Main Content -->
         <div class="main-wrapper">
@@ -20,22 +38,22 @@
                 <!-- Left side dictionary type list -->
                 <div class="dict-type-panel">
                     <div class="dict-type-header">
-                        <el-button type="success" size="mini" @click="showAddDictTypeDialog">Add Dictionary Type</el-button>
-                        <el-button type="danger" size="mini" @click="batchDeleteDictType"
-                            :disabled="selectedDictTypes.length === 0">
-                            Batch Delete Dictionary Types
-                        </el-button>
+                        <span class="micro-label">Dictionary types</span>
+                        <el-button type="text" @click="batchDeleteDictType" class="delete-btn"
+                            :disabled="selectedDictTypes.length === 0">Delete selected</el-button>
                     </div>
                     <el-table ref="dictTypeTable" :data="dictTypeList" style="width: 100%" v-loading="dictTypeLoading"
                         element-loading-text="Loading..." element-loading-spinner="el-icon-loading"
                         element-loading-background="rgba(255, 255, 255, 0.7)" @row-click="handleDictTypeRowClick"
                         @selection-change="handleDictTypeSelectionChange" :row-class-name="tableRowClassName"
                         class="dict-type-table">
-                        <el-table-column type="selection" width="55" align="center"></el-table-column>
-                        <el-table-column label="Dictionary Type Name" prop="dictName" align="center"></el-table-column>
-                        <el-table-column label="Actions" width="100" align="center">
+                        <el-table-column type="selection" width="44" />
+                        <el-table-column label="Dictionary Type Name" prop="dictName" min-width="160">
+                            <template slot-scope="scope"><span class="cell-key">{{ scope.row.dictName }}</span></template>
+                        </el-table-column>
+                        <el-table-column label="" width="70" align="right">
                             <template slot-scope="scope">
-                                <el-button type="text" size="mini" @click.stop="editDictType(scope.row)">Edit</el-button>
+                                <el-button type="text" @click.stop="editDictType(scope.row)">Edit</el-button>
                             </template>
                         </el-table-column>
                     </el-table>
@@ -44,43 +62,40 @@
                 <!-- Right side dictionary data list -->
                 <div class="content-area">
                     <el-card class="dict-data-card" shadow="never">
-                        <el-table ref="dictDataTable" :data="dictDataList" style="width: 100%"
+                        <el-table ref="dictDataTable" :data="visibleRows" style="width: 100%"
                             v-loading="dictDataLoading" element-loading-text="Loading..."
                             element-loading-spinner="el-icon-loading"
-                            element-loading-background="rgba(255, 255, 255, 0.7)" class="data-table"
+                            element-loading-background="rgba(250, 249, 247, 0.75)" class="data-table"
+                            :row-class-name="dictRowClass"
+                            @sort-change="onTableSortChange"
                             header-row-class-name="table-header">
-                            <el-table-column label="Select" align="center" width="55">
+                            <el-table-column v-if="selecting" label="" align="center" width="52">
                                 <template slot-scope="scope">
                                     <el-checkbox v-model="scope.row.selected"></el-checkbox>
                                 </template>
                             </el-table-column>
-                            <el-table-column label="Dictionary Label" prop="dictLabel" align="center"></el-table-column>
-                            <el-table-column label="Dictionary Value" prop="dictValue" align="center"></el-table-column>
-                            <el-table-column label="Sort" prop="sort" align="center"></el-table-column>
-                            <el-table-column label="Actions" align="center" width="180px">
+                            <el-table-column label="Dictionary Label" prop="dictLabel" min-width="200" sortable="custom">
+                                <template slot-scope="scope"><span class="cell-key">{{ scope.row.dictLabel }}</span></template>
+                            </el-table-column>
+                            <el-table-column label="Dictionary Value" prop="dictValue" min-width="180" sortable="custom">
+                                <template slot-scope="scope"><span class="mono">{{ scope.row.dictValue }}</span></template>
+                            </el-table-column>
+                            <el-table-column label="Sort" prop="sort" width="90" align="right" sortable="custom" />
+                            <el-table-column label="Actions" align="right" width="150">
                                 <template slot-scope="scope">
-                                    <el-button type="text" size="mini" @click="editDictData(scope.row)"
-                                        class="edit-btn">
-                                        Edit
-                                    </el-button>
-                                    <el-button type="text" size="mini" @click="deleteDictData(scope.row)"
-                                        class="delete-btn">
-                                        Delete
-                                    </el-button>
+                                    <div class="row-actions">
+                                        <el-button type="text" @click="editDictData(scope.row)">Edit</el-button>
+                                        <el-button type="text" @click="deleteDictData(scope.row)" class="delete-btn">Delete</el-button>
+                                    </div>
                                 </template>
                             </el-table-column>
+                            <template slot="empty">
+                                <div class="ds-empty"><b>No entries in this dictionary.</b>Pick a type on the left, then add an entry.</div>
+                            </template>
                         </el-table>
                         <div class="table-footer">
                             <div class="batch-actions">
-                                <el-button size="mini" type="primary" @click="selectAllDictData">
-                                    {{ isAllDictDataSelected ? 'Deselect All' : 'Select All' }}
-                                </el-button>
-                                <el-button type="success" size="mini" @click="showAddDictDataDialog" class="add-btn">
-                                    Add Dictionary Data
-                                </el-button>
-                                <el-button size="mini" type="danger" icon="el-icon-delete" @click="batchDeleteDictData">
-                                    Batch Delete Dictionary Data
-                                </el-button>
+                                <span class="muted">Showing {{ visibleRows.length }} of {{ total }} entries</span>
                             </div>
                             <div class="custom-pagination">
                                 <el-select v-model="pageSize" @change="handlePageSizeChange" class="page-size-select">
@@ -128,15 +143,28 @@ import dictApi from '@/apis/module/dict'
 import DictDataDialog from '@/components/DictDataDialog.vue'
 import DictTypeDialog from '@/components/DictTypeDialog.vue'
 import VersionFooter from '@/components/VersionFooter.vue'
+import ListToolbar from '@/components/ListToolbar.vue'
+import listControls from '@/mixins/listControls'
 export default {
     name: 'DictManagement',
+    mixins: [listControls],
     components: {
+        ListToolbar,
         DictTypeDialog,
         DictDataDialog,
         VersionFooter
     },
     data() {
         return {
+            // list controls — selection stays on `row.selected`
+            sortBy: 'sort',
+            sortDir: 'asc',
+            sortOptions: [
+                { label: 'Sort order', value: 'sort' },
+                { label: 'Dictionary label', value: 'dictLabel' },
+                { label: 'Dictionary value', value: 'dictValue' }
+            ],
+            searchTimer: null,
             // Dictionary type related
             dictTypeList: [],
             dictTypeLoading: false,
@@ -173,6 +201,15 @@ export default {
     },
     created() {
         this.loadDictTypeList()
+    },
+    beforeDestroy() {
+        if (this.searchTimer) clearTimeout(this.searchTimer);
+    },
+    watch: {
+        search() {
+            if (this.searchTimer) clearTimeout(this.searchTimer);
+            this.searchTimer = setTimeout(() => this.handleSearch(), 350);
+        }
     },
     methods: {
         // Dictionary type related methods
@@ -274,6 +311,17 @@ export default {
                 }
                 this.dictDataLoading = false
             })
+        },
+        dictRowClass({ row }) {
+            return row.selected ? 'selected-row' : '';
+        },
+        selectAllRows() {
+            this.isAllDictDataSelected = true;
+            this.dictDataList.forEach(row => { this.$set(row, 'selected', true); });
+        },
+        clearSelection() {
+            this.isAllDictDataSelected = false;
+            this.dictDataList.forEach(row => { this.$set(row, 'selected', false); });
         },
         selectAllDictData() {
             this.isAllDictDataSelected = !this.isAllDictDataSelected
@@ -382,6 +430,12 @@ export default {
         }
     },
     computed: {
+        sourceRows() {
+            return this.dictDataList;
+        },
+        selectedCount() {
+            return this.dictDataList.filter(row => row.selected).length;
+        },
         pageCount() {
             return Math.ceil(this.total / this.pageSize);
         },
@@ -407,443 +461,57 @@ export default {
 <style lang="scss" scoped>
 @import '@/styles/theme.scss';
 
-.welcome {
-    min-height: 506px;
-    height: 100vh;
-    display: flex;
-    position: relative;
-    flex-direction: column;
-    background-size: cover;
-    background: linear-gradient(to bottom right, #fff5eb, #fff7f0, #ffe8d6) center;
-    -webkit-background-size: cover;
-    -o-background-size: cover;
-    overflow: hidden;
-}
-
-.main-wrapper {
-    margin: 5px 22px;
-    border-radius: 15px;
-    min-height: calc(100vh - 24vh);
-    height: auto;
-    max-height: 80vh;
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
-    position: relative;
-    background: rgba(237, 242, 255, 0.5);
-    display: flex;
-    flex-direction: column;
-}
-
-.operation-bar {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 16px 24px;
-}
-
-.page-title {
-    font-size: 24px;
-    margin: 0;
-}
-
-.action-group {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-}
-
-.search-group {
-    display: flex;
-    gap: 10px;
-}
-
-.search-input {
-    width: 240px;
-}
-
-.btn-search {
-    background: linear-gradient(135deg, #6b8cff, #a966ff);
-    border: none;
-    color: white;
-}
-
-.btn-search:hover {
-    opacity: 0.9;
-    transform: translateY(-1px);
-}
-
-:deep(.search-input .el-input__inner) {
-    border-radius: 4px;
-    border: 1px solid #DCDFE6;
-    background-color: white;
-    transition: border-color 0.2s;
-}
-
-:deep(.search-input .el-input__inner:focus) {
-    border-color: #6b8cff;
-    outline: none;
-}
+// Page chrome lives in styles/ds.scss.
 
 .content-panel {
-    flex: 1;
-    display: flex;
-    overflow: hidden;
-    height: 100%;
-    border-radius: 15px;
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    gap: 14px;
+    align-items: start;
     background: transparent;
-    border: 1px solid #fff;
+    border: 0;
+}
+
+@media (max-width: 1000px) {
+    .content-panel { grid-template-columns: 1fr; }
 }
 
 .dict-type-panel {
-    width: 300px;
-    background: white;
-    border-right: 1px solid #ebeef5;
-    display: flex;
-    flex-direction: column;
+    background: $surface;
+    border: 1px solid $border-color;
+    border-radius: $radius-lg;
+    overflow: hidden;
 }
 
 .dict-type-header {
-    padding: 16px;
-    border-bottom: 1px solid #ebeef5;
     display: flex;
-    gap: 8px;
-}
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 16px 18px 12px;
 
-.dict-type-table {
-    flex: 1;
-    overflow-y: auto;
-}
-
-.content-area {
-    flex: 1;
-    padding: 24px;
-    height: 100%;
-    min-width: 600px;
-    overflow: hidden;
-    background-color: white;
-    display: flex;
-    flex-direction: column;
+    .micro-label { margin-bottom: 0; }
 }
 
 .dict-data-card {
-    background: white;
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    border: none;
+    background: $surface;
+    border: 1px solid $border-color;
+    border-radius: $radius-lg;
     box-shadow: none;
-    overflow: hidden;
-}
 
-.data-table {
-    border-radius: 6px;
-    overflow-y: hidden;
-    background-color: transparent !important;
-    --table-max-height: calc(100vh - 40vh);
-    max-height: var(--table-max-height);
-
-    :deep(.el-table__body-wrapper) {
-        max-height: calc(var(--table-max-height) - 40px);
-        overflow-y: auto;
-    }
-
-    :deep(.el-table__body) {
-        tr:last-child td {
-            border-bottom: none;
-        }
-    }
-}
-
-:deep(.el-table) {
-    &::before {
-        display: none;
-    }
-
-    &::after {
-        display: none;
-    }
+    ::v-deep .el-card__body { padding: 0; }
 }
 
 .table-footer {
     display: flex;
+    align-items: center;
     justify-content: space-between;
-    align-items: center;
-    padding: 16px 0;
-    width: 100%;
-    flex-shrink: 0;
-    min-height: 60px;
-    background: white;
-    margin-top: 10px;
+    gap: 16px;
+    padding: 12px 16px;
+    border-top: 1px solid $border-color;
+    color: $text-light;
+    font-size: 11.5px;
 }
 
-.batch-actions {
-    display: flex;
-    gap: 8px;
-    padding-left: 26px;
-
-    .el-button {
-        min-width: 72px;
-        height: 32px;
-        padding: 7px 12px 7px 10px;
-        font-size: 12px;
-        border-radius: 4px;
-        line-height: 1;
-        font-weight: 500;
-        border: none;
-        transition: all 0.3s ease;
-        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
-
-        &:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
-        }
-    }
-
-    .el-button--primary {
-        background: #5f70f3;
-        color: white;
-    }
-
-    .el-button--success {
-        background: #5bc98c;
-        color: white;
-    }
-
-    .el-button--danger {
-        background: #fd5b63;
-        color: white;
-    }
-}
-
-.custom-pagination {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-
-    .el-select {
-        margin-right: 8px;
-    }
-
-    .pagination-btn:first-child,
-    .pagination-btn:nth-child(2),
-    .pagination-btn:nth-child(3),
-    .pagination-btn:nth-last-child(2) {
-        min-width: 60px;
-        height: 32px;
-        padding: 0 12px;
-        border-radius: 4px;
-        border: 1px solid #e4e7ed;
-        background: #dee7ff;
-        color: #606266;
-        font-size: 14px;
-        cursor: pointer;
-        transition: all 0.3s ease;
-
-        &:hover {
-            background: #d7dce6;
-        }
-
-        &:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-        }
-    }
-
-    .pagination-btn:not(:first-child):not(:nth-child(2)):not(:nth-child(3)):not(:nth-last-child(2)) {
-        min-width: 28px;
-        height: 32px;
-        padding: 0;
-        border-radius: 4px;
-        border: 1px solid transparent;
-        background: transparent;
-        color: #606266;
-        font-size: 14px;
-        cursor: pointer;
-        transition: all 0.3s ease;
-
-        &:hover {
-            background: rgba(245, 247, 250, 0.3);
-        }
-    }
-
-    .pagination-btn.active {
-        background: #5f70f3 !important;
-        color: #ffffff !important;
-        border-color: #5f70f3 !important;
-
-        &:hover {
-            background: #6d7cf5 !important;
-        }
-    }
-
-    .total-text {
-        color: #909399;
-        font-size: 14px;
-        margin-left: 10px;
-    }
-}
-
-.page-size-select {
-    width: 100px;
-    margin-right: 10px;
-
-    :deep(.el-input__inner) {
-        height: 32px;
-        line-height: 32px;
-        border-radius: 4px;
-        border: 1px solid #e4e7ed;
-        background: #dee7ff;
-        color: #606266;
-        font-size: 14px;
-    }
-
-    :deep(.el-input__suffix) {
-        right: 6px;
-        width: 15px;
-        height: 20px;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        top: 6px;
-        border-radius: 4px;
-    }
-
-    :deep(.el-input__suffix-inner) {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 100%;
-    }
-
-    :deep(.el-icon-arrow-up:before) {
-        content: "";
-        display: inline-block;
-        border-left: 6px solid transparent;
-        border-right: 6px solid transparent;
-        border-top: 9px solid #606266;
-        position: relative;
-        transform: rotate(0deg);
-        transition: transform 0.3s;
-    }
-}
-
-.edit-btn,
-.delete-btn {
-    margin: 0 8px;
-    color: #7079aa !important;
-    font-size: 12px;
-    padding: 7px 12px;
-    height: 32px;
-    line-height: 1;
-    border-radius: 4px;
-    transition: all 0.3s ease;
-
-    &:hover {
-        color: #5a64b5 !important;
-        transform: translateY(-1px);
-    }
-}
-
-:deep(.dict-type-header .el-button) {
-    min-width: 72px;
-    height: 32px;
-    padding: 7px 12px 7px 10px;
-    font-size: 12px;
-    border-radius: 4px;
-    line-height: 1;
-    font-weight: 500;
-    border: none;
-    transition: all 0.3s ease;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
-
-    &:hover {
-        transform: translateY(-1px);
-        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
-    }
-
-    &.el-button--success {
-        background: #5bc98c;
-        color: white;
-    }
-
-    &.el-button--danger {
-        background: #fd5b63;
-        color: white;
-    }
-}
-
-:deep(.el-table .cell) {
-    padding-left: 10px;
-    padding-right: 10px;
-}
-
-:deep(.el-loading-mask) {
-    background-color: rgba(255, 255, 255, 0.6) !important;
-    backdrop-filter: blur(2px);
-}
-
-:deep(.el-loading-spinner .circular) {
-    width: 28px;
-    height: 28px;
-}
-
-:deep(.el-loading-spinner .path) {
-    stroke: #6b8cff;
-}
-
-:deep(.el-loading-text) {
-    color: #6b8cff !important;
-    font-size: 14px;
-    margin-top: 8px;
-}
-
-:deep(.dict-type-table .el-table__row) {
-    cursor: pointer;
-}
-
-:deep(.dict-type-table .el-table__row.current-row) {
-    background-color: $primary !important;
-    color: white;
-}
-
-:deep(.dict-type-table .el-table__row.current-row .el-button--text) {
-    color: white !important;
-}
-
-:deep(.dict-type-table .el-table__row:hover) {
-    background-color: #f5f7fa;
-}
-
-:deep(.dict-type-table .el-table__row.current-row:hover) {
-    background-color: $primary !important;
-}
-
-:deep(.dict-type-table .el-table__row td) {
-    background-color: transparent !important;
-}
-
-:deep(.el-table thead) {
-    color: #000000;
-}
-
-:deep(.el-card__body) {
-    padding: 15px;
-    display: flex;
-    flex-direction: column;
-    flex: 1;
-    overflow: hidden;
-}
-
-:deep(.el-checkbox__inner) {
-    background-color: #eeeeee !important;
-    border-color: #cccccc !important;
-}
-
-:deep(.el-checkbox__inner:hover) {
-    border-color: #cccccc !important;
-}
-
-:deep(.el-checkbox__input.is-checked .el-checkbox__inner) {
-    background-color: #5f70f3 !important;
-    border-color: #5f70f3 !important;
-}
+.delete-btn { color: $danger !important; }
 </style>

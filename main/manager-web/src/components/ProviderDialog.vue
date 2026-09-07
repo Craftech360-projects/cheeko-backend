@@ -1,5 +1,6 @@
 <template>
-  <el-dialog :visible="visible" :close-on-click-modal="false" @update:visible="handleVisibleChange" width="57%" center custom-class="custom-dialog"
+  <el-dialog :visible="visible" :close-on-click-modal="dismissOnBackdrop"
+    @open="markPristine" @update:visible="handleVisibleChange" width="57%" center custom-class="custom-dialog"
     :show-close="false" class="center-dialog">
 
     <div style="margin: 0 18px; text-align: left; padding: 10px; border-radius: 10px;">
@@ -41,7 +42,7 @@
               Add
             </el-button>
             <el-button type="primary" @click="toggleSelectAllFields" size="small"
-              style="background: #5f70f3; border: none; margin-left: 10px;">
+              style="margin-left: 10px;">
               {{ isAllFieldsSelected ? 'Deselect All' : 'Select All' }}
             </el-button>
             <el-button type="danger" @click="batchRemoveFields" size="small"
@@ -130,7 +131,9 @@
 </template>
 
 <script>
+import dialogDismiss from '@/mixins/dialogDismiss';
 export default {
+  mixins: [dialogDismiss],
   props: {
     title: String,
     visible: Boolean,
@@ -342,6 +345,8 @@ export default {
 </script>
 
 <style lang="scss" scoped>
+@import '@/styles/theme.scss';
+
 ::v-deep .custom-dialog.el-dialog {
   margin-top: 0 !important;
   border-radius: 20px !important;
@@ -374,8 +379,8 @@ export default {
 }
 
 .custom-close-btn:hover {
-  color: #409EFF;
-  border-color: #409EFF;
+  color: $info;
+  border-color: $info;
 }
 
 .custom-form .el-form-item {
@@ -383,7 +388,7 @@ export default {
 }
 
 .custom-form .el-form-item__label {
-  color: #3d4566;
+  color: $text-dark;
   font-weight: normal;
   text-align: right;
   padding-right: 20px;
@@ -413,7 +418,7 @@ export default {
 }
 
 .save-btn:hover {
-  background: linear-gradient(to right, #237ff4, #9c40d5);
+  background: $surface;
   color: white;
   border: none;
 }

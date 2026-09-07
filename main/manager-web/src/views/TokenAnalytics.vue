@@ -1,19 +1,16 @@
 <template>
   <div class="token-analytics">
     <el-main class="main-content">
-      <!-- Page Title -->
-      <div class="page-header">
-        <h1>Token Usage Analytics</h1>
-        <p class="subtitle">Monitor token consumption, costs, and performance metrics</p>
-      </div>
-
-      <!-- Date Range Filter -->
-      <el-card class="filter-card" shadow="never">
-        <div class="filter-row">
-          <span class="filter-label">Date Range:</span>
+      <div class="page-head">
+        <div>
+          <h1 class="page-title">Raw Tokens</h1>
+          <p class="page-lead">Unattributed token and latency detail, straight from the agent logs.</p>
+        </div>
+        <div class="page-actions">
           <el-date-picker
             v-model="dateRange"
             type="daterange"
+            size="small"
             range-separator="to"
             start-placeholder="Start date"
             end-placeholder="End date"
@@ -22,11 +19,9 @@
             @change="fetchData"
             :picker-options="datePickerOptions"
           />
-          <el-button type="primary" @click="fetchData" :loading="isLoading">
-            <i class="el-icon-refresh"></i> Refresh
-          </el-button>
+          <el-button size="small" @click="fetchData" :loading="isLoading">Refresh</el-button>
         </div>
-      </el-card>
+      </div>
 
       <!-- Overall Stats Cards -->
       <div class="stats-grid">
@@ -277,20 +272,39 @@
         <div slot="header" class="card-header">
           <span>Daily Usage Summary</span>
         </div>
+        <ListToolbar
+          :count="dailySummary.length"
+          count-noun="days"
+          :total="dailySummary.length"
+          :sort-options="sortOptions"
+          :sort-by.sync="sortBy"
+          :sort-dir.sync="sortDir"
+          :selecting.sync="selecting"
+          :selected-count="selectedCount"
+          :all-selected="allSelected"
+          :search.sync="listSearch"
+          search-placeholder="Filter by date"
+          @select-all-matching="selectAllMatching"
+          @clear-selection="clearSelection"
+        />
         <el-table
-          :data="dailySummary"
+          ref="table"
+          :data="visibleRows"
           v-loading="isLoading"
-          stripe
           style="width: 100%"
+          :row-class-name="rowClass"
+          @sort-change="onTableSortChange"
+          @selection-change="onSelectionChange"
         >
-          <el-table-column prop="usage_date" label="Date" min-width="120">
+          <el-table-column v-if="selecting" type="selection" width="44" />
+          <el-table-column prop="usage_date" label="Date" min-width="130" sortable="custom">
             <template slot-scope="scope">
               {{ formatDate(scope.row.usage_date) }}
             </template>
           </el-table-column>
-          <el-table-column prop="unique_devices" label="Devices" min-width="80" align="center" />
-          <el-table-column prop="total_sessions" label="Sessions" min-width="80" align="center" />
-          <el-table-column prop="message_count" label="Messages" min-width="90" align="center" />
+          <el-table-column prop="unique_devices" label="Devices" min-width="90" align="right" sortable="custom" />
+          <el-table-column prop="total_sessions" label="Sessions" min-width="95" align="right" sortable="custom" />
+          <el-table-column prop="message_count" label="Messages" min-width="100" align="right" sortable="custom" />
           <el-table-column label="Input Tokens" min-width="120" align="right">
             <template slot-scope="scope">
               {{ formatTokens(scope.row.input_tokens) }}
@@ -384,13 +398,30 @@
 </template>
 
 <script>
+import ListToolbar from '@/components/ListToolbar.vue';
+import listControls from '@/mixins/listControls';
 import Api from '@/apis/api';
+import { SERIES_COLORS } from '@/components/charts/presets';
 
 export default {
   name: 'TokenAnalytics',
-  components: { },
+  mixins: [listControls],
+  components: { ListToolbar, },
   data() {
     return {
+      // list controls
+      sortBy: 'usage_date',
+      rowKey: 'usage_date',
+      searchFields: ['usage_date'],
+      sortDir: 'desc',
+      sortOptions: [
+        { label: 'Date', value: 'usage_date' },
+        { label: 'Sessions', value: 'total_sessions' },
+        { label: 'Cost', value: 'cost_inr' },
+        { label: 'Devices', value: 'unique_devices' }
+      ],
+      groupOptions: [{ label: 'None', value: '' }],
+
       isLoading: false,
       dateRange: this.getDefaultDateRange(),
       overallTotals: {},
@@ -429,6 +460,9 @@ export default {
     };
   },
   computed: {
+    sourceRows() {
+      return this.dailySummary || [];
+    },
     totalTokens() {
       return (this.overallTotals.input_tokens || 0) + (this.overallTotals.output_tokens || 0);
     },
@@ -469,10 +503,10 @@ export default {
       let offset = 0;
 
       const segments = [
-        { type: 'input-audio', value: inputAudio, color: '#fa8c16' },
-        { type: 'input-text', value: inputText, color: '#1890ff' },
-        { type: 'output-audio', value: outputAudio, color: '#52c41a' },
-        { type: 'output-text', value: outputText, color: '#722ed1' }
+        { type: 'input-audio', value: inputAudio, color: SERIES_COLORS.aiTalk },
+        { type: 'input-text', value: inputText, color: SERIES_COLORS.card },
+        { type: 'output-audio', value: outputAudio, color: SERIES_COLORS.radio },
+        { type: 'output-text', value: outputText, color: SERIES_COLORS.game }
       ].filter(s => s.value > 0);
 
       return segments.map(segment => {
@@ -631,267 +665,254 @@ export default {
 <style scoped lang="scss">
 @import '@/styles/theme.scss';
 
+// Warm monochrome, one accent. Structure comes from 1px rules; the only
+// colour is the four-way chart palette, which genuinely needs four marks.
 .token-analytics {
-  min-height: 100vh;
-  background: linear-gradient(145deg, #fff5eb, #fff7f0);
+  min-height: 0;
 }
 
 .main-content {
-  padding: 20px;
+  padding: 0;
   max-width: 1400px;
   margin: 0 auto;
 }
 
-.page-header {
-  margin-bottom: 20px;
-
-  h1 {
-    color: #3d4566;
-    font-size: 28px;
-    font-weight: 700;
-    margin: 0 0 8px 0;
-  }
-
-  .subtitle {
-    color: #818cae;
-    font-size: 14px;
-    margin: 0;
-  }
-}
-
-.filter-card {
-  margin-bottom: 20px;
-  border-radius: 12px;
-
-  .filter-row {
-    display: flex;
-    align-items: center;
-    gap: 15px;
-    flex-wrap: wrap;
-  }
-
-  .filter-label {
-    font-weight: 500;
-    color: #3d4566;
-  }
-}
-
+// ---------- KPI row -------------------------------------------------------
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 16px;
-  margin-bottom: 20px;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 14px;
+  margin-bottom: 14px;
 }
 
 .stat-card {
-  border-radius: 12px;
-  border: none;
+  background: $surface;
+  border: 1px solid $border-color;
+  border-radius: $radius-lg;
 
   ::v-deep .el-card__body {
     display: flex;
-    align-items: center;
-    gap: 15px;
-    padding: 20px;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 20px 22px;
   }
 
   .stat-icon {
-    width: 50px;
-    height: 50px;
-    border-radius: 12px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 24px;
-
-    &.devices { background: rgba($primary, 0.1); color: $primary; }
-    &.sessions { background: rgba(#52c41a, 0.1); color: #52c41a; }
-    &.messages { background: rgba(#1890ff, 0.1); color: #1890ff; }
-    &.tokens { background: rgba(#722ed1, 0.1); color: #722ed1; }
-    &.cost { background: rgba(#fa8c16, 0.1); color: #fa8c16; }
-    &.latency { background: rgba(#eb2f96, 0.1); color: #eb2f96; }
+    flex: 0 0 auto;
+    margin-top: 3px;
+    font-size: 14px;
+    color: $text-light;
   }
 
   .stat-content {
     flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column-reverse;
   }
 
   .stat-value {
-    font-size: 24px;
-    font-weight: 700;
-    color: #3d4566;
+    font-family: $font-display;
+    font-size: 32px;
+    font-weight: 400;
+    line-height: 1;
+    letter-spacing: -0.03em;
+    color: $text-dark;
 
     &.cost-value {
-      color: #fa8c16;
+      color: $text-dark;
     }
   }
 
   .stat-label {
-    font-size: 13px;
-    color: #818cae;
-    margin-top: 4px;
+    margin-bottom: 12px;
+    font-family: $font-mono;
+    font-size: 9.5px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.11em;
+    color: $text-light;
   }
 }
 
-.breakdown-card, .table-card {
-  border-radius: 12px;
-  border: none;
-  margin-bottom: 20px;
+// ---------- Cards ---------------------------------------------------------
+.breakdown-card,
+.table-card,
+.chart-card,
+.distribution-card {
+  background: $surface;
+  border: 1px solid $border-color;
+  border-radius: $radius-lg;
+  margin-bottom: 14px;
+
+  ::v-deep .el-card__header {
+    padding: 16px 22px;
+    border-bottom: 1px solid $divider-color;
+  }
 
   .card-header {
-    font-size: 16px;
-    font-weight: 600;
-    color: #3d4566;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 13.5px;
+    font-weight: 590;
+    letter-spacing: -0.01em;
+    color: $text-dark;
+  }
+}
+
+// ds.scss strips the body padding off every `shadow="never"` card so a table
+// can sit flush to the rule. These three hold prose and charts, not a table,
+// so they take it back. The `.el-card` in the selector is what outranks it.
+.breakdown-card.el-card,
+.chart-card.el-card,
+.distribution-card.el-card {
+  ::v-deep > .el-card__body {
+    padding: 20px 22px;
   }
 }
 
 .breakdown-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 30px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 28px;
 }
 
 .breakdown-section {
   h4 {
-    color: #3d4566;
-    font-size: 14px;
-    font-weight: 600;
-    margin: 0 0 12px 0;
-    padding-bottom: 8px;
-    border-bottom: 2px solid #f0f0f0;
+    margin: 0 0 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid $border-color;
+    font-family: $font-mono;
+    font-size: 9.5px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.11em;
+    color: $text-light;
   }
 
   .breakdown-item {
     display: flex;
     justify-content: space-between;
-    padding: 8px 0;
-    font-size: 14px;
+    gap: 12px;
+    padding: 7px 0;
+    font-size: 12.5px;
 
-    .label { color: #818cae; }
+    .label { color: $text-gray; }
+
     .value {
-      font-weight: 500;
-      color: #3d4566;
-
-      &.audio { color: #fa8c16; }
-      &.text { color: #1890ff; }
+      font-family: $font-mono;
+      font-size: 12px;
+      color: $text-body;
     }
 
     &.total {
-      border-top: 1px solid #f0f0f0;
+      border-top: 1px solid $divider-color;
       margin-top: 8px;
       padding-top: 12px;
-      font-weight: 600;
+
+      .label { color: $text-dark; font-weight: 550; }
+      .value { color: $text-dark; font-weight: 550; }
     }
   }
 
   &.pricing {
-    background: #fafafa;
-    padding: 15px;
-    border-radius: 8px;
+    background: $surface-sunk;
+    border: 1px solid $divider-color;
+    border-radius: $radius-md;
+    padding: 16px 18px;
+
+    h4 { border-bottom-color: $border-color; }
 
     .pricing-item {
       display: flex;
       justify-content: space-between;
+      gap: 12px;
       padding: 6px 0;
-      font-size: 13px;
+      font-size: 12.5px;
 
-      .label { color: #818cae; }
+      .label { color: $text-gray; }
+
       .rate {
-        color: #fa8c16;
-        font-weight: 500;
+        font-family: $font-mono;
+        font-size: 12px;
+        color: $text-body;
       }
     }
   }
 }
 
+// ---------- Table cells ---------------------------------------------------
 .owner-name {
-  font-weight: 500;
-  color: #3d4566;
+  color: $text-dark;
 }
 
 .kid-name {
-  font-weight: 500;
-  color: #409eff;
+  color: $text-body;
 }
 
 .mac-address {
-  font-family: 'Courier New', monospace;
-  font-size: 12px;
-  background: #f5f5f5;
-  padding: 2px 6px;
-  border-radius: 4px;
+  font-family: $font-mono;
+  font-size: 11px;
+  color: $text-gray;
+  background: transparent;
+  padding: 0;
 }
 
 .cost-cell {
-  color: #fa8c16;
-  font-weight: 500;
+  font-family: $font-mono;
+  color: $text-dark;
 }
 
-::v-deep .el-table {
-  border-radius: 8px;
-
-  th {
-    background: #fafafa !important;
-    color: #3d4566;
-    font-weight: 600;
-  }
-}
-
-/* Charts Section */
+// ---------- Bar charts ----------------------------------------------------
 .charts-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
-  gap: 20px;
-  margin-bottom: 20px;
+  gap: 14px;
+  margin-bottom: 14px;
 }
 
-.chart-card {
-  border-radius: 12px;
-  border: none;
+.chart-legend {
+  display: flex;
+  gap: 14px;
+  font-family: $font-mono;
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
 
-  .card-header {
+  .legend-item {
     display: flex;
-    justify-content: space-between;
     align-items: center;
-  }
+    gap: 6px;
+    color: $text-light;
 
-  .chart-legend {
-    display: flex;
-    gap: 15px;
-    font-size: 12px;
-
-    .legend-item {
-      display: flex;
-      align-items: center;
-      gap: 5px;
-      color: #818cae;
-
-      .dot {
-        width: 10px;
-        height: 10px;
-        border-radius: 50%;
-      }
-
-      &.input .dot { background: #1890ff; }
-      &.output .dot { background: #52c41a; }
+    .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 2px;
     }
+
+    &.input .dot { background: $text-dark; }
+    &.output .dot { background: $primary; }
   }
 }
 
 .bar-chart-container {
   display: flex;
-  gap: 10px;
+  gap: 12px;
   height: 250px;
-  padding: 10px 0;
+  padding: 6px 0;
 
   .chart-y-axis {
     display: flex;
     flex-direction: column;
     justify-content: space-between;
-    font-size: 11px;
-    color: #818cae;
-    width: 50px;
+    width: 54px;
+    padding: 4px 0;
     text-align: right;
-    padding: 5px 0;
+    font-family: $font-mono;
+    font-size: 9.5px;
+    color: $text-light;
   }
 }
 
@@ -901,8 +922,8 @@ export default {
   align-items: flex-end;
   gap: 4px;
   padding-bottom: 25px;
-  border-bottom: 1px solid #e8e8e8;
-  border-left: 1px solid #e8e8e8;
+  border-bottom: 1px solid $border-color;
+  border-left: 1px solid $border-color;
   position: relative;
   overflow-x: auto;
 }
@@ -914,12 +935,10 @@ export default {
   display: flex;
   flex-direction: column;
   align-items: center;
-  cursor: pointer;
+  cursor: default;
   transition: opacity 0.2s;
 
-  &:hover {
-    opacity: 0.8;
-  }
+  &:hover { opacity: 0.72; }
 
   .bars {
     display: flex;
@@ -933,34 +952,30 @@ export default {
   }
 
   .bar {
-    width: 12px;
-    border-radius: 3px 3px 0 0;
+    width: 11px;
+    border-radius: 2px 2px 0 0;
     transition: height 0.3s ease;
     min-height: 2px;
 
-    &.input-bar {
-      background: linear-gradient(180deg, #1890ff, #40a9ff);
-    }
-
-    &.output-bar {
-      background: linear-gradient(180deg, #52c41a, #73d13d);
-    }
+    &.input-bar { background: $text-dark; }
+    &.output-bar { background: $primary; }
 
     &.cost-bar {
-      width: 20px;
-      background: linear-gradient(180deg, #fa8c16, #ffa940);
+      width: 18px;
+      background: $primary;
     }
   }
 
   .bar-label {
-    font-size: 10px;
-    color: #818cae;
+    position: absolute;
+    bottom: -20px;
     margin-top: 8px;
+    font-family: $font-mono;
+    font-size: 9px;
+    color: $text-light;
     white-space: nowrap;
     transform: rotate(-45deg);
     transform-origin: top left;
-    position: absolute;
-    bottom: -20px;
   }
 }
 
@@ -970,39 +985,31 @@ export default {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  color: #bfbfbf;
+  gap: 10px;
+  color: $text-light;
 
-  i {
-    font-size: 48px;
-    margin-bottom: 15px;
-  }
+  i { font-size: 24px; }
 
   p {
-    font-size: 14px;
     margin: 0;
+    font-size: 12.5px;
   }
 }
 
-/* Token Distribution Chart */
-.distribution-card {
-  border-radius: 12px;
-  border: none;
-  margin-bottom: 20px;
-}
-
+// ---------- Token distribution -------------------------------------------
 .distribution-container {
   display: flex;
   align-items: center;
-  gap: 40px;
-  padding: 20px;
+  gap: 48px;
+  padding: 12px 4px;
   flex-wrap: wrap;
   justify-content: center;
 }
 
 .donut-chart {
   position: relative;
-  width: 200px;
-  height: 200px;
+  width: 190px;
+  height: 190px;
 
   .donut-svg {
     transform: rotate(-90deg);
@@ -1023,15 +1030,21 @@ export default {
 
     .total-label {
       display: block;
-      font-size: 12px;
-      color: #818cae;
+      font-family: $font-mono;
+      font-size: 9.5px;
+      text-transform: uppercase;
+      letter-spacing: 0.11em;
+      color: $text-light;
     }
 
     .total-value {
       display: block;
-      font-size: 20px;
-      font-weight: 700;
-      color: #3d4566;
+      margin-top: 6px;
+      font-family: $font-display;
+      font-size: 24px;
+      font-weight: 400;
+      letter-spacing: -0.02em;
+      color: $text-dark;
     }
   }
 }
@@ -1039,46 +1052,52 @@ export default {
 .distribution-legend {
   display: flex;
   flex-direction: column;
-  gap: 12px;
 
   .legend-row {
     display: flex;
     align-items: center;
-    gap: 12px;
-    font-size: 14px;
+    gap: 14px;
+    padding: 9px 0;
+    font-size: 12.5px;
+
+    & + .legend-row {
+      border-top: 1px solid $divider-color;
+    }
 
     .legend-color {
-      width: 14px;
-      height: 14px;
-      border-radius: 3px;
+      width: 8px;
+      height: 8px;
+      border-radius: 2px;
 
-      &.input-audio { background: #fa8c16; }
-      &.input-text { background: #1890ff; }
-      &.output-audio { background: #52c41a; }
-      &.output-text { background: #722ed1; }
+      &.input-audio { background: #B3560F; }
+      &.input-text { background: #2C5B7A; }
+      &.output-audio { background: #8A5D06; }
+      &.output-text { background: #5C6B4A; }
     }
 
     .legend-text {
-      color: #3d4566;
-      min-width: 100px;
+      color: $text-body;
+      min-width: 104px;
     }
 
     .legend-value {
-      color: #3d4566;
-      font-weight: 500;
+      font-family: $font-mono;
+      font-size: 12px;
+      color: $text-dark;
       min-width: 80px;
       text-align: right;
     }
 
     .legend-percent {
-      color: #818cae;
-      min-width: 50px;
+      font-family: $font-mono;
+      font-size: 11px;
+      color: $text-light;
+      min-width: 48px;
       text-align: right;
     }
   }
 }
 
-/* Responsive adjustments for charts */
 @media (max-width: 768px) {
   .charts-grid {
     grid-template-columns: 1fr;
@@ -1086,18 +1105,15 @@ export default {
 
   .distribution-container {
     flex-direction: column;
+    gap: 24px;
   }
 
   .bar-group {
     min-width: 20px;
 
-    .bar {
-      width: 8px;
-    }
+    .bar { width: 8px; }
 
-    .bar.cost-bar {
-      width: 14px;
-    }
+    .bar.cost-bar { width: 13px; }
   }
 }
 </style>

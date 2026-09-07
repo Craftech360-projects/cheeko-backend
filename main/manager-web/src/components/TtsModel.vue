@@ -1,6 +1,7 @@
 <template>
   <el-dialog :visible.sync="localVisible" width="90%" @close="handleClose" :show-close="false" :append-to-body="true"
-    :close-on-click-modal="true">
+    :close-on-click-modal="dismissOnBackdrop"
+    @open="markPristine">
     <button class="custom-close-btn" @click="handleClose">
       ×
     </button>
@@ -100,10 +101,12 @@
 </template>
 
 <script>
+import dialogDismiss from '@/mixins/dialogDismiss';
 import Api from "@/apis/api";
 import AudioPlayer from './AudioPlayer.vue';
 
 export default {
+  mixins: [dialogDismiss],
   components: { AudioPlayer },
   props: {
     visible: {
@@ -181,6 +184,10 @@ export default {
     window.removeEventListener('mousemove', this.handleDrag);
   },
   methods: {
+    dirtyState() {
+      return this.selectedRows;
+    },
+
     // Update whether to show reference columns
     updateShowReferenceColumns() {
       if (this.modelConfig && this.modelConfig.configJson) {
@@ -515,6 +522,8 @@ export default {
 </script>
 
 <style lang="scss" scoped>
+@import '@/styles/theme.scss';
+
 ::v-deep .el-dialog {
   border-radius: 8px !important;
   overflow: hidden;
@@ -576,8 +585,8 @@ export default {
 }
 
 .custom-close-btn:hover {
-  color: #409EFF;
-  border-color: #409EFF;
+  color: $info;
+  border-color: $info;
 }
 
 /* Remark text */
@@ -592,7 +601,7 @@ export default {
 }
 
 ::v-deep .remark-input .el-textarea__inner:focus {
-  border-color: #409EFF !important;
+  border-color: $info !important;
   outline: none;
 }
 
@@ -690,7 +699,7 @@ export default {
 .edit-btn:hover,
 .delete-btn:hover,
 .save-btn:hover {
-  color: #5f70f3 !important;
+  color: $text-dark !important;
   transform: scale(1.05);
 }
 

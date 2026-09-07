@@ -634,23 +634,23 @@ export default {
 
 .global-search-input ::v-deep .el-input__inner {
   height: 32px;
-  border-radius: 16px;
-  background-color: #fff;
-  border: 1px solid #e4e6ef;
+  border-radius: $radius-sm;
+  background-color: $surface;
+  border: 1px solid $border-color;
   padding-left: 35px;
   font-size: 13px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  box-shadow: none;
   transition: all 0.2s ease;
 }
 
 .global-search-input ::v-deep .el-input__inner:focus {
   border-color: $primary;
-  box-shadow: 0 2px 8px rgba($primary, 0.15);
+  box-shadow: none;
 }
 
 .global-search-input ::v-deep .el-input__prefix {
   left: 12px;
-  color: #909399;
+  color: $text-light;
 }
 
 .search-dropdown {
@@ -661,9 +661,9 @@ export default {
   max-width: 420px;
   max-height: 450px;
   overflow-y: auto;
-  background: #fff;
-  border-radius: 12px;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.2);
+  background: $surface;
+  border-radius: $radius-md;
+  box-shadow: none;
   border: 1px solid #ebeef5;
   z-index: 9999;
 }
@@ -674,7 +674,7 @@ export default {
   justify-content: center;
   gap: 8px;
   padding: 24px;
-  color: #909399;
+  color: $text-light;
   font-size: 14px;
 }
 
@@ -702,8 +702,8 @@ export default {
   padding: 8px 16px;
   font-size: 12px;
   font-weight: 600;
-  color: #606266;
-  background: #f5f7fa;
+  color: $text-body;
+  background: $surface-sunk;
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
@@ -718,7 +718,7 @@ export default {
   background: rgba($primary, 0.1);
   color: $primary;
   padding: 2px 8px;
-  border-radius: 10px;
+  border-radius: $radius-sm;
   font-size: 11px;
   font-weight: 500;
 }
@@ -740,7 +740,7 @@ export default {
 .result-name {
   font-size: 14px;
   font-weight: 500;
-  color: #303133;
+  color: $text-dark;
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -749,7 +749,7 @@ export default {
 
 .result-meta {
   font-size: 12px;
-  color: #909399;
+  color: $text-light;
   margin-left: 12px;
   max-width: 120px;
   overflow: hidden;
@@ -764,7 +764,7 @@ export default {
   justify-content: center;
   gap: 8px;
   padding: 32px 16px;
-  color: #909399;
+  color: $text-light;
   font-size: 14px;
 }
 
@@ -795,7 +795,7 @@ export default {
 }
 
 .search-dropdown::-webkit-scrollbar-thumb {
-  background: #dcdfe6;
+  background: $border-color;
   border-radius: 3px;
 }
 

@@ -48,60 +48,66 @@ export default {
 @import '@/styles/theme.scss';
 
 .stat-card {
-  background: #fff;
+  background: $surface;
   border: 1px solid $border-color;
-  border-radius: 12px;
-  padding: 14px 16px 10px;
+  border-radius: $radius-lg;
+  padding: 22px 24px 18px;
   min-width: 0;
-  box-shadow: 0 4px 14px rgba(61, 69, 102, 0.05);
+  box-shadow: none;
 }
 
 .stat-head {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   justify-content: space-between;
-  gap: 8px;
+  gap: 12px;
+  margin-bottom: 14px;
 }
 
 .stat-label {
-  font-size: 12px;
-  color: $text-gray;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  font-family: $font-mono;
+  font-size: 9.5px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.11em;
+  color: $text-light;
 }
 
 .stat-delta {
-  font-size: 11px;
-  font-weight: 600;
+  font-size: 11.5px;
+  font-weight: 560;
   white-space: nowrap;
 
-  &.delta-good { color: #006300; }
-  &.delta-bad { color: #d03b3b; }
-  &.delta-flat { color: $text-gray; }
+  &.delta-good { color: $success; }
+  &.delta-bad { color: $danger; }
+  &.delta-flat { color: $text-light; }
 }
 
 .stat-value-row {
   display: flex;
   align-items: baseline;
-  gap: 6px;
-  margin-top: 2px;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
 }
 
 .stat-value {
-  font-size: 24px;
-  font-weight: 700;
+  font-family: $font-display;
+  font-size: 40px;
+  font-weight: 400;
+  line-height: 1;
+  letter-spacing: -0.03em;
   color: $text-dark;
-  font-variant-numeric: tabular-nums;
 }
 
 .stat-sub {
-  font-size: 11px;
-  color: $text-gray;
-  white-space: nowrap;
+  font-size: 11.5px;
+  color: $text-light;
+  min-width: 0;
 }
 
 .stat-sparkline {
-  margin-top: 6px;
+  margin-top: 14px;
+  min-height: 0;
 }
 </style>

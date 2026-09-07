@@ -1,100 +1,70 @@
 <template>
   <div class="welcome" @keyup.enter="retrievePassword">
-    <el-container style="height: 100%;">
-      <!-- Keep the same header -->
-      <el-header>
-        <div style="display: flex;align-items: center;margin-top: 15px;margin-left: 10px;gap: 10px;">
-          <img loading="lazy" alt="" src="@/assets/cheeko-logo.svg" style="width: 45px;height: 45px;" />
-          <!-- <img loading="lazy" alt="" src="@/assets/cheeko-ai.png" style="height: 18px;" /> -->
-        </div>
-      </el-header>
-      <div class="login-person">
-        <img loading="lazy" alt="" src="@/assets/login/register-person.png" style="width: 100%;" />
+    <div class="auth-art">
+      <div class="auth-brand">
+        <img loading="lazy" alt="Cheeko" src="@/assets/cheeko-logo.svg" />
+        <span class="auth-meta">Account recovery</span>
       </div>
-      <el-main style="position: relative;">
-        <form @submit.prevent="retrievePassword">
-          <div class="login-box">
-            <!-- Title section -->
-            <div style="display: flex;align-items: center;gap: 20px;margin-bottom: 39px;padding: 0 30px;">
-              <img loading="lazy" alt="" src="@/assets/login/hi.png" style="width: 34px;height: 34px;" />
-              <div class="login-text">Reset Password</div>
-              <div class="login-welcome">
-                PASSWORD RETRIEVE
-              </div>
-            </div>
+      <p class="auth-quote">Back in, in two steps.</p>
+      <div class="auth-meta">Codes expire after 10 minutes</div>
+    </div>
 
-            <div style="padding: 0 30px;">
-              <!-- Phone number input -->
-              <div class="input-box">
-                <div style="display: flex; align-items: center; width: 100%;">
-                  <el-select v-model="form.areaCode" style="width: 220px; margin-right: 10px;">
-                    <el-option v-for="item in mobileAreaList" :key="item.key" :label="`${item.name} (${item.key})`"
-                      :value="item.key" />
-                  </el-select>
-                  <el-input v-model="form.mobile" placeholder="Enter phone number" />
-                </div>
-              </div>
+    <div class="auth-form">
+      <div class="auth-box">
+        <h1 class="auth-title">Reset password</h1>
+        <p class="auth-lead">We will send a one-time code to the mobile number on the account.</p>
 
-              <div style="display: flex; align-items: center; margin-top: 20px; width: 100%; gap: 10px;">
-                <div class="input-box" style="width: calc(100% - 130px); margin-top: 0;">
-                  <img loading="lazy" alt="" class="input-icon" src="@/assets/login/shield.png" />
-                  <el-input v-model="form.captcha" placeholder="Enter verification code" style="flex: 1;" />
-                </div>
-                <img loading="lazy" v-if="captchaUrl" :src="captchaUrl" alt="Captcha"
-                  style="width: 150px; height: 40px; cursor: pointer;" @click="fetchCaptcha" />
-              </div>
-
-              <!-- Mobile verification code -->
-              <div style="display: flex; align-items: center; margin-top: 20px; width: 100%; gap: 10px;">
-                <div class="input-box" style="width: calc(100% - 130px); margin-top: 0;">
-                  <img loading="lazy" alt="" class="input-icon" src="@/assets/login/phone.png" />
-                  <el-input v-model="form.mobileCaptcha" placeholder="Enter SMS code" style="flex: 1;" maxlength="6" />
-                </div>
-                <el-button type="primary" class="send-captcha-btn" :disabled="!canSendMobileCaptcha"
-                  @click="sendMobileCaptcha">
-                  <span>
-                    {{ countdown > 0 ? `Retry in ${countdown}s` : 'Send Code' }}
-                  </span>
-                </el-button>
-              </div>
-
-              <!-- New password -->
-              <div class="input-box">
-                <img loading="lazy" alt="" class="input-icon" src="@/assets/login/password.png" />
-                <el-input v-model="form.newPassword" placeholder="Enter new password" type="password" show-password />
-              </div>
-
-              <!-- Confirm new password -->
-              <div class="input-box">
-                <img loading="lazy" alt="" class="input-icon" src="@/assets/login/password.png" />
-                <el-input v-model="form.confirmPassword" placeholder="Confirm new password" type="password" show-password />
-              </div>
-
-              <!-- Bottom link -->
-              <div style="font-weight: 400;font-size: 14px;text-align: left;color: var(--primary);margin-top: 20px;">
-                <div style="cursor: pointer;" @click="goToLogin">Back to Login</div>
-              </div>
-            </div>
-
-            <!-- Button text -->
-            <div class="login-btn" @click="retrievePassword">Reset Now</div>
-
-            <!-- Agreement declaration -->
-            <div style="font-size: 14px;color: #979db1;">
-              By continuing, you agree to the
-              <div style="display: inline-block;color: var(--primary);cursor: pointer;">Terms of Service</div>
-              and
-              <div style="display: inline-block;color: var(--primary);cursor: pointer;">Privacy Policy</div>
-            </div>
+        <div class="input-box">
+          <span class="micro-label">Phone number</span>
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <el-select v-model="form.areaCode" style="width: 190px;">
+              <el-option v-for="item in mobileAreaList" :key="item.key" :label="`${item.name} (${item.key})`"
+                :value="item.key" />
+            </el-select>
+            <el-input v-model="form.mobile" placeholder="Enter phone number" />
           </div>
-        </form>
-      </el-main>
+        </div>
 
-      <!-- Footer -->
-      <el-footer>
-        <version-footer />
-      </el-footer>
-    </el-container>
+        <div class="input-row">
+          <div class="input-box">
+            <span class="micro-label">Verification code</span>
+            <el-input v-model="form.captcha" placeholder="Enter the code" />
+          </div>
+          <img loading="lazy" v-if="captchaUrl" :src="captchaUrl" alt="Verification code"
+            class="captcha-img" @click="fetchCaptcha" />
+        </div>
+
+        <div class="input-row">
+          <div class="input-box">
+            <span class="micro-label">SMS code</span>
+            <el-input v-model="form.mobileCaptcha" placeholder="6-digit code" maxlength="6" />
+          </div>
+          <el-button class="send-captcha-btn" :disabled="!canSendMobileCaptcha" @click="sendMobileCaptcha">
+            {{ countdown > 0 ? `Retry in ${countdown}s` : 'Send code' }}
+          </el-button>
+        </div>
+
+        <div class="input-box">
+          <span class="micro-label">New password</span>
+          <el-input v-model="form.newPassword" placeholder="At least 8 characters" type="password" show-password />
+        </div>
+
+        <div class="input-box">
+          <span class="micro-label">Confirm password</span>
+          <el-input v-model="form.confirmPassword" placeholder="Repeat the password" type="password" show-password />
+        </div>
+
+        <div class="login-btn" @click="retrievePassword">Reset password</div>
+
+        <div class="auth-alt">
+          Remembered it? <span class="link" @click="goToLogin">Back to sign in</span>
+        </div>
+
+        <div class="auth-footer">
+          <version-footer />
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -257,23 +227,8 @@ export default {
 @import './auth.scss';
 
 .send-captcha-btn {
-  margin-right: -5px;
-  min-width: 100px;
-  height: 40px;
-  line-height: 40px;
-  border-radius: 4px;
-  font-size: 14px;
-  background: $primary;
-  border: none;
-  padding: 0;
-
-  &:hover {
-    background: $primary-dark;
-  }
-
-  &:disabled {
-    background: #c0c4cc;
-    cursor: not-allowed;
-  }
+  height: 48px;
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 </style>

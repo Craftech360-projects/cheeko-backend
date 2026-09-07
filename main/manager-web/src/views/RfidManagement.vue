@@ -1,54 +1,58 @@
 <template>
     <div class="welcome">
 
-        <div class="operation-bar">
-            <h2 class="page-title">RFID Card Management</h2>
-            <div class="right-operations">
-                <el-input placeholder="Search..." v-model="searchKeyword" class="search-input"
-                    @keyup.enter.native="handleSearch" clearable />
-                <el-button class="btn-search" @click="handleSearch">Search</el-button>
+        <div class="page-head">
+            <div>
+                <h1 class="page-title">RFID Cards</h1>
+                <p class="page-lead">Physical cards, the packs they belong to and the content each UID resolves to.</p>
+            </div>
+            <div class="page-actions">
+                <el-button v-if="activeTab === 'contentPacks'" size="small" type="primary" @click="showAddContentPackDialog">Create pack</el-button>
+                <el-button v-else-if="activeTab === 'packs'" size="small" type="primary" @click="showAddPackDialog">New SKU</el-button>
+                <el-button v-else-if="activeTab === 'cards'" size="small" type="primary" @click="showAddCardDialog">New card</el-button>
+                <el-button v-else-if="activeTab === 'series'" size="small" type="primary" @click="showAddSeriesDialog">New range</el-button>
             </div>
         </div>
 
         <!-- Stats Overview Bar -->
         <div class="stats-bar" v-loading="statsLoading" element-loading-background="transparent">
 
-            <div class="stat-item" @click="switchTab('contentPacks')">
+            <div class="stat-item card kpi" @click="switchTab('contentPacks')">
                 <div class="stat-icon content"><i class="el-icon-notebook-2"></i></div>
                 <div class="stat-content">
                     <div class="stat-value">{{ stats.totalContentPacks }}</div>
                     <div class="stat-label">Content Packs</div>
                 </div>
             </div>
-            <div class="stat-item" @click="switchTab('packs')">
+            <div class="stat-item card kpi" @click="switchTab('packs')">
                 <div class="stat-icon skus"><i class="el-icon-goods"></i></div>
                 <div class="stat-content">
                     <div class="stat-value">{{ stats.totalProductSkus }}</div>
                     <div class="stat-label">Product SKUs</div>
                 </div>
             </div>
-            <div class="stat-item" @click="switchTab('cards')">
+            <div class="stat-item card kpi" @click="switchTab('cards')">
                 <div class="stat-icon cards"><i class="el-icon-postcard"></i></div>
                 <div class="stat-content">
                     <div class="stat-value">{{ stats.totalCards }}</div>
                     <div class="stat-label">Card Mappings</div>
                 </div>
             </div>
-            <div class="stat-item" @click="switchTab('aiCards')">
-                <div class="stat-icon ai-cards" style="background: rgba(231, 76, 60, 0.1); color: #e74c3c;"><i class="el-icon-cpu"></i></div>
+            <div class="stat-item card kpi" @click="switchTab('aiCards')">
+                <div class="stat-icon ai-cards"><i class="el-icon-cpu"></i></div>
                 <div class="stat-content">
                     <div class="stat-value">{{ stats.totalAiCards }}</div>
                     <div class="stat-label">AI Cards</div>
                 </div>
             </div>
-            <div class="stat-item" @click="switchTab('series')">
+            <div class="stat-item card kpi" @click="switchTab('series')">
                 <div class="stat-icon series"><i class="el-icon-s-operation"></i></div>
                 <div class="stat-content">
                     <div class="stat-value">{{ stats.totalSeries }}</div>
                     <div class="stat-label">Bulk Ranges</div>
                 </div>
             </div>
-            <div class="stat-item" @click="switchTab('cardAnalytics')">
+            <div class="stat-item card kpi" @click="switchTab('cardAnalytics')">
                 <div class="stat-icon analytics"><i class="el-icon-data-analysis"></i></div>
                 <div class="stat-content">
                     <div class="stat-value">{{ stats.totalCardTaps }}</div>
@@ -90,6 +94,47 @@
             <div class="content-panel">
                 <div class="content-area">
                     <el-card class="rfid-card" shadow="never">
+                        <ListToolbar
+                            v-if="tabHasList"
+                            :count="tabRows.length"
+                            :count-noun="tabNoun"
+                            :total="tabRows.length"
+                            :sort-options="tabSortOptions"
+                            :sort-by.sync="sortBy"
+                            :sort-dir.sync="sortDir"
+                            :group-options="tabGroupOptions"
+                            :group-by.sync="groupBy"
+                            :selecting.sync="selecting"
+                            :selected-count="selectedCount"
+                            :all-selected="allSelected"
+                            :search.sync="searchKeyword"
+                            :search-placeholder="tabSearchPlaceholder"
+                            class="rfid-toolbar"
+                            @select-all-matching="selectAllRows"
+                            @clear-selection="clearSelection"
+                        >
+                            <template #filters>
+                                <el-select
+                                    v-if="activeTab === 'contentPacks'"
+                                    v-model="contentPacksTypeFilter"
+                                    size="mini"
+                                    clearable
+                                    placeholder="Content type"
+                                    class="lb-filter"
+                                    @change="handleContentPacksTypeChange">
+                                    <el-option
+                                        v-for="opt in contentPackTypeOptions"
+                                        :key="opt.value"
+                                        :label="opt.label"
+                                        :value="opt.value" />
+                                </el-select>
+                            </template>
+                            <template #bulk>
+                                <el-button @click="bulkExport">Export</el-button>
+                                <el-button v-if="activeTab === 'contentPacks'" type="danger" @click="deleteSelectedContentPacks">Delete</el-button>
+                            </template>
+                        </ListToolbar>
+
                         <!-- AI Prompts Tab -->
 
 
@@ -109,17 +154,17 @@
                                     </p>
                                 </div>
                             </div>
-                            <el-table ref="packsTable" :data="packsList" class="transparent-table" v-loading="packsLoading"
+                            <el-table ref="packsTable" :data="sortRows(packsList)" class="transparent-table" v-loading="packsLoading"
                                 element-loading-text="Loading..." element-loading-spinner="el-icon-loading"
                                 element-loading-background="rgba(255, 255, 255, 0.7)"
                                 :header-cell-class-name="headerCellClassName">
-                                <el-table-column label="Select" align="center" width="80">
+                                <el-table-column v-if="selecting" label="" align="center" width="52">
                                     <template slot-scope="scope">
                                         <el-checkbox v-model="scope.row.selected"></el-checkbox>
                                     </template>
                                 </el-table-column>
-                                <el-table-column label="Pack Code" prop="packCode" align="center" width="200"></el-table-column>
-                                <el-table-column label="Name" prop="name" align="center" show-overflow-tooltip></el-table-column>
+                                <el-table-column label="Pack Code" prop="packCode" sortable="custom" align="center" width="200"></el-table-column>
+                                <el-table-column label="Name" prop="name" sortable="custom" align="center" show-overflow-tooltip></el-table-column>
                                 <el-table-column label="Age Range" align="center" width="100">
                                     <template slot-scope="scope">
                                         {{ scope.row.ageMin }}-{{ scope.row.ageMax }}
@@ -178,13 +223,43 @@
                                     </p>
                                 </div>
                             </div>
-                            <el-table ref="cardsTable" :data="cardsList" class="transparent-table" v-loading="cardsLoading"
+                            <el-table ref="cardsTable" :data="sortRows(cardsList)" class="transparent-table" v-loading="cardsLoading"
                                 element-loading-text="Loading..." element-loading-spinner="el-icon-loading"
                                 element-loading-background="rgba(255, 255, 255, 0.7)"
                                 :header-cell-class-name="headerCellClassName">
                                 <el-table-column label="Select" align="center" width="60">
                                     <template slot-scope="scope">
                                         <el-checkbox v-model="scope.row.selected"></el-checkbox>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="Thumbnail" align="center" width="96">
+                                    <template slot-scope="scope">
+                                        <el-popover
+                                            v-if="cardThumbnail(scope.row)"
+                                            placement="right"
+                                            trigger="hover"
+                                            :open-delay="120"
+                                            popper-class="thumb-popper">
+                                            <img
+                                                class="thumb-zoom"
+                                                :src="cardThumbnail(scope.row)"
+                                                :alt="scope.row.rfidUid" />
+                                            <div slot="reference" class="thumb-cell">
+                                                <img
+                                                    :src="cardThumbnail(scope.row)"
+                                                    :alt="scope.row.rfidUid"
+                                                    loading="lazy"
+                                                    @error="onCardThumbError(scope.row)" />
+                                            </div>
+                                        </el-popover>
+                                        <div v-else class="thumb-cell is-empty" title="No picture available">
+                                            <svg viewBox="0 0 24 24" aria-label="No picture available" role="img">
+                                                <rect x="3.5" y="5" width="17" height="14" rx="2" />
+                                                <circle cx="9" cy="10" r="1.6" />
+                                                <path d="M4.5 16.5l4.2-4.2 3.1 3.1 2.7-2.6 4.9 4.7" />
+                                                <line x1="4" y1="20" x2="20" y2="4" />
+                                            </svg>
+                                        </div>
                                     </template>
                                 </el-table-column>
                                 <el-table-column label="RFID UID" align="center" width="150">
@@ -290,7 +365,7 @@
                                     </p>
                                 </div>
                             </div>
-                            <el-table ref="aiCardsTable" :data="aiCardsList" class="transparent-table" v-loading="aiCardsLoading"
+                            <el-table ref="aiCardsTable" :data="sortRows(aiCardsList)" class="transparent-table" v-loading="aiCardsLoading"
                                 element-loading-text="Loading..." element-loading-spinner="el-icon-loading"
                                 element-loading-background="rgba(255, 255, 255, 0.7)"
                                 :header-cell-class-name="headerCellClassName">
@@ -319,11 +394,20 @@
                                         </el-tag>
                                     </template>
                                 </el-table-column>
-                                <el-table-column label="Language" align="center" width="120">
+                                <el-table-column label="AI Agent" min-width="150" sortable="custom">
                                     <template slot-scope="scope">
-                                        <el-tag v-if="getAiCardLanguageLabel(scope.row)" type="info" size="small">
+                                        <div v-if="getAiCardAgentName(scope.row)" class="rowid">
+                                            <span class="rowid-mark accent">{{ aiAgentInitials(scope.row) }}</span>
+                                            <span class="cell-key">{{ getAiCardAgentName(scope.row) }}</span>
+                                        </div>
+                                        <span v-else class="text-muted">-</span>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="Language" width="130">
+                                    <template slot-scope="scope">
+                                        <span v-if="getAiCardLanguageLabel(scope.row)" class="chip info">
                                             {{ getAiCardLanguageLabel(scope.row) }}
-                                        </el-tag>
+                                        </span>
                                         <span v-else class="text-muted">-</span>
                                     </template>
                                 </el-table-column>
@@ -389,46 +473,23 @@
                                 </div>
                             </div>
 
-                            <div class="table_top_actions" style="margin-bottom: 20px; display: flex; justify-content: space-between;">
-                                <div>
-                                    <el-button size="mini" type="primary" class="select-all-btn" @click="handleSelectAllContentPacks(true)">
-                                        Select All
-                                    </el-button>
-                                    <el-button size="mini" type="success" icon="el-icon-plus" @click="showAddContentPackDialog">Create Pack</el-button>
-                                    <el-button size="mini" type="danger" icon="el-icon-delete" @click="deleteSelectedContentPacks">Delete Selected</el-button>
-                                </div>
-                                <div class="filter-group">
-                                    <span class="filter-label">Content Type</span>
-                                    <el-select
-                                        v-model="contentPacksTypeFilter"
-                                        size="mini"
-                                        clearable
-                                        placeholder="All types"
-                                        class="type-filter-select"
-                                        @change="handleContentPacksTypeChange">
-                                        <el-option
-                                            v-for="opt in contentPackTypeOptions"
-                                            :key="opt.value"
-                                            :label="opt.label"
-                                            :value="opt.value"></el-option>
-                                    </el-select>
-                                </div>
-                            </div>
 
-                            <div v-loading="contentPacksLoading" class="pack-grid-container" element-loading-background="rgba(255, 255, 255, 0.5)">
+
+                            <div v-loading="contentPacksLoading" class="pack-grid-container" element-loading-background="rgba(250, 249, 247, 0.75)">
                                 <div v-if="contentPacksList.length === 0 && !contentPacksLoading" class="empty-state">
-                                    <i class="el-icon-notebook-2 empty-icon" style="font-size: 48px; color: #ddd; margin-bottom: 10px;"></i>
-                                    <p style="color: #909399;">No Content Packs found</p>
-                                    <el-button type="text" @click="showAddContentPackDialog">Create your first pack</el-button>
+                                    <i class="el-icon-notebook-2 empty-icon"></i>
+                                    <div class="empty-title">{{ showingCustomPacks ? 'No custom cards recorded yet' : 'No content packs found' }}</div>
+                                    <el-button v-if="!showingCustomPacks" type="text" @click="showAddContentPackDialog">Create your first pack</el-button>
                                 </div>
 
                                 <div v-else class="pack-grid">
-                                    <div v-for="pack in contentPacksList" :key="pack.id" class="pack-card" :class="{ selected: pack.selected }" @click="editContentPack(pack)">
-                                        <div class="pack-card-selection" @click.stop="">
+                                    <article v-for="pack in contentPacksList" :key="pack.id" class="pack-card" :class="{ selected: pack.selected }" @click="editContentPack(pack)">
+                                        <div v-if="selecting" class="pack-select" @click.stop="">
                                             <el-checkbox v-model="pack.selected"></el-checkbox>
                                         </div>
-                                        <!-- Card face: the pack's thumbnail shown like the physical RFID card -->
-                                        <div class="pack-visual">
+                                        <!-- The card face. Shown whole rather than cropped: the artwork is
+                                             what is printed on the physical card, so a crop hides the subject. -->
+                                        <figure class="pack-visual">
                                             <img
                                                 v-if="pack.thumbnailUrl && !pack._thumbError"
                                                 :src="pack.thumbnailUrl"
@@ -436,31 +497,30 @@
                                                 loading="lazy"
                                                 @error="onPackThumbError(pack)" />
                                             <div v-else class="pack-visual-empty">
-                                                <i class="el-icon-notebook-2"></i>
+                                                <i class="el-icon-picture-outline"></i>
+                                                <span>No artwork</span>
                                             </div>
-                                        </div>
-                                        <div class="pack-card-header">
+                                        </figure>
+
+                                        <div class="pack-body">
                                             <div class="pack-title-row">
-                                                <span class="pack-title" :title="pack.name">{{ pack.name }}</span>
-                                                <el-tag size="mini" :type="pack.active ? 'success' : 'info'" effect="dark">{{ pack.active ? 'Active' : 'Draft' }}</el-tag>
+                                                <h4 class="pack-title" :title="pack.name">{{ pack.name }}</h4>
+                                                <span class="pack-status" :class="{ live: pack.active }">{{ pack.active ? 'Active' : 'Draft' }}</span>
                                             </div>
                                             <div class="pack-code">{{ pack.packCode }}</div>
-                                        </div>
-                                        <div class="pack-card-body">
-                                            <div class="pack-desc">{{ pack.description || 'No description provided.' }}</div>
-                                            <div class="pack-metrics">
-                                                <el-tag size="mini" type="info" effect="plain"><i class="el-icon-document"></i> {{ pack.totalItems || 0 }} Items</el-tag>
-                                                <el-tag size="mini" type="success" effect="plain"><i class="el-icon-flag"></i> {{ pack.language }}</el-tag>
+                                            <p class="pack-desc">{{ pack.description || 'No description.' }}</p>
+                                            <div class="pack-meta">
+                                                <span>{{ pack.totalItems || 0 }} items</span>
+                                                <span>{{ pack.language }}</span>
+                                                <span>{{ pack.contentType === 'prompt' ? 'AI generated' : 'Read-aloud' }}</span>
                                             </div>
                                         </div>
-                                        <div class="pack-card-footer">
-                                            <div class="pack-version">{{ pack.contentType === 'prompt' ? 'AI Generated' : 'Read-Aloud' }}</div>
-                                            <div class="pack-actions">
-                                                <el-button size="mini" icon="el-icon-edit" circle type="primary" plain @click.stop="editContentPack(pack)"></el-button>
-                                                <el-button size="mini" icon="el-icon-delete" circle type="danger" plain @click.stop="deleteContentPack(pack)"></el-button>
-                                            </div>
-                                        </div>
-                                    </div>
+
+                                        <footer class="pack-actions">
+                                            <el-button type="text" @click.stop="editContentPack(pack)">Edit</el-button>
+                                            <el-button type="text" class="is-danger" @click.stop="deleteContentPack(pack)">Delete</el-button>
+                                        </footer>
+                                    </article>
                                 </div>
                             </div>
 
@@ -507,7 +567,7 @@
                                 <el-button size="mini" icon="el-icon-refresh" @click="fetchCustomCards">Refresh</el-button>
                             </div>
 
-                            <el-table :data="customCardsList" v-loading="customCardsLoading" size="mini" style="width: 100%"
+                            <el-table :data="sortRows(customCardsList)" v-loading="customCardsLoading" size="mini" style="width: 100%"
                                 @selection-change="handleCustomCardSelection" empty-text="No custom cards issued yet">
                                 <el-table-column type="selection" width="45"></el-table-column>
                                 <el-table-column prop="rfidUid" label="RFID UID" min-width="160">
@@ -537,7 +597,7 @@
                                 </div>
                             </div>
 
-                            <el-table :data="customPacksList" v-loading="customPacksLoading" size="mini" style="width: 100%"
+                            <el-table :data="sortRows(customPacksList)" v-loading="customPacksLoading" size="mini" style="width: 100%"
                                 empty-text="No parent has recorded anything yet">
                                 <el-table-column prop="packCode" label="Pack Code" min-width="180">
                                     <template slot-scope="scope">
@@ -547,7 +607,7 @@
                                 <el-table-column label="Device" min-width="180">
                                     <template slot-scope="scope">
                                         <div>{{ scope.row.deviceAlias || 'Unnamed toy' }}</div>
-                                        <div style="color: #909399; font-size: 12px; font-family: monospace;">
+                                        <div style="color: var(--text-light); font-size: 12px; font-family: monospace;">
                                             {{ scope.row.macAddress || 'device not found' }}
                                         </div>
                                     </template>
@@ -557,7 +617,7 @@
                                         <a v-if="scope.row.itemAudioUrl" :href="scope.row.itemAudioUrl" target="_blank" rel="noopener">
                                             {{ scope.row.itemTitle || 'recording' }}
                                         </a>
-                                        <span v-else style="color: #909399;">none</span>
+                                        <span v-else style="color: var(--text-light);">none</span>
                                     </template>
                                 </el-table-column>
                                 <el-table-column label="Size" width="90">
@@ -593,11 +653,11 @@
                                     </p>
                                 </div>
                             </div>
-                            <el-table ref="seriesTable" :data="seriesList" class="transparent-table" v-loading="seriesLoading"
+                            <el-table ref="seriesTable" :data="sortRows(seriesList)" class="transparent-table" v-loading="seriesLoading"
                                 element-loading-text="Loading..." element-loading-spinner="el-icon-loading"
                                 element-loading-background="rgba(255, 255, 255, 0.7)"
                                 :header-cell-class-name="headerCellClassName">
-                                <el-table-column label="Select" align="center" width="80">
+                                <el-table-column v-if="selecting" label="" align="center" width="52">
                                     <template slot-scope="scope">
                                         <el-checkbox v-model="scope.row.selected"></el-checkbox>
                                     </template>
@@ -836,20 +896,97 @@
                                         <el-button icon="el-icon-download" :loading="consoleDownloadLoading" @click="handleDownloadLookup">Download</el-button>
                                     </div>
 
-                                    <div v-if="consoleLookupResult" style="margin-top: 12px;">
-                                        <el-alert
-                                            :type="consoleLookupResult.success ? 'success' : 'error'"
-                                            :title="(consoleLookupResult.success ? 'Resolved' : 'Not resolved') + ' — ' + consoleLookupResult.type"
-                                            :closable="false"
-                                            show-icon>
-                                        </el-alert>
-                                        <div v-if="consoleLookupResult.success && consoleLookupResult.data" style="display: flex; flex-wrap: wrap; gap: 16px; margin: 8px 0; font-size: 13px;">
-                                            <span v-if="consoleLookupResult.data.contentType"><strong>Type:</strong> {{ consoleLookupResult.data.contentType }}</span>
-                                            <span v-if="consoleLookupResult.data.characterName || consoleLookupResult.data.agentName"><strong>Character:</strong> {{ consoleLookupResult.data.characterName || consoleLookupResult.data.agentName }}</span>
-                                            <span v-if="consoleLookupResult.data.title"><strong>Title:</strong> {{ consoleLookupResult.data.title }}</span>
-                                            <span v-if="consoleLookupResult.data.packCode"><strong>Pack:</strong> {{ consoleLookupResult.data.packCode }}</span>
+                                    <!-- The resolved card, rendered the way it reads in the Content
+                                         Packs grid. Preview only: nothing here edits the pack. -->
+                                    <div v-if="consoleLookupResult" class="lookup-result">
+                                        <div class="lookup-verdict" :class="{ failed: !consoleLookupResult.success }">
+                                            <i :class="consoleLookupResult.success ? 'el-icon-success' : 'el-icon-warning-outline'"></i>
+                                            <span class="lookup-verdict-text">{{ consoleLookupResult.success ? 'Resolved' : 'Not resolved' }}</span>
+                                            <span class="lookup-verdict-type">{{ consoleLookupResult.type }}</span>
                                         </div>
-                                        <pre style="background: rgba(0,0,0,0.25); padding: 10px; border-radius: 6px; max-height: 320px; overflow: auto; font-size: 12px;">{{ JSON.stringify(consoleLookupResult.data, null, 2) }}</pre>
+
+                                        <div v-if="!consoleLookupResult.success" class="lookup-error">
+                                            {{ consoleLookupResult.data.error }}
+                                        </div>
+
+                                        <article v-else class="pack-card preview">
+                                            <figure class="pack-visual">
+                                                <img
+                                                    v-if="lookupArtwork && !lookupThumbError"
+                                                    :src="lookupArtwork"
+                                                    :alt="lookupPreview.title"
+                                                    @error="lookupThumbError = true" />
+                                                <div v-else class="pack-visual-empty">
+                                                    <i class="el-icon-picture-outline"></i>
+                                                    <span>No artwork</span>
+                                                </div>
+                                            </figure>
+
+                                            <div class="pack-body">
+                                                <div class="pack-title-row">
+                                                    <h4 class="pack-title" :title="lookupPreview.title">{{ lookupPreview.title }}</h4>
+                                                </div>
+                                                <div class="pack-code">{{ lookupPreview.packCode || lookupPreview.uid }}</div>
+
+                                                <!-- AI card: the agent this tap starts -->
+                                                <div v-if="lookupPreview.agentName" class="preview-agent">
+                                                    <span class="rowid-mark accent">{{ lookupAgentInitials }}</span>
+                                                    <div class="preview-agent-text">
+                                                        <span class="preview-agent-name">{{ lookupPreview.agentName }}</span>
+                                                        <span class="preview-agent-sub">
+                                                            <template v-if="lookupPreview.languageName">Speaks {{ lookupPreview.languageName }}</template>
+                                                            <template v-else>Language not set</template>
+                                                            <template v-if="lookupPreview.runtimeAgentName && lookupPreview.runtimeAgentName !== lookupPreview.agentName">
+                                                                · runs on {{ lookupPreview.runtimeAgentName }}
+                                                            </template>
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                                <p v-if="lookupPreview.promptText" class="pack-desc preview-prompt">{{ lookupPreview.promptText }}</p>
+                                                <div class="pack-meta">
+                                                    <span>{{ lookupPreview.uid }}</span>
+                                                    <span v-if="lookupPreview.contentType">{{ lookupPreview.contentType }}</span>
+                                                    <span v-if="lookupPreview.languageCode">{{ lookupPreview.languageCode }}</span>
+                                                    <span v-if="lookupPreview.voiceId">voice {{ lookupPreview.voiceId }}</span>
+                                                    <span v-if="lookupPreview.version">v{{ lookupPreview.version }}</span>
+                                                    <span>{{ lookupPreview.tracks.length }} items</span>
+                                                </div>
+                                            </div>
+
+                                            <div v-if="lookupPreview.tracks.length" class="preview-tracks">
+                                                <div v-for="track in lookupPreview.tracks" :key="track.key" class="preview-track">
+                                                    <span class="preview-track-seq">{{ track.sequence }}</span>
+                                                    <img
+                                                        v-if="thumbSrc(track) && !failedThumbs[track.key]"
+                                                        :src="thumbSrc(track)"
+                                                        :alt="track.title"
+                                                        class="preview-track-thumb"
+                                                        @error="onThumbError(track)" />
+                                                    <span
+                                                        v-else-if="track.imageKind === 'device' && !failedThumbs[track.key]"
+                                                        class="preview-track-thumb is-loading">
+                                                        <i class="el-icon-loading"></i>
+                                                    </span>
+                                                    <span v-else class="preview-track-thumb is-empty">
+                                                        <i class="el-icon-picture-outline"></i>
+                                                    </span>
+                                                    <span class="preview-track-title">{{ track.title || 'Untitled' }}</span>
+                                                    <span v-if="track.story" class="preview-track-story">{{ track.story }}</span>
+                                                    <el-button
+                                                        v-if="track.audioUrl"
+                                                        type="text"
+                                                        :icon="playingUrl === track.audioUrl ? 'el-icon-video-pause' : 'el-icon-video-play'"
+                                                        @click="togglePreviewAudio(track.audioUrl)"></el-button>
+                                                </div>
+                                            </div>
+                                        </article>
+
+                                        <div class="lookup-raw">
+                                            <el-button type="text" @click="consoleShowRawJson = !consoleShowRawJson">
+                                                {{ consoleShowRawJson ? 'Hide' : 'Show' }} raw JSON
+                                            </el-button>
+                                            <pre v-if="consoleShowRawJson" class="lookup-raw-json">{{ JSON.stringify(consoleLookupResult.data, null, 2) }}</pre>
+                                        </div>
                                     </div>
                                 </div>
 
@@ -894,6 +1031,7 @@
                                 <!-- NFC Detail Dialog -->
                                 <el-dialog
                                     :visible.sync="nfcDetailVisible"
+                                    :close-on-click-modal="!nfcNewCardUid.trim()"
                                     :title="nfcDetailData ? nfcDetailData.title || nfcDetailData.rfid_uid || 'Card Details' : 'Card Details'"
                                     width="600px"
                                     :append-to-body="true"
@@ -989,7 +1127,7 @@
                                     <div v-else class="nfc-detail-not-found">
                                         <i class="el-icon-warning-outline" style="font-size: 40px; color: #e6a23c; margin-bottom: 12px;"></i>
                                         <p>No mapping found for <strong>{{ nfcDetailUid }}</strong></p>
-                                        <p style="color: #909399; font-size: 13px;">This card is not mapped to any content yet.</p>
+                                        <p style="color: var(--text-light); font-size: 13px;">This card is not mapped to any content yet.</p>
                                     </div>
                                 </el-dialog>
                             </div>
@@ -1027,6 +1165,7 @@
             :form="contentPackForm"
             @submit="handleContentPackSubmit"
             @cancel="contentPackDialogVisible = false"
+            @content-type-created="onContentTypeCreated"
         />
 
         <RfidSeriesDialog
@@ -1047,19 +1186,45 @@
 </template>
 
 <script>
+import ListToolbar from '@/components/ListToolbar.vue';
+import listControls from '@/mixins/listControls';
 import Api from "@/apis/api";
 import VersionFooter from "@/components/VersionFooter.vue";
 import RfidPackDialog from "@/components/RfidPackDialog.vue";
 import RfidCardDialog from "@/components/RfidCardDialog.vue";
 import RfidContentPackDialog from "@/components/RfidContentPackDialog.vue";
 import RfidSeriesDialog from "@/components/RfidSeriesDialog.vue";
-import { contentTypeLabel } from "@/utils/contentTypes";
+import { contentTypeLabel, customContentTypes } from "@/utils/contentTypes";
+import { isBinUrl, loadLvglBinAsDataUrl } from "@/utils/lvglBin";
+
+// Most content items store their artwork as an LVGL `.bin` — the frame the
+// toy's screen draws. A browser cannot put one in an <img>, so those are
+// decoded to a PNG data URL client-side before the row renders.
+function imageKind(url) {
+    if (!url) return 'none';
+    return isBinUrl(url) ? 'device' : 'image';
+}
+
+// Matches the server's `scope` value for per-child custom-card packs. The
+// catalogue grid excludes them unless this is the selected filter.
+const CUSTOM_PACK_SCOPE = 'custom';
 
 export default {
   name: 'RfidManagement',
-    components: { VersionFooter, RfidPackDialog, RfidCardDialog, RfidContentPackDialog, RfidSeriesDialog },
+    mixins: [listControls],
+    components: { ListToolbar, VersionFooter, RfidPackDialog, RfidCardDialog, RfidContentPackDialog, RfidSeriesDialog },
     data() {
         return {
+            // Track thumbnails whose URL failed to load, so the row shows a
+            // placeholder instead of the browser's broken-image glyph and the
+            // alt text spilling out of a 28px box.
+            failedThumbs: {},
+            // url -> PNG data URL, for the `.bin` frames decoded in the browser
+            decodedThumbs: {},
+            // list controls — one toolbar drives whichever tab is open
+            sortBy: 'name',
+            sortDir: 'asc',
+            searchTimer: null,
             activeTab: 'contentPacks',
             searchKeyword: '',
             pageSizeOptions: [10, 20, 50, 100],
@@ -1193,6 +1358,9 @@ export default {
             consoleDownloadLoading: false,
             consoleSequence: 1,
             consoleLookupResult: null,
+            consoleShowRawJson: false,
+            lookupThumbError: false,
+            playingUrl: null,
 
             // Stats
             stats: {
@@ -1211,6 +1379,7 @@ export default {
     beforeDestroy() {
         if (this._statsRefreshTimer) clearTimeout(this._statsRefreshTimer);
         this.disconnectNfc();
+        this.stopPreviewAudio();
     },
     created() {
 
@@ -1243,10 +1412,162 @@ export default {
         this.fetchActiveTabList();
     },
     computed: {
+        /**
+         * contentPackId -> thumbnail URL. Built once per pack-list change so the
+         * Card Mappings table does not scan the pack array for every cell.
+         */
+        contentPackThumbs() {
+            const map = {};
+            for (const pack of this.contentPacksDropdown) {
+                if (pack && pack.thumbnailUrl) map[pack.id] = pack.thumbnailUrl;
+            }
+            return map;
+        },
+
+    // The active tab's rows, and the sort/group vocabulary that fits them
+    tabRows() {
+      return ({
+        packs: this.packsList,
+        cards: this.cardsList,
+        aiCards: this.aiCardsList,
+        customCards: this.customCardsList,
+        series: this.seriesList,
+        contentPacks: this.contentPacksList
+      })[this.activeTab] || [];
+    },
+    tabHasList() {
+      return ['packs', 'cards', 'aiCards', 'customCards', 'series', 'contentPacks'].indexOf(this.activeTab) !== -1;
+    },
+    tabNoun() {
+      return ({
+        packs: 'SKUs', cards: 'cards', aiCards: 'AI cards',
+        customCards: 'custom cards', series: 'ranges', contentPacks: 'content packs'
+      })[this.activeTab] || 'items';
+    },
+    tabSearchPlaceholder() {
+      return this.activeTab === 'cards' || this.activeTab === 'aiCards'
+        ? 'Enter RFID UID (e.g. 5C42C905)'
+        : 'Search name or code';
+    },
+    tabSortOptions() {
+      const common = [{ label: 'Name', value: 'name' }, { label: 'Created', value: 'createDate' }];
+      return ({
+        packs: [{ label: 'Pack code', value: 'packCode' }].concat(common),
+        cards: [{ label: 'Card UID', value: 'cardUid' }].concat(common),
+        aiCards: [
+          { label: 'Card UID', value: 'cardUid' },
+          { label: 'AI agent', value: 'actionData.agent_name' },
+          { label: 'Language', value: 'actionData.language_name' }
+        ].concat(common),
+        series: [{ label: 'Series code', value: 'seriesCode' }].concat(common),
+        contentPacks: common,
+        customCards: common
+      })[this.activeTab] || common;
+    },
+    tabGroupOptions() {
+      return [
+        { label: 'None', value: '' },
+        { label: 'Content pack', value: 'packName' },
+        { label: 'Card type', value: 'cardType' }
+      ];
+    },
+    sourceRows() {
+      return this.tabRows;
+    },
+    selectedCount() {
+      return this.tabRows.filter(row => row.selected).length;
+    },
+    allSelected() {
+      return this.tabRows.length > 0 && this.selectedCount === this.tabRows.length;
+    },
         // Content type filter options, built from the types actually in use so a
         // type created in the pack editor shows up here too.
+        // The resolved lookup, flattened into the same shape the pack grid renders:
+        // a title, a code, and a numbered track list. Grouped packs come back as
+        // stories rather than items, so both are folded into one list here.
+        lookupPreview() {
+            const data = (this.consoleLookupResult && this.consoleLookupResult.data) || {};
+            const tracks = [];
+
+            (data.items || []).forEach((item, index) => {
+                tracks.push({
+                    key: `i-${index}`,
+                    sequence: item.sequence || index + 1,
+                    title: item.title,
+                    audioUrl: item.audioUrl,
+                    imageUrl: item.imageUrl,
+                    imageKind: imageKind(item.imageUrl),
+                    story: null
+                });
+            });
+
+            (data.stories || []).forEach((story, sIndex) => {
+                (story.audio || []).forEach((audio, aIndex) => {
+                    const image = (story.images || []).find(img => img.index === audio.index);
+                    tracks.push({
+                        key: `s-${sIndex}-${aIndex}`,
+                        sequence: audio.index,
+                        title: story.title,
+                        audioUrl: audio.url,
+                        imageUrl: image ? image.url : null,
+                        imageKind: imageKind(image ? image.url : null),
+                        story: `Story ${story.index || sIndex + 1}`
+                    });
+                });
+            });
+
+            return {
+                title: data.title || data.agentName || data.characterName || 'Untitled card',
+                packCode: data.packCode,
+                uid: data.rfid_uid || this.consoleLookupUid,
+                contentType: data.contentType,
+                version: data.version,
+                promptText: data.promptText,
+                thumbnailUrl: data.thumbnailUrl,
+                // AI cards resolve to a character rather than a pack: the agent
+                // is what the tap actually starts, so it leads the preview.
+                agentName: data.agentName || data.characterName || null,
+                runtimeAgentName: data.runtimeAgentName || null,
+                languageName: data.languageName || data.actionData?.language_name || null,
+                languageCode: data.languageCode || data.actionData?.language_code || null,
+                voiceId: data.voiceId || null,
+                tracks
+            };
+        },
+
+        // The pack's own artwork when it has some, otherwise the first track's
+        // picture, so a pack with per-item images still previews as a card.
+        lookupArtwork() {
+            const preview = this.lookupPreview;
+            if (preview.thumbnailUrl) return preview.thumbnailUrl;
+            const withImage = preview.tracks.find(track => track.imageUrl);
+            return withImage ? withImage.imageUrl : null;
+        },
+
+        showingCustomPacks() {
+            return this.contentPacksTypeFilter === CUSTOM_PACK_SCOPE;
+        },
+
+        lookupAgentInitials() {
+            const name = String(this.lookupPreview.agentName || '').trim();
+            if (!name) return '—';
+            const parts = name.split(/\s+/).filter(Boolean);
+            return (parts.length > 1 ? parts[0][0] + parts[1][0] : name.slice(0, 2)).toUpperCase();
+        },
+
         contentPackTypeOptions() {
-            return this.contentPackTypes.map(value => ({ value, label: contentTypeLabel(value) }));
+            // Custom cards are content packs a parent recorded, not catalogue
+            // content, so they are their own choice rather than a content type.
+            //
+            // Types are otherwise derived from saved packs, so a playlist with
+            // no packs yet would be invisible here. Merging the ones created
+            // from the pack editor keeps a new, empty playlist selectable.
+            const derived = new Set(this.contentPackTypes);
+            customContentTypes().forEach(t => derived.add(t.value));
+            return [
+                { value: CUSTOM_PACK_SCOPE, label: 'Custom Cards' },
+                ...[...derived].sort().map(value => ({ value, label: contentTypeLabel(value) }))
+            ];
         },
         // Questions pagination
         questionsPageCount() {
@@ -1299,6 +1620,74 @@ export default {
         }
     },
     methods: {
+    // Shared sort/search for whichever tab's table is rendering
+    onThumbError(track) {
+      this.$set(this.failedThumbs, track.key, true);
+    },
+
+    /**
+     * A web image renders straight from its URL; a device `.bin` renders once
+     * it has been decoded, which is kicked off the first time it is seen.
+     */
+    thumbSrc(track) {
+      if (!track.imageUrl) return null;
+      if (track.imageKind !== 'device') return track.imageUrl;
+
+      const decoded = this.decodedThumbs[track.imageUrl];
+      if (decoded === undefined) this.decodeTrackThumb(track);
+      return decoded || null;
+    },
+
+    decodeTrackThumb(track) {
+      // Mark it in flight so the getter does not queue the same URL again on
+      // every re-render.
+      this.$set(this.decodedThumbs, track.imageUrl, null);
+      loadLvglBinAsDataUrl(track.imageUrl).then(dataUrl => {
+        if (dataUrl) this.$set(this.decodedThumbs, track.imageUrl, dataUrl);
+        else this.$set(this.failedThumbs, track.key, true);
+      });
+    },
+
+    sortRows(list) {
+      const rows = (list || []).slice();
+      const q = (this.searchKeyword || '').trim().toLowerCase();
+      const filtered = !q ? rows : rows.filter(row =>
+        ['name', 'packCode', 'cardUid', 'seriesCode', 'packName'].some(field => {
+          const value = row[field];
+          return value !== null && value !== undefined && String(value).toLowerCase().includes(q);
+        }));
+      if (this.sortBy) {
+        filtered.sort((a, b) => this.compareRows(a, b, this.sortBy, this.sortDir));
+      }
+      if (this.groupBy) {
+        filtered.sort((a, b) => this.compareRows(a, b, this.groupBy, 'asc'));
+      }
+      return filtered;
+    },
+    selectAllRows() {
+      this.tabRows.forEach(row => { this.$set(row, 'selected', true); });
+    },
+    clearSelection() {
+      this.tabRows.forEach(row => { this.$set(row, 'selected', false); });
+    },
+    bulkExport() {
+      const rows = this.tabRows.filter(row => row.selected);
+      if (!rows.length) {
+        this.$message.warning('Nothing to export.');
+        return;
+      }
+      const cols = Object.keys(rows[0]).filter(k => k !== 'selected' && typeof rows[0][k] !== 'object');
+      const escape = value => `"${String(value === null || value === undefined ? '' : value).replace(/"/g, '""')}"`;
+      const csv = [cols.join(',')]
+        .concat(rows.map(row => cols.map(col => escape(row[col])).join(',')))
+        .join('\n');
+      const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `rfid-${this.activeTab}.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+    },
         getVisiblePages(currentPage, pageCount) {
             const pages = [];
             const maxVisible = 3;
@@ -1322,8 +1711,57 @@ export default {
         },
 
         // Broken pack thumbnail → fall back to the placeholder icon
+        // Preview-only playback for the Lookup & Test result. One element, so a
+        // second play always replaces the first rather than stacking.
+        togglePreviewAudio(url) {
+            if (this.playingUrl === url) {
+                this.stopPreviewAudio();
+                return;
+            }
+            this.stopPreviewAudio();
+            this._previewAudio = new Audio(url);
+            this._previewAudio.addEventListener('ended', () => { this.playingUrl = null; });
+            this._previewAudio.play().catch(() => {
+                this.$message.error('Could not play this audio');
+                this.playingUrl = null;
+            });
+            this.playingUrl = url;
+        },
+
+        stopPreviewAudio() {
+            if (this._previewAudio) {
+                this._previewAudio.pause();
+                this._previewAudio = null;
+            }
+            this.playingUrl = null;
+        },
+
+        resetLookupPreview() {
+            this.lookupThumbError = false;
+            this.consoleShowRawJson = false;
+            this.stopPreviewAudio();
+        },
+
         onPackThumbError(pack) {
             this.$set(pack, '_thumbError', true);
+        },
+
+        /**
+         * Artwork for a card mapping. In practice no mapping carries its own
+         * `thumbnail_url` — the picture belongs to the content pack the card
+         * points at — but a card's own value wins if one is ever set directly.
+         * Returns null when there is nothing loadable, which is what draws the
+         * placeholder. `imageKind` filters out `.bin` framebuffers, which are
+         * screen data for the toy rather than anything an <img> can render.
+         */
+        cardThumbnail(row) {
+            if (!row || row._thumbError) return null;
+            const url = row.thumbnailUrl || this.contentPackThumbs[row.contentPackId] || null;
+            return url && imageKind(url) === 'image' ? url : null;
+        },
+
+        onCardThumbError(row) {
+            this.$set(row, '_thumbError', true);
         },
 
         switchTab(tab) {
@@ -1595,6 +2033,19 @@ export default {
             if (n.includes('astro')) return 'success';
             return 'danger';
         },
+        // agent_name has been on action_data all along — it only ever fed the
+        // tag colour, so the name itself was never visible.
+        getAiCardAgentName(card) {
+            return card?.actionData?.agent_name || card?.aiAgentName || '';
+        },
+
+        aiAgentInitials(card) {
+            const name = String(this.getAiCardAgentName(card) || '').trim();
+            if (!name) return '—';
+            const parts = name.split(/\s+/).filter(Boolean);
+            return (parts.length > 1 ? parts[0][0] + parts[1][0] : name.slice(0, 2)).toUpperCase();
+        },
+
         getAiCardLanguageLabel(card) {
             return card?.actionData?.language_name || card?.aiLanguageName || card?.actionData?.language_code || card?.aiLanguageCode || '';
         },
@@ -2018,11 +2469,13 @@ export default {
         // ==================== CONTENT PACKS ====================
         fetchContentPacks() {
             this.contentPacksLoading = true;
+            const showingCustom = this.showingCustomPacks;
             Api.rfid.getContentPackPage({
                 page: this.contentPacksCurrentPage,
                 limit: this.contentPacksPageSize,
                 packCode: this.searchKeyword,
-                contentType: this.contentPacksTypeFilter
+                contentType: showingCustom ? '' : this.contentPacksTypeFilter,
+                scope: showingCustom ? CUSTOM_PACK_SCOPE : ''
             }, ({ data }) => {
                 this.contentPacksLoading = false;
                 if (data.code === 0) {
@@ -2588,6 +3041,7 @@ export default {
             }
             this.consoleLookupLoading = true;
             this.consoleLookupResult = null;
+            this.resetLookupPreview();
 
             Api.rfid.lookupCard(this.consoleLookupUid.trim(), ({ data }) => {
                 this.consoleLookupLoading = false;
@@ -2614,6 +3068,7 @@ export default {
             }
             this.consoleSeriesLoading = true;
             this.consoleLookupResult = null;
+            this.resetLookupPreview();
 
             Api.rfid.lookupSeries(this.consoleLookupUid.trim(), ({ data }) => {
                 this.consoleSeriesLoading = false;
@@ -2640,6 +3095,7 @@ export default {
             }
             this.consoleContentLoading = true;
             this.consoleLookupResult = null;
+            this.resetLookupPreview();
 
             Api.rfid.lookupContent(this.consoleLookupUid.trim(), this.consoleSequence, ({ data }) => {
                 this.consoleContentLoading = false;
@@ -2666,6 +3122,7 @@ export default {
             }
             this.consoleDownloadLoading = true;
             this.consoleLookupResult = null;
+            this.resetLookupPreview();
 
             Api.rfid.getContentDownload(this.consoleLookupUid.trim(), ({ data }) => {
                 this.consoleDownloadLoading = false;
@@ -2689,24 +3146,24 @@ export default {
 </script>
 
 <style lang="scss" scoped>
+@import '@/styles/theme.scss';
+
 .welcome {
-    min-height: 100vh;
+    min-height: 0;
     display: flex;
     position: relative;
     flex-direction: column;
-    background-size: cover;
-    background: linear-gradient(to bottom right, #fff5eb, #fff7f0, #ffe8d6) center;
-    overflow-y: auto;
+    background: transparent;
 }
 
 .main-wrapper {
-    margin: 5px 22px;
-    border-radius: 15px;
-    min-height: calc(100vh - 24vh);
+    margin: 0;
+    border-radius: 0;
+    min-height: 0;
     height: auto;
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
+    box-shadow: none;
     position: relative;
-    background: rgba(237, 242, 255, 0.5);
+    background: transparent;
     display: flex;
     flex-direction: column;
 }
@@ -2721,8 +3178,14 @@ export default {
 }
 
 .page-title {
-    font-size: 24px;
-    margin: 0;
+  margin: 0;
+  font-family: $font-display;
+  font-size: 34px;
+  font-weight: 400;
+  line-height: 1.05;
+  letter-spacing: -0.025em;
+  color: $text-dark;
+
 }
 
 .right-operations {
@@ -2736,75 +3199,85 @@ export default {
 }
 
 .btn-search {
-    background: linear-gradient(135deg, #6b8cff, #a966ff);
+    background: $surface;
     border: none;
     color: white;
 }
 
 .tab-navigation {
     display: flex;
-    gap: 12px;
-    padding: 12px 24px;
+    gap: 26px;
+    padding: 0;
+    margin-bottom: 22px;
     background: transparent;
-    // Mobile: tab pills scroll sideways instead of wrapping into a blob
+    border-bottom: 1px solid $border-color;
+    // Mobile: tabs scroll sideways instead of wrapping into a blob
     overflow-x: auto;
 }
 
 .tab-btn {
-    padding: 8px 20px;
-    border-radius: 8px;
-    background: rgba(95, 112, 243, 0.15);
-    color: #3d4566;
+    padding: 0 0 11px;
+    border-radius: 0;
+    background: transparent;
+    color: $text-gray;
     cursor: pointer;
-    font-weight: 500;
-    font-size: 14px;
-    transition: all 0.3s ease;
+    font-weight: 400;
+    font-size: 13px;
+    white-space: nowrap;
+    flex: 0 0 auto;
+    transition: color 0.15s ease, box-shadow 0.15s ease;
+
+    i { margin-right: 5px; }
 
     &.active {
-        background: #5f70f3;
-        color: white;
+        background: transparent;
+        color: $text-dark;
+        font-weight: 550;
+        box-shadow: inset 0 -2px 0 0 $text-dark;
     }
 
     &:hover:not(.active) {
-        background: rgba(95, 112, 243, 0.25);
+        background: transparent;
+        color: $text-body;
     }
 }
 
 .content-panel {
     flex: 1;
     display: flex;
-    overflow: hidden;
-    height: 100%;
-    border-radius: 15px;
+    overflow: visible;
+    height: auto;
+    border-radius: 0;
     background: transparent;
-    border: 1px solid #fff;
+    border: 0;
 }
 
 .content-area {
     flex: 1;
-    height: 100%;
-    min-width: 600px;
-    overflow: auto;
-    background-color: white;
+    height: auto;
+    min-width: 0;
+    overflow: visible;
+    background: transparent;
     display: flex;
     flex-direction: column;
 }
 
 .rfid-card {
-    background: white;
+    background: $surface;
     flex: 1;
     display: flex;
     flex-direction: column;
-    border: none;
+    border: 1px solid $border-color;
+    border-radius: $radius-lg;
     box-shadow: none;
     overflow: hidden;
 
     ::v-deep .el-card__body {
-        padding: 15px;
+        padding: 20px 22px;
         display: flex;
         flex-direction: column;
         flex: 1;
-        overflow: hidden;
+        overflow: visible;
     }
 }
 
@@ -2830,26 +3303,26 @@ export default {
         font-weight: 500;
         border: none;
         transition: all 0.3s ease;
-        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+        box-shadow: none;
 
         &:hover {
             transform: translateY(-1px);
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+            box-shadow: none;
         }
     }
 
     .el-button--primary {
-        background: #5f70f3;
+        background: $text-dark;
         color: white;
     }
 
     .el-button--success {
-        background: #5bc98c;
+        background: $success;
         color: white;
     }
 
     .el-button--danger {
-        background: #fd5b63;
+        background: $danger;
         color: white;
     }
 }
@@ -2864,15 +3337,15 @@ export default {
         height: 32px;
         padding: 0 12px;
         border-radius: 4px;
-        border: 1px solid #e4e7ed;
-        background: #dee7ff;
-        color: #606266;
+        border: 1px solid $border-color;
+        background: $surface-sunk;
+        color: $text-body;
         font-size: 14px;
         cursor: pointer;
         transition: all 0.3s ease;
 
         &:hover {
-            background: #d7dce6;
+            background: $border-color;
         }
 
         &:disabled {
@@ -2881,14 +3354,14 @@ export default {
         }
 
         &.active {
-            background: #5f70f3 !important;
-            color: #ffffff !important;
-            border-color: #5f70f3 !important;
+            background: $text-dark !important;
+            color: $white !important;
+            border-color: $text-dark !important;
         }
     }
 
     .total-text {
-        color: #909399;
+        color: $text-light;
         font-size: 14px;
         margin-left: 10px;
     }
@@ -2902,7 +3375,7 @@ export default {
 
 .filter-label {
     font-size: 12px;
-    color: #909399;
+    color: $text-light;
     white-space: nowrap;
 }
 
@@ -2913,9 +3386,9 @@ export default {
         height: 28px;
         line-height: 28px;
         border-radius: 4px;
-        border: 1px solid #e4e7ed;
-        background: #dee7ff;
-        color: #606266;
+        border: 1px solid $border-color;
+        background: $surface-sunk;
+        color: $text-body;
     }
 }
 
@@ -2927,15 +3400,15 @@ export default {
         height: 32px;
         line-height: 32px;
         border-radius: 4px;
-        border: 1px solid #e4e7ed;
-        background: #dee7ff;
-        color: #606266;
+        border: 1px solid $border-color;
+        background: $surface-sunk;
+        color: $text-body;
         font-size: 14px;
     }
 }
 
 :deep(.transparent-table) {
-    background: white;
+    background: $surface;
     flex: 1;
     width: 100%;
     display: flex;
@@ -2947,7 +3420,7 @@ export default {
     }
 
     .el-table__header th {
-        background: white !important;
+        background: $surface !important;
         color: black;
     }
 
@@ -2966,21 +3439,21 @@ export default {
 }
 
 :deep(.el-checkbox__inner) {
-    background-color: #eeeeee !important;
-    border-color: #cccccc !important;
+    background-color: $surface-sunk !important;
+    border-color: $border-color !important;
 }
 
 :deep(.el-checkbox__input.is-checked .el-checkbox__inner) {
-    background-color: #5f70f3 !important;
-    border-color: #5f70f3 !important;
+    background-color: $text-dark !important;
+    border-color: $text-dark !important;
 }
 
 :deep(.el-table .el-button--text) {
-    color: #7079aa;
+    color: $text-gray;
 }
 
 :deep(.el-table .el-button--text:hover) {
-    color: #5a64b5;
+    color: $text-dark;
 }
 
 :deep(.el-loading-mask) {
@@ -2989,11 +3462,11 @@ export default {
 }
 
 :deep(.el-loading-spinner .path) {
-    stroke: #6b8cff;
+    stroke: $primary;
 }
 
 :deep(.el-loading-text) {
-    color: #6b8cff !important;
+    color: $primary !important;
 }
 
 /* Console Tab Styles */
@@ -3013,15 +3486,15 @@ export default {
     align-items: center;
     gap: 12px;
     padding: 12px 16px;
-    background: white;
+    background: $surface;
     border-radius: 10px;
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+    box-shadow: none;
     cursor: pointer;
     transition: all 0.2s ease;
 
     &:hover {
         transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        box-shadow: none;
     }
 }
 
@@ -3034,50 +3507,52 @@ export default {
     justify-content: center;
     font-size: 18px;
 
-    &.prompts { background: #eff6ff; color: #3b82f6; }
-    &.content { background: #fff7ed; color: #f97316; }
-    &.skus { background: #f0fdf4; color: #22c55e; }
-    &.cards { background: #faf5ff; color: #a855f7; }
-    &.series { background: #fef2f2; color: #ef4444; }
-    &.analytics { background: #eef2ff; color: #4f46e5; }
+    &.prompts { background: $surface-sunk; color: $text-gray; }
+    &.content { background: $surface-sunk; color: $text-gray; }
+    &.skus { background: $surface-sunk; color: $text-gray; }
+    &.cards { background: $surface-sunk; color: $text-gray; }
+    &.series { background: $surface-sunk; color: $text-gray; }
+    &.analytics { background: $surface-sunk; color: $text-gray; }
 }
 
 .stat-content {
     .stat-value {
         font-size: 20px;
         font-weight: 700;
-        color: #1e293b;
+        color: $text-dark;
         line-height: 1.2;
     }
 
     .stat-label {
         font-size: 11px;
-        color: #94a3b8;
+        color: $text-light;
         font-weight: 500;
         text-transform: uppercase;
         letter-spacing: 0.5px;
     }
 }
 
-/* Section Headers */
+/* Section Headers — flush with the card body's own padding, so the title
+   starts on the same line as the toolbar and the grid below it. */
 .section-header {
-    padding: 12px 16px 8px;
-    border-bottom: 1px solid #f1f5f9;
-    margin-bottom: 4px;
+    padding: 0 0 14px;
+    border-bottom: 1px solid $divider-color;
+    margin-bottom: 16px;
 }
 
 .section-info {
     .section-title {
-        margin: 0 0 4px;
-        font-size: 16px;
-        font-weight: 600;
-        color: #1e293b;
+        margin: 0 0 5px;
+        font-size: 13.5px;
+        font-weight: 590;
+        letter-spacing: -0.01em;
+        color: $text-dark;
         display: flex;
         align-items: center;
         gap: 8px;
 
         i {
-            color: #5f70f3;
+            color: $text-light;
         }
     }
 
@@ -3088,18 +3563,19 @@ export default {
 
     .section-description {
         margin: 0;
-        font-size: 13px;
-        color: #64748b;
-        line-height: 1.5;
+        font-size: 12.5px;
+        color: $text-gray;
+        line-height: 1.55;
+        max-width: 82ch;
     }
 
     .section-help {
-        color: #94a3b8;
+        color: $text-light;
         cursor: help;
         margin-left: 4px;
 
         &:hover {
-            color: #5f70f3;
+            color: $text-dark;
         }
     }
 }
@@ -3108,12 +3584,12 @@ export default {
 .uid-mono {
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
     font-size: 13px;
-    color: #334155;
+    color: $text-body;
     letter-spacing: 0.5px;
 }
 
 .text-muted {
-    color: #cbd5e1;
+    color: $text-light;
 }
 
 .content-badge {
@@ -3130,25 +3606,25 @@ export default {
 }
 
 .analytics-kpi {
-    background: #f8fafc;
-    border: 1px solid #e2e8f0;
+    background: $surface-sunk;
+    border: 1px solid $border-color;
     border-radius: 10px;
     padding: 10px 12px;
 
     &.warning {
-        background: #fff7ed;
-        border-color: #fed7aa;
+        background: $warning-bg;
+        border-color: darken($warning-bg, 6%);
     }
 
     &.danger {
-        background: #fef2f2;
-        border-color: #fecaca;
+        background: $danger-bg;
+        border-color: darken($danger-bg, 6%);
     }
 }
 
 .analytics-kpi-label {
     font-size: 11px;
-    color: #64748b;
+    color: $text-gray;
     text-transform: uppercase;
     letter-spacing: 0.4px;
 }
@@ -3157,7 +3633,7 @@ export default {
     margin-top: 4px;
     font-size: 22px;
     font-weight: 700;
-    color: #1e293b;
+    color: $text-dark;
 }
 
 .analytics-insights {
@@ -3168,8 +3644,8 @@ export default {
 }
 
 .insight-card {
-    background: #ffffff;
-    border: 1px solid #e2e8f0;
+    background: $surface;
+    border: 1px solid $border-color;
     border-radius: 10px;
     padding: 10px 12px;
 }
@@ -3177,7 +3653,7 @@ export default {
 .insight-title {
     font-size: 12px;
     font-weight: 700;
-    color: #334155;
+    color: $text-body;
     margin-bottom: 8px;
     text-transform: uppercase;
     letter-spacing: 0.3px;
@@ -3193,9 +3669,9 @@ export default {
     align-items: center;
     justify-content: space-between;
     font-size: 12px;
-    color: #475569;
+    color: $text-body;
     padding: 4px 0;
-    border-bottom: 1px dashed #e2e8f0;
+    border-bottom: 1px dashed $border-color;
 }
 
 .insight-row:last-child {
@@ -3204,7 +3680,7 @@ export default {
 
 .insight-empty {
     font-size: 12px;
-    color: #94a3b8;
+    color: $text-light;
     padding: 6px 0;
 }
 
@@ -3212,7 +3688,7 @@ export default {
     display: inline-block;
     padding: 4px 10px;
     border-radius: 4px;
-    background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+    background: $surface;
     color: white;
     font-size: 12px;
     font-weight: 500;
@@ -3222,7 +3698,7 @@ export default {
     display: inline-block;
     padding: 4px 10px;
     border-radius: 4px;
-    background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+    background: $surface;
     color: white;
     font-size: 12px;
     font-weight: 500;
@@ -3234,13 +3710,13 @@ export default {
     margin: 0 0 16px;
     padding: 14px 18px;
     border-radius: 10px;
-    border: 1.5px dashed #dcdfe6;
-    background: #fafbfc;
+    border: 1.5px dashed $border-color;
+    background: $surface-sunk;
     transition: all 0.3s ease;
 
     &.connected {
-        border-color: #67c23a;
-        background: linear-gradient(135deg, #f0f9eb, #fafbfc);
+        border-color: $success;
+        background: $surface;
     }
 }
 
@@ -3260,12 +3736,12 @@ export default {
     width: 10px;
     height: 10px;
     border-radius: 50%;
-    background: #c0c4cc;
+    background: $text-light;
     display: inline-block;
     transition: background 0.3s;
 
     &.active {
-        background: #67c23a;
+        background: $success;
     }
 
     &.pulse {
@@ -3274,20 +3750,20 @@ export default {
 }
 
 @keyframes nfc-pulse {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(103, 194, 58, 0.5); }
-    50% { box-shadow: 0 0 0 6px rgba(103, 194, 58, 0); }
+    0%, 100% { box-shadow: none; }
+    50% { box-shadow: none; }
 }
 
 .nfc-label {
     font-size: 13px;
     font-weight: 500;
-    color: #606266;
+    color: $text-body;
 }
 
 .nfc-tap-hint {
     margin-top: 8px;
     font-size: 12px;
-    color: #909399;
+    color: $text-light;
 
     i {
         animation: nfc-tap-bounce 1.5s infinite;
@@ -3308,7 +3784,7 @@ export default {
 }
 
 .nfc-tap-label {
-    color: #909399;
+    color: $text-light;
     font-weight: 500;
 }
 
@@ -3318,13 +3794,13 @@ export default {
 }
 
 .nfc-tap-time {
-    color: #c0c4cc;
+    color: $text-light;
     font-size: 11px;
 }
 
 .nfc-history {
     margin-top: 10px;
-    border-top: 1px solid #ebeef5;
+    border-top: 1px solid $divider-color;
     padding-top: 8px;
 }
 
@@ -3338,7 +3814,7 @@ export default {
 .nfc-history-title {
     font-size: 12px;
     font-weight: 500;
-    color: #909399;
+    color: $text-light;
 }
 
 .nfc-history-list {
@@ -3360,19 +3836,19 @@ export default {
     transition: background 0.2s;
 
     &:hover {
-        background: #f5f7fa;
+        background: $surface-sunk;
     }
 }
 
 .nfc-history-uid {
     font-family: 'SF Mono', 'Fira Code', monospace;
     font-weight: 500;
-    color: #303133;
+    color: $text-dark;
     min-width: 100px;
 }
 
 .nfc-history-content {
-    color: #606266;
+    color: $text-body;
     flex: 1;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -3380,7 +3856,7 @@ export default {
 }
 
 .nfc-history-time {
-    color: #c0c4cc;
+    color: $text-light;
     font-size: 11px;
     flex-shrink: 0;
 }
@@ -3396,7 +3872,7 @@ export default {
     flex-direction: column;
     gap: 10px;
     padding-bottom: 16px;
-    border-bottom: 1px solid #ebeef5;
+    border-bottom: 1px solid $divider-color;
 }
 
 .nfc-detail-row {
@@ -3408,19 +3884,19 @@ export default {
 .nfc-detail-label {
     font-size: 13px;
     font-weight: 500;
-    color: #909399;
+    color: $text-light;
     min-width: 80px;
 }
 
 .nfc-detail-value {
     font-size: 13px;
-    color: #303133;
+    color: $text-dark;
 }
 
 .nfc-detail-section-title {
     font-size: 14px;
     font-weight: 600;
-    color: #303133;
+    color: $text-dark;
     margin: 16px 0 10px;
 }
 
@@ -3431,9 +3907,9 @@ export default {
 .nfc-detail-story {
     margin-bottom: 12px;
     padding: 10px 12px;
-    background: #f8f9fb;
+    background: $surface-sunk;
     border-radius: 8px;
-    border: 1px solid #ebeef5;
+    border: 1px solid $divider-color;
 }
 
 .nfc-story-header {
@@ -3446,7 +3922,7 @@ export default {
 .nfc-story-title {
     font-size: 13px;
     font-weight: 500;
-    color: #303133;
+    color: $text-dark;
 }
 
 .nfc-story-tracks {
@@ -3467,8 +3943,8 @@ export default {
     width: 22px;
     height: 22px;
     border-radius: 50%;
-    background: #e8f0fe;
-    color: #409eff;
+    background: $surface-sunk;
+    color: $info;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -3479,7 +3955,7 @@ export default {
 
 .nfc-track-title {
     font-weight: 500;
-    color: #606266;
+    color: $text-body;
     max-width: 120px;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -3487,7 +3963,7 @@ export default {
 }
 
 .nfc-track-url {
-    color: #909399;
+    color: $text-light;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -3500,7 +3976,7 @@ export default {
 .nfc-linked-cards {
     margin-top: 16px;
     padding-top: 16px;
-    border-top: 1px solid #ebeef5;
+    border-top: 1px solid $divider-color;
 }
 
 .nfc-linked-header {
@@ -3517,7 +3993,7 @@ export default {
 .nfc-linked-loading {
     text-align: center;
     padding: 16px;
-    color: #909399;
+    color: $text-light;
     font-size: 13px;
 }
 
@@ -3534,15 +4010,15 @@ export default {
     align-items: center;
     gap: 8px;
     padding: 6px 10px;
-    background: #f8f9fb;
+    background: $surface-sunk;
     border-radius: 6px;
-    border: 1px solid #ebeef5;
+    border: 1px solid $divider-color;
 }
 
 .nfc-linked-notes {
     flex: 1;
     font-size: 12px;
-    color: #909399;
+    color: $text-light;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -3551,7 +4027,7 @@ export default {
 .nfc-linked-empty {
     text-align: center;
     padding: 12px;
-    color: #c0c4cc;
+    color: $text-light;
     font-size: 13px;
 }
 
@@ -3572,10 +4048,12 @@ export default {
 }
 
 .nfc-detail-json {
-    background: #1e1e2e;
-    color: #a6e3a1;
-    border-radius: 8px;
-    padding: 14px;
+    background: $surface-sunk;
+    border: 1px solid $divider-color;
+    color: $text-body;
+    font-family: $font-mono;
+    border-radius: $radius-md;
+    padding: 14px 16px;
     font-size: 11px;
     line-height: 1.5;
     max-height: 300px;
@@ -3620,12 +4098,12 @@ export default {
 
     .sequence-label {
         font-size: 12px;
-        color: #64748b;
+        color: $text-gray;
         font-weight: 500;
 
         i {
             font-size: 12px;
-            color: #94a3b8;
+            color: $text-light;
             cursor: help;
         }
     }
@@ -3636,6 +4114,194 @@ export default {
     gap: 10px;
     margin-bottom: 20px;
     flex-wrap: wrap;
+}
+
+/* ---------- Lookup & Test result ----------------------------------------
+   The resolved card previewed with the same chrome as the Content Packs
+   grid, minus every control that would change it. */
+.lookup-result {
+    flex: 1 0 100%;
+    margin-top: 4px;
+    margin-bottom: 20px;
+}
+
+.lookup-verdict {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding-bottom: 12px;
+    margin-bottom: 16px;
+    border-bottom: 1px solid $divider-color;
+
+    i {
+        color: $success;
+        font-size: 13px;
+    }
+
+    .lookup-verdict-text {
+        font-size: 13px;
+        font-weight: 590;
+        color: $text-dark;
+    }
+
+    .lookup-verdict-type {
+        font-family: $font-mono;
+        font-size: 9.5px;
+        text-transform: uppercase;
+        letter-spacing: 0.11em;
+        color: $text-light;
+    }
+
+    &.failed i { color: $danger; }
+}
+
+.lookup-error {
+    padding: 14px 16px;
+    background: $danger-bg;
+    border: 1px solid darken($danger-bg, 6%);
+    border-radius: $radius-md;
+    font-size: 12.5px;
+    color: $danger;
+}
+
+.pack-card.preview {
+    max-width: 420px;
+    cursor: default;
+
+    &:hover { border-color: $border-color; }
+}
+
+.preview-prompt {
+    -webkit-line-clamp: 4;
+}
+
+.preview-tracks {
+    border-top: 1px solid $divider-color;
+    max-height: 320px;
+    overflow-y: auto;
+}
+
+.preview-track {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 16px;
+
+    & + .preview-track {
+        border-top: 1px solid $divider-color;
+    }
+}
+
+.preview-track-seq {
+    flex: 0 0 auto;
+    min-width: 18px;
+    font-family: $font-mono;
+    font-size: 10px;
+    color: $text-light;
+}
+
+.preview-agent {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 10px 0 2px;
+    padding: 10px 12px;
+    background: $surface-sunk;
+    border-radius: $radius-md;
+}
+
+.preview-agent-text {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.preview-agent-name {
+    font-size: 13px;
+    font-weight: 560;
+    color: $text-dark;
+}
+
+.preview-agent-sub {
+    font-size: 11.5px;
+    color: $text-gray;
+    margin-top: 1px;
+}
+
+.preview-track-thumb {
+    flex: 0 0 auto;
+    width: 28px;
+    height: 28px;
+    border-radius: $radius-sm;
+    border: 1px solid $border-color;
+    background: $surface-sunk;
+    // `cover` fills the box at any source aspect; `contain` left letterbox
+    // gaps and made portrait art read as a sliver.
+    object-fit: cover;
+    object-position: center;
+    display: block;
+    overflow: hidden;
+
+    &.is-empty,
+    &.is-loading,
+    &.is-device {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: $text-light;
+        font-size: 13px;
+    }
+
+    &.is-device {
+        background: $accent-wash;
+        color: $primary-dark;
+        border-color: $accent-wash;
+    }
+}
+
+.preview-track-title {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: 12.5px;
+    color: $text-body;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.preview-track-story {
+    flex: 0 0 auto;
+    font-family: $font-mono;
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: $text-light;
+}
+
+.lookup-raw {
+    margin-top: 12px;
+
+    :deep(.el-button--text) {
+        padding: 0;
+        font-size: 11.5px;
+        color: $text-light;
+
+        &:hover { color: $text-dark; }
+    }
+}
+
+.lookup-raw-json {
+    margin: 8px 0 0;
+    padding: 14px 16px;
+    max-height: 320px;
+    overflow: auto;
+    background: $surface-sunk;
+    border: 1px solid $divider-color;
+    border-radius: $radius-md;
+    font-family: $font-mono;
+    font-size: 11px;
+    line-height: 1.6;
+    color: $text-body;
 }
 
 .lookup-guide {
@@ -3650,7 +4316,7 @@ export default {
         align-items: center;
         gap: 10px;
         font-size: 13px;
-        color: #64748b;
+        color: $text-gray;
 
         .el-tag {
             min-width: 130px;
@@ -3677,18 +4343,18 @@ export default {
         .result-label {
             font-weight: 600;
             font-size: 14px;
-            color: #3d4566;
+            color: $text-dark;
 
             i {
                 margin-right: 6px;
             }
 
             .el-icon-success {
-                color: #67c23a;
+                color: $success;
             }
 
             .el-icon-error {
-                color: #f56c6c;
+                color: $danger;
             }
         }
     }
@@ -3714,7 +4380,7 @@ export default {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    color: #909399;
+    color: $text-light;
 
     i {
         font-size: 64px;
@@ -3728,166 +4394,277 @@ export default {
     }
 }
 
-/* Q&A Packs Grid */
+/* ---------- Content pack grid --------------------------------------------
+   One flat surface per pack: a 1px rule, the card artwork whole, then the
+   text. No inner bands, no elevation — the same chrome as every other card
+   on the page. */
 .pack-grid-container {
-    padding: 10px 0;
+    padding: 4px 0 0;
     min-height: 200px;
 }
 .pack-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-    gap: 24px;
+    grid-template-columns: repeat(auto-fill, minmax(178px, 1fr));
+    // Every tile is the same ratio, so cards line up bottom to bottom. The cap
+    // stops a wide viewport blowing a card up to full column width.
+    align-items: stretch;
+    justify-items: stretch;
+    gap: 16px;
     padding-bottom: 20px;
 }
 .pack-card {
-    background: #fff;
-    border-radius: 12px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.03);
-    border: 1px solid #f0f0f0;
-    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+    position: relative;
+    width: 100%;
+    max-width: 216px;
     display: flex;
     flex-direction: column;
-    position: relative;
+    background: $surface;
+    border: 1px solid $border-color;
+    border-radius: $radius-lg;
     overflow: hidden;
     cursor: pointer;
-    height: 100%;
+    transition: border-color 0.18s ease, background-color 0.18s ease;
+
+    &:hover {
+        border-color: $text-light;
+    }
+
+    &.selected {
+        border-color: $text-dark;
+        background: $row-selected;
+    }
 }
 
-/* Card face — the pack thumbnail rendered like the physical RFID card
-   (standard card ratio 85.6:54 ≈ 1.585) */
+.pack-select {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    z-index: 2;
+    padding: 3px;
+    background: $surface;
+    border: 1px solid $border-color;
+    border-radius: $radius-sm;
+    line-height: 0;
+}
+
+/* One tile ratio for every card, so a pack with no artwork is the same size as
+   one with. It is portrait because the card faces are: at 3:4 the artwork
+   fills the tile edge to edge, and `contain` means an odd ratio letterboxes
+   rather than losing the subject to a crop. */
 .pack-visual {
     position: relative;
-    width: 100%;
-    aspect-ratio: 85.6 / 54;
-    background: linear-gradient(135deg, #fdf3e7, #f7e8d2);
+    margin: 0;
+    aspect-ratio: 3 / 4;
+    background: $surface-sunk;
+    border-bottom: 1px solid $divider-color;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     overflow: hidden;
-    border-bottom: 1px solid #f0f0f0;
-}
 
-.pack-visual img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
+    img {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        display: block;
+    }
 }
 
 .pack-visual-empty {
     width: 100%;
     height: 100%;
     display: flex;
-    align-items: center;
+    flex-direction: column;
     justify-content: center;
-    color: #dcb98a;
-    font-size: 30px;
+    align-items: center;
+    gap: 6px;
+    color: $text-light;
+
+    i { font-size: 22px; }
+
+    span {
+        font-family: $font-mono;
+        font-size: 9px;
+        text-transform: uppercase;
+        letter-spacing: 0.11em;
+    }
 }
-.pack-card:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 12px 24px rgba(0,0,0,0.06);
-    border-color: #d9ecff;
+
+.pack-body {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    padding: 13px 14px 12px;
 }
-.pack-card.selected {
-    border-color: #409eff;
-    box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.2);
-}
-.pack-card-selection {
-    position: absolute;
-    top: 10px;
-    left: 10px;
-    z-index: 10;
-}
-.pack-card-header {
-    background: linear-gradient(135deg, #ffffff 0%, #fcfcfc 100%);
-    padding: 16px 16px 16px 40px;
-    border-bottom: 1px solid #f5f7fa;
-}
+
 .pack-title-row {
     display: flex;
+    align-items: baseline;
     justify-content: space-between;
-    align-items: center;
-    margin-bottom: 6px;
     gap: 10px;
 }
+
 .pack-title {
-    font-weight: 600;
-    font-size: 15px;
-    color: #1a1a1a;
+    margin: 0;
+    font-size: 12.5px;
+    font-weight: 590;
+    letter-spacing: -0.01em;
+    color: $text-dark;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
+
+.pack-status {
+    flex: 0 0 auto;
+    font-family: $font-mono;
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.11em;
+    color: $text-light;
+
+    &.live { color: $success; }
+}
+
 .pack-code {
-    font-size: 11px;
-    color: #909399;
-    font-family: 'Roboto Mono', monospace;
-    background: #f4f4f5;
-    padding: 2px 6px;
-    border-radius: 4px;
-    display: inline-block;
+    margin-top: 5px;
+    font-family: $font-mono;
+    font-size: 10.5px;
+    letter-spacing: 0.02em;
+    color: $text-light;
+    word-break: break-all;
 }
-.pack-card-body {
-    padding: 16px;
-    flex-grow: 1;
-    display: flex;
-    flex-direction: column;
-}
+
 .pack-desc {
-    font-size: 13px;
-    color: #606266;
-    margin-bottom: 16px;
+    margin: 9px 0 0;
+    flex: 1 1 auto;
+    font-size: 11.5px;
     line-height: 1.5;
+    color: $text-gray;
     overflow: hidden;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
-    flex-grow: 1;
 }
-.pack-metrics {
+
+.pack-meta {
     display: flex;
-    gap: 8px;
     flex-wrap: wrap;
+    gap: 4px 8px;
+    margin-top: 11px;
+    font-family: $font-mono;
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: $text-light;
+
+    span + span {
+        padding-left: 8px;
+        border-left: 1px solid $divider-color;
+    }
 }
-.pack-card-footer {
-    padding: 12px 16px;
-    border-top: 1px solid #f5f7fa;
+
+.pack-actions {
     display: flex;
-    justify-content: space-between;
-    align-items: center;
-    background: #fafafa;
+    gap: 14px;
+    padding: 9px 14px;
+    border-top: 1px solid $divider-color;
+
+    :deep(.el-button--text) {
+        padding: 0;
+        font-size: 11.5px;
+        color: $text-gray;
+
+        &:hover { color: $text-dark; }
+
+        &.is-danger:hover { color: $danger; }
+    }
 }
-.pack-version {
-    font-size: 11px;
-    color: #909399;
-    font-weight: 500;
-}
+
 .empty-state {
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    padding: 80px 0;
-    background: #fdfdfd;
-    border-radius: 12px;
-    border: 2px dashed #e4e7ed;
+    gap: 6px;
+    padding: 64px 0;
+    background: $surface-sunk;
+    border: 1px solid $divider-color;
+    border-radius: $radius-lg;
     text-align: center;
+
+    .empty-icon {
+        font-size: 24px;
+        color: $text-light;
+    }
+
+    .empty-title {
+        font-family: $font-display;
+        font-size: 19px;
+        color: $text-body;
+    }
 }
 .ai-card-thumbnail {
     width: 56px;
     height: 42px;
     margin: 0 auto;
-    border-radius: 6px;
-    border: 1px solid #e4e7ed;
-    background: #fff;
+    border-radius: $radius-sm;
+    border: 1px solid $border-color;
+    background: $surface-sunk;
     overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 .ai-card-thumbnail img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
     display: block;
+}
+
+// ---------- Card Mappings thumbnail ----------
+// Small enough to keep the row height it already had; the artwork is printed on
+// the physical card, so it is fitted whole rather than cropped to fill.
+.thumb-cell {
+    width: 46px;
+    height: 46px;
+    margin: 0 auto;
+    border-radius: $radius-sm;
+    border: 1px solid $border-color;
+    background: $surface-sunk;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: zoom-in;
+
+    img {
+        max-width: 100%;
+        max-height: 100%;
+        object-fit: contain;
+        display: block;
+    }
+
+    &.is-empty {
+        cursor: default;
+        border-style: dashed;
+    }
+
+    svg {
+        width: 22px;
+        height: 22px;
+        fill: none;
+        stroke: $text-light;
+        stroke-width: 1.4;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        opacity: 0.55;
+    }
 }
 /* Stat Icons */
 .stat-icon.qa-packs {
-    color: #9b59b6;
-    background: rgba(155, 89, 182, 0.1);
+    color: $secondary-purple;
+    background: $surface-sunk;
 }
 </style>

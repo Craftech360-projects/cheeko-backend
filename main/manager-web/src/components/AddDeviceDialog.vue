@@ -1,5 +1,7 @@
 <template>
-  <el-dialog :visible="visible" @close="handleClose" width="24%" center>
+  <el-dialog
+    :close-on-click-modal="dismissOnBackdrop"
+    @open="markPristine" :visible="visible" @close="handleClose" width="24%" center>
     <div
       style="margin: 0 10px 10px;display: flex;align-items: center;gap: 10px;font-weight: 700;font-size: 20px;text-align: left;color: #3d4566;">
       <div
@@ -30,9 +32,11 @@
 </template>
 
 <script>
+import dialogDismiss from '@/mixins/dialogDismiss';
 import Api from '@/apis/api';
 
 export default {
+  mixins: [dialogDismiss],
   name: 'AddDeviceDialog',
   props: {
     visible: { type: Boolean, required: true },
@@ -45,6 +49,10 @@ export default {
     }
   },
   methods: {
+    dirtyState() {
+      return this.deviceCode;
+    },
+
     confirm() {
       if (!/^\d{6}$/.test(this.deviceCode)) {
         this.$message.error('Please enter a 6-digit verification code');
@@ -91,7 +99,7 @@ export default {
 @import '@/styles/theme.scss';
 
 .input-46 {
-  border: 1px solid #e4e6ef;
+  border: 1px solid $border-color;
   background: #f6f8fb;
   border-radius: 10px;
 }
@@ -117,7 +125,7 @@ export default {
 
 ::v-deep .el-dialog {
   border-radius: 15px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  box-shadow: none;
 }
 
 ::v-deep .el-dialog__headerbtn {

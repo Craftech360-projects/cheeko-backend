@@ -831,6 +831,20 @@ async function listAllFamilies({ page = 1, limit = 50 } = {}) {
     }),
   ]);
 
+  // Toys paired to each child. `deviceCount` below counts the *household's*
+  // toys, which is the same number for every sibling — on its own it reads as
+  // if one child owned all of them.
+  const pairedCounts = kids.length
+    ? await prisma.ai_device.groupBy({
+      by: ['kid_id'],
+      where: { kid_id: { in: kids.map((kid) => kid.id) } },
+      _count: { kid_id: true },
+    })
+    : [];
+  const pairedByKid = new Map(
+    pairedCounts.filter((row) => row.kid_id).map((row) => [row.kid_id.toString(), row._count.kid_id])
+  );
+
   return {
     total,
     page: safePage,
@@ -842,6 +856,9 @@ async function listAllFamilies({ page = 1, limit = 50 } = {}) {
       grade: kid.grade || null,
       birthDate: kid.birth_date,
       parentName: kid.sys_user?.parent_profile?.display_name || null,
+      // Toys paired to this child.
+      pairedDeviceCount: pairedByKid.get(kid.id.toString()) || 0,
+      // Toys the parent owns, shared across every child in the household.
       deviceCount: kid.sys_user?.ai_device?.length || 0,
     })),
   };
@@ -1546,6 +1563,15 @@ async function getFounderConversations({ range = '7d' } = {}) {
 }
 
 /**
+ * Kid names are first-name-only by policy on the founder dashboard.
+ */
+function firstNameOnly(name) {
+  const trimmed = String(name || '').trim();
+  if (!trimmed) return null;
+  return trimmed.split(/\s+/)[0];
+}
+
+/**
  * Real transcript for one voice session. Replaces the placeholder preview that
  * previously shipped fabricated dialogue attached to a real device.
  */
@@ -1553,16 +1579,30 @@ async function getConversationTranscript(sessionId) {
   const id = String(sessionId || '').trim();
   if (!id) return null;
 
-  const [summary, messages] = await Promise.all([
+  const [summary, session, messages] = await Promise.all([
     prisma.voice_session_summaries.findFirst({ where: { session_id: id } }),
+    prisma.voice_sessions.findFirst({
+      where: { session_id: id },
+      select: {
+        ai_agent: { select: { agent_name: true } },
+        kid_profile: { select: { name: true, nickname: true } },
+      },
+    }),
     prisma.voice_session_messages.findMany({
       where: { session_id: id },
       orderBy: { sequence: 'asc' },
       take: 200,
+      include: { ai_agent: { select: { agent_name: true } } },
     }),
   ]);
 
   if (!summary && !messages.length) return null;
+
+  // Speakers are named, not labelled. A session can hand off between characters
+  // mid-conversation (the quiz bee takes over from the companion), so the agent
+  // name is read per message and only falls back to the session's agent.
+  const sessionAgentName = session?.ai_agent?.agent_name || null;
+  const kidName = firstNameOnly(session?.kid_profile?.nickname || session?.kid_profile?.name);
 
   return {
     sessionId: id,
@@ -1571,13 +1611,21 @@ async function getConversationTranscript(sessionId) {
     summary: summary?.summary || null,
     turns: messages.length,
     updatedAt: summary?.updated_at || null,
+    agentName: sessionAgentName,
+    kidName,
     lines: messages
       .filter((message) => message.content)
-      .map((message) => ({
-        speaker: String(message.role || '').toLowerCase() === 'assistant' ? 'Cheeko' : 'Kid',
-        text: message.content,
-        createdAt: message.created_at,
-      })),
+      .map((message) => {
+        const isAgent = String(message.role || '').toLowerCase() === 'assistant';
+        return {
+          role: isAgent ? 'assistant' : 'user',
+          speaker: isAgent
+            ? (message.ai_agent?.agent_name || sessionAgentName || 'Agent')
+            : (kidName || 'Kid'),
+          text: message.content,
+          createdAt: message.created_at,
+        };
+      }),
   };
 }
 

@@ -1,5 +1,7 @@
 <template>
-  <el-dialog title="Manual Add Device" :visible="visible" @close="handleClose" width="30%" center>
+  <el-dialog
+    :close-on-click-modal="dismissOnBackdrop"
+    @open="markPristine" title="Manual Add Device" :visible="visible" @close="handleClose" width="30%" center>
     <div class="dialog-content">
       <el-form :model="deviceForm" :rules="rules" ref="deviceForm" label-width="100px">
         <el-form-item label="Device Model" prop="board">
@@ -28,9 +30,11 @@
 </template>
 
 <script>
+import dialogDismiss from '@/mixins/dialogDismiss';
 import Api from '@/apis/api';
 
 export default {
+  mixins: [dialogDismiss],
   name: 'ManualAddDeviceDialog',
   props: {
     visible: { type: Boolean, required: true },
@@ -73,6 +77,10 @@ export default {
     this.getFirmwareTypes();
   },
   methods: {
+    dirtyState() {
+      return this.deviceForm;
+    },
+
     async getFirmwareTypes() {
       try {
         const res = await Api.dict.getDictDataByType('FIRMWARE_TYPE');
@@ -147,7 +155,7 @@ export default {
 
 ::v-deep .el-dialog {
   border-radius: 15px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  box-shadow: none;
 }
 
 ::v-deep .el-dialog__body {
