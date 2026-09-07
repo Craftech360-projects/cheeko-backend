@@ -13,14 +13,12 @@
         </div>
 
         <ListToolbar
-          :count="deviceList.length"
+          :count="visibleRows.length"
           count-noun="devices"
-          :total="deviceList.length"
+          :total="visibleRows.length"
           :sort-options="sortOptions"
           :sort-by.sync="sortBy"
           :sort-dir.sync="sortDir"
-          :group-options="groupOptions"
-          :group-by.sync="groupBy"
           :selecting.sync="selecting"
           :selected-count="selectedCount"
           :all-selected="allSelected"
@@ -37,7 +35,7 @@
         <div class="card pad0 devices-table">
         <el-table
           ref="table"
-          :data="visibleRows"
+          :data="paginatedDeviceList"
           v-loading="loading"
           style="width: 100%"
           :row-class-name="rowClass"
@@ -153,12 +151,12 @@
         </el-table>
         </div>
 
-        <div class="pagination-container" v-if="filteredDeviceList.length > 0">
-          <span class="total-info">Total: {{ filteredDeviceList.length }} devices</span>
+        <div class="pagination-container" v-if="visibleRows.length > 0">
+          <span class="total-info">Total: {{ visibleRows.length }} devices</span>
           <el-pagination
             background
             layout="prev, pager, next"
-            :total="filteredDeviceList.length"
+            :total="visibleRows.length"
             :page-size="pageSize"
             :current-page.sync="currentPage"
             @current-change="handlePageChange"
@@ -356,16 +354,9 @@ export default {
         { label: 'Firmware', value: 'appVersion' },
         { label: 'Owner', value: 'userName' }
       ],
-      groupOptions: [
-        { label: 'None', value: '' },
-        { label: 'Firmware', value: 'appVersion' },
-        { label: 'Owner', value: 'userName' }
-      ],
       searchFields: ['macAddress', 'alias', 'userName'],
       loading: false,
       deviceList: [],
-      searchKeyword: '',
-      activeSearchKeyword: '',
       currentPage: 1,
       pageSize: 20,
       settingsDialogVisible: false,
@@ -407,25 +398,22 @@ export default {
     }
   },
   computed: {
-    filteredDeviceList() {
-      if (!this.activeSearchKeyword) return this.deviceList;
-      const keyword = this.activeSearchKeyword.toLowerCase();
-      return this.deviceList.filter(device => {
-        return (
-          (device.macAddress && device.macAddress.toLowerCase().includes(keyword)) ||
-          (device.alias && device.alias.toLowerCase().includes(keyword)) ||
-          (device.userName && device.userName.toLowerCase().includes(keyword))
-        );
-      });
-    },
+    // The mixin searches and sorts the whole list; the page is a slice of the
+    // result, so paging cannot reorder rows and search spans every device.
     paginatedDeviceList() {
       const start = (this.currentPage - 1) * this.pageSize;
-      return this.filteredDeviceList.slice(start, start + this.pageSize);
+      return this.visibleRows.slice(start, start + this.pageSize);
     },
-    // The toolbar's search replaces the old keyword box, so the mixin filters
-    // the already-paginated page.
     sourceRows() {
-      return this.paginatedDeviceList;
+      return this.deviceList;
+    }
+  },
+  watch: {
+    listSearch() {
+      this.currentPage = 1;
+    },
+    sortBy() {
+      this.currentPage = 1;
     }
   },
   created() {
@@ -484,10 +472,6 @@ export default {
     },
     refreshList() {
       this.loadDevices();
-    },
-    handleSearch() {
-      this.activeSearchKeyword = this.searchKeyword;
-      this.currentPage = 1;
     },
     handlePageChange(page) {
       this.currentPage = page;

@@ -28,24 +28,6 @@
           >{{ sortDir === 'asc' ? '↑' : '↓' }}</button>
         </div>
 
-        <div v-if="groupOptions.length" class="lb-control">
-          <span class="lb-lab">Group</span>
-          <el-select
-            :value="groupBy"
-            size="mini"
-            placeholder="None"
-            popper-class="lb-popper"
-            @change="value => $emit('update:groupBy', value)"
-          >
-            <el-option
-              v-for="opt in groupOptions"
-              :key="opt.value"
-              :label="opt.label"
-              :value="opt.value"
-            />
-          </el-select>
-        </div>
-
         <!-- View-specific filters (status, language, firmware…) -->
         <slot name="filters" />
 
@@ -105,8 +87,8 @@
 
 <script>
 /**
- * The list toolbar every list screen carries: Sort, Group, View and Select on
- * the left, search anchored right, with a bulk action bar that appears when a
+ * The list toolbar every list screen carries: Sort, View and Select on the
+ * left, search anchored right, with a bulk action bar that appears when a
  * selection is live.
  *
  * Everything is `.sync`-friendly:
@@ -119,10 +101,6 @@ export default {
     sortOptions: { type: Array, default: () => [] },
     sortBy: { type: String, default: '' },
     sortDir: { type: String, default: 'desc' },
-
-    // left — group
-    groupOptions: { type: Array, default: () => [] },
-    groupBy: { type: String, default: '' },
 
     // left — view switch
     views: {

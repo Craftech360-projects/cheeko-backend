@@ -223,14 +223,12 @@
           <span>Top 10 Active Devices</span>
         </div>
         <ListToolbar
-          :count="topDevices.length"
+          :count="visibleRows.length"
           count-noun="devices"
-          :total="topDevices.length"
+          :total="visibleRows.length"
           :sort-options="sortOptions"
           :sort-by.sync="sortBy"
           :sort-dir.sync="sortDir"
-          :group-options="groupOptions"
-          :group-by.sync="groupBy"
           :selecting.sync="selecting"
           :selected-count="selectedCount"
           :all-selected="allSelected"
@@ -370,10 +368,6 @@ export default {
         { label: 'Device alias', value: 'alias' },
         { label: 'Owner', value: 'owner_name' },
         { label: 'Accuracy', value: 'accuracy' }
-      ],
-      groupOptions: [
-        { label: 'None', value: '' },
-        { label: 'Owner', value: 'owner_name' }
       ],
       searchFields: ['alias', 'owner_name', 'mac_address'],
 

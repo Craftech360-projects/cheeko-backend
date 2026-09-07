@@ -18,8 +18,6 @@
             :sort-options="sortOptions"
             :sort-by.sync="sortBy"
             :sort-dir.sync="sortDir"
-            :group-options="groupOptions"
-            :group-by.sync="groupBy"
             :selecting.sync="selecting"
             :selected-count="selectedCount"
             :all-selected="isAllSelected"
@@ -197,10 +195,6 @@ export default {
                 { label: 'Firmware name', value: 'firmwareName' },
                 { label: 'Version', value: 'version' },
                 { label: 'File size', value: 'size' }
-            ],
-            groupOptions: [
-                { label: 'None', value: '' },
-                { label: 'Firmware type', value: 'type' }
             ],
             searchTimer: null,
             searchName: "",

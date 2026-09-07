@@ -16,18 +16,16 @@
       </div>
 
       <ListToolbar
-        :count="filteredRows.length"
+        :count="visibleRows.length"
         count-noun="children"
-        :total="filteredRows.length"
+        :total="visibleRows.length"
         :sort-options="sortOptions"
         :sort-by.sync="sortBy"
         :sort-dir.sync="sortDir"
-        :group-options="groupOptions"
-        :group-by.sync="groupBy"
         :selecting.sync="selecting"
         :selected-count="selectedCount"
         :all-selected="allSelected"
-        :search.sync="search"
+        :search.sync="listSearch"
         search-placeholder="Filter by MAC or child name"
         @select-all-matching="selectAllMatching"
         @clear-selection="clearSelection"
@@ -256,18 +254,14 @@ export default {
         { label: 'Last played', value: 'last_played' },
         { label: 'Child', value: 'kid_name' },
         { label: 'Level', value: 'current_level' },
-        { label: 'Accuracy', value: 'accuracy' }
-      ],
-      groupOptions: [
-        { label: 'None', value: '' },
-        { label: 'Band', value: 'age_band' }
+        { label: 'Levels done', value: 'levels_completed' }
       ],
       rows: [],
       // Which bank the page is showing. The API defaults to quiz when absent,
       // so this only ever narrows what is already the default.
       bank: 'quiz',
       isLoading: false,
-      search: '',
+      searchFields: ['device_mac', 'kid_name'],
       onlyPlayed: true,
       levelDialog: false,
       target: null,
@@ -311,14 +305,11 @@ export default {
       if (t.direction === 'down') return { type: 'danger', text: `${t.accuracy}% (down ${Math.abs(t.delta)} pts)` };
       return { type: '', text: `${t.accuracy}% — about the same` };
     },
+    // Only the checkbox filter lives here; the toolbar's search is the mixin's,
+    // so changing it also prunes a selection that pointed at hidden rows.
     filteredRows() {
-      const term = this.search.trim().toLowerCase();
-      return this.rows.filter((r) => {
-        if (this.onlyPlayed && !r.last_played) return false;
-        if (!term) return true;
-        return (r.device_mac || '').toLowerCase().includes(term)
-          || (r.kid_name || '').toLowerCase().includes(term);
-      });
+      if (!this.onlyPlayed) return this.rows;
+      return this.rows.filter((r) => r.last_played);
     }
   },
   mounted() {

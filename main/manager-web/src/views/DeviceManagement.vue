@@ -9,18 +9,16 @@
     </div>
 
     <ListToolbar
-      :count="deviceList.length"
+      :count="visibleRows.length"
       count-noun="devices"
-      :total="deviceList.length"
+      :total="visibleRows.length"
       :sort-options="sortOptions"
       :sort-by.sync="sortBy"
       :sort-dir.sync="sortDir"
-      :group-options="groupOptions"
-      :group-by.sync="groupBy"
       :selecting.sync="selecting"
       :selected-count="selectedCount"
       :all-selected="isAllSelected"
-      :search.sync="searchKeyword"
+      :search.sync="listSearch"
       search-placeholder="Device model or MAC address"
       @select-all-matching="selectAllRows"
       @clear-selection="clearSelection"
@@ -34,7 +32,7 @@
       <div class="content-panel">
         <div class="content-area">
           <el-card class="device-card" shadow="never">
-            <el-table ref="deviceTable" :data="visibleRows" class="transparent-table"
+            <el-table ref="deviceTable" :data="paginatedDeviceList" class="transparent-table"
                       :header-cell-class-name="headerCellClassName" v-loading="loading"
                       :row-class-name="deviceRowClass"
                       @sort-change="onTableSortChange"
@@ -137,7 +135,7 @@
                   {{ page }}
                 </button>
                 <button class="pagination-btn" :disabled="currentPage === pageCount" @click="goNext">Next</button>
-                <span class="total-text">Total {{ deviceList.length }} records</span>
+                <span class="total-text">Total {{ visibleRows.length }} records</span>
               </div>
             </div>
           </el-card>
@@ -320,16 +318,9 @@ export default {
         { label: 'MAC address', value: 'macAddress' },
         { label: 'Firmware', value: 'firmwareVersion' }
       ],
-      groupOptions: [
-        { label: 'None', value: '' },
-        { label: 'Firmware', value: 'firmwareVersion' },
-        { label: 'Model', value: 'model' }
-      ],
-      searchTimer: null,
+      searchFields: ['model', 'macAddress'],
       addDeviceDialogVisible: false,
       manualAddDeviceDialogVisible: false,
-      searchKeyword: "",
-      activeSearchKeyword: "",
       currentAgentId: this.$route.query.agentId || '',
       currentPage: 1,
       pageSize: 10,
@@ -366,22 +357,14 @@ export default {
     selectedCount() {
       return this.deviceList.filter(row => row.selected).length;
     },
-    filteredDeviceList() {
-      const keyword = this.activeSearchKeyword.toLowerCase();
-      if (!keyword) return this.deviceList;
-      return this.deviceList.filter(device =>
-          (device.model && device.model.toLowerCase().includes(keyword)) ||
-          (device.macAddress && device.macAddress.toLowerCase().includes(keyword))
-      );
-    },
-
+    // `visibleRows` is the searched + sorted list; the page is a slice of it,
+    // so paging never reorders and searching never strands you on a dead page.
     paginatedDeviceList() {
       const start = (this.currentPage - 1) * this.pageSize;
-      const end = start + this.pageSize;
-      return this.filteredDeviceList.slice(start, end);
+      return this.visibleRows.slice(start, start + this.pageSize);
     },
     pageCount() {
-      return Math.ceil(this.filteredDeviceList.length / this.pageSize);
+      return Math.ceil(this.visibleRows.length / this.pageSize) || 1;
     },
     // Calculate if current page is fully selected
     isCurrentPageAllSelected() {
@@ -403,6 +386,14 @@ export default {
       }
       return pages;
     } },
+  watch: {
+    listSearch() {
+      this.currentPage = 1;
+    },
+    sortBy() {
+      this.currentPage = 1;
+    }
+  },
   mounted() {
     const agentId = this.$route.query.agentId;
     const macAddress = this.$route.query.macAddress;
@@ -460,11 +451,6 @@ export default {
       this.pageSize = val;
       this.currentPage = 1;
     },
-    handleSearch() {
-      this.activeSearchKeyword = this.searchKeyword;
-      this.currentPage = 1;
-    },
-
     handleSelectAll() {
       const shouldSelectAll = !this.isCurrentPageAllSelected;
       this.paginatedDeviceList.forEach(row => {
@@ -619,8 +605,7 @@ export default {
             };
           })
               .sort((a, b) => a.rawBindTime - b.rawBindTime);
-          this.activeSearchKeyword = "";
-          this.searchKeyword = "";
+          this.listSearch = "";
         } else {
           this.$message.error(data.msg || 'Failed to get device list');
         }
@@ -648,8 +633,7 @@ export default {
             selected: false,
             kidId: device.kid_id || null
           }];
-          this.activeSearchKeyword = "";
-          this.searchKeyword = "";
+          this.listSearch = "";
         } else {
           this.$message.error(data.msg || 'Device not found');
         }

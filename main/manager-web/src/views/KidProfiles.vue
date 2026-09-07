@@ -26,8 +26,6 @@
         :sort-options="sortOptions"
         :sort-by.sync="sortBy"
         :sort-dir.sync="sortDir"
-        :group-options="groupOptions"
-        :group-by.sync="groupBy"
         :views="views"
         :view.sync="view"
         :selecting.sync="selecting"
@@ -265,11 +263,6 @@ export default {
         { label: 'Name', value: 'name' },
         { label: 'Age', value: '_age' },
         { label: 'Birth date', value: 'birth_date' },
-        { label: 'Language', value: 'language' },
-        { label: 'Gender', value: 'gender' }
-      ],
-      groupOptions: [
-        { label: 'None', value: '' },
         { label: 'Language', value: 'language' },
         { label: 'Gender', value: 'gender' }
       ],

@@ -18,8 +18,6 @@
             :sort-options="sortOptions"
             :sort-by.sync="sortBy"
             :sort-dir.sync="sortDir"
-            :group-options="groupOptions"
-            :group-by.sync="groupBy"
             :selecting.sync="selecting"
             :selected-count="selectedCount"
             :all-selected="isAllSelected"
@@ -140,10 +138,6 @@ export default {
                 { label: 'Parameter value', value: 'paramValue' },
                 { label: 'Remark', value: 'remark' }
             ],
-            groupOptions: [
-                { label: 'None', value: '' },
-                { label: 'Namespace', value: '_namespace' }
-            ],
             searchTimer: null,
             searchCode: "",
             paramsList: [],
@@ -179,15 +173,8 @@ export default {
     },
 
     computed: {
-        // Namespace = the segment before the first dot, so Group by Namespace
-        // clusters agent.* / gateway.* / reports.* without a schema change.
         sourceRows() {
-            return this.paramsList.map(row => {
-                const code = row.paramCode || '';
-                const at = code.indexOf('.');
-                row._namespace = at === -1 ? '' : code.slice(0, at);
-                return row;
-            });
+            return this.paramsList;
         },
         selectedCount() {
             return this.paramsList.filter(row => row.selected).length;

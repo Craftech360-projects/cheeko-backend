@@ -16,14 +16,12 @@
           </div>
 
           <ListToolbar
-            :count="templates.length"
+            :count="visibleRows.length"
             count-noun="templates"
-            :total="templates.length"
+            :total="visibleRows.length"
             :sort-options="sortOptions"
             :sort-by.sync="sortBy"
             :sort-dir.sync="sortDir"
-            :group-options="groupOptions"
-            :group-by.sync="groupBy"
             :selecting.sync="selecting"
             :selected-count="selectedCount"
             :all-selected="allSelected"
@@ -200,10 +198,6 @@ export default {
       sortOptions: [
         { label: 'Sort order', value: 'sort' },
         { label: 'Name', value: 'agentName' },
-        { label: 'Language', value: 'language' }
-      ],
-      groupOptions: [
-        { label: 'None', value: '' },
         { label: 'Language', value: 'language' }
       ],
       searchFields: ['agentName', 'systemPrompt', 'language'],

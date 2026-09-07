@@ -102,8 +102,6 @@
                             :sort-options="tabSortOptions"
                             :sort-by.sync="sortBy"
                             :sort-dir.sync="sortDir"
-                            :group-options="tabGroupOptions"
-                            :group-by.sync="groupBy"
                             :selecting.sync="selecting"
                             :selected-count="selectedCount"
                             :all-selected="allSelected"
@@ -119,7 +117,7 @@
                                     v-model="contentPacksTypeFilter"
                                     size="mini"
                                     clearable
-                                    placeholder="Content type"
+                                    placeholder="Category"
                                     class="lb-filter"
                                     @change="handleContentPacksTypeChange">
                                     <el-option
@@ -157,6 +155,7 @@
                             <el-table ref="packsTable" :data="sortRows(packsList)" class="transparent-table" v-loading="packsLoading"
                                 element-loading-text="Loading..." element-loading-spinner="el-icon-loading"
                                 element-loading-background="rgba(255, 255, 255, 0.7)"
+                                @sort-change="onTableSortChange"
                                 :header-cell-class-name="headerCellClassName">
                                 <el-table-column v-if="selecting" label="" align="center" width="52">
                                     <template slot-scope="scope">
@@ -368,6 +367,7 @@
                             <el-table ref="aiCardsTable" :data="sortRows(aiCardsList)" class="transparent-table" v-loading="aiCardsLoading"
                                 element-loading-text="Loading..." element-loading-spinner="el-icon-loading"
                                 element-loading-background="rgba(255, 255, 255, 0.7)"
+                                @sort-change="onTableSortChange"
                                 :header-cell-class-name="headerCellClassName">
                                 <el-table-column label="Select" align="center" width="60">
                                     <template slot-scope="scope">
@@ -394,7 +394,7 @@
                                         </el-tag>
                                     </template>
                                 </el-table-column>
-                                <el-table-column label="AI Agent" min-width="150" sortable="custom">
+                                <el-table-column label="AI Agent" prop="actionData.agent_name" min-width="150" sortable="custom">
                                     <template slot-scope="scope">
                                         <div v-if="getAiCardAgentName(scope.row)" class="rowid">
                                             <span class="rowid-mark accent">{{ aiAgentInitials(scope.row) }}</span>
@@ -476,14 +476,14 @@
 
 
                             <div v-loading="contentPacksLoading" class="pack-grid-container" element-loading-background="rgba(250, 249, 247, 0.75)">
-                                <div v-if="contentPacksList.length === 0 && !contentPacksLoading" class="empty-state">
+                                <div v-if="visibleContentPacks.length === 0 && !contentPacksLoading" class="empty-state">
                                     <i class="el-icon-notebook-2 empty-icon"></i>
                                     <div class="empty-title">{{ showingCustomPacks ? 'No custom cards recorded yet' : 'No content packs found' }}</div>
                                     <el-button v-if="!showingCustomPacks" type="text" @click="showAddContentPackDialog">Create your first pack</el-button>
                                 </div>
 
                                 <div v-else class="pack-grid">
-                                    <article v-for="pack in contentPacksList" :key="pack.id" class="pack-card" :class="{ selected: pack.selected }" @click="editContentPack(pack)">
+                                    <article v-for="pack in visibleContentPacks" :key="pack.id" class="pack-card" :class="{ selected: pack.selected }" @click="editContentPack(pack)">
                                         <div v-if="selecting" class="pack-select" @click.stop="">
                                             <el-checkbox v-model="pack.selected"></el-checkbox>
                                         </div>
@@ -1209,6 +1209,16 @@ function imageKind(url) {
 // catalogue grid excludes them unless this is the selected filter.
 const CUSTOM_PACK_SCOPE = 'custom';
 
+// Tabs searched by re-querying the server, so the search spans every page.
+// Only the card tabs qualify: their endpoint filters on rfid_uid, which is
+// exactly what their search box asks for. The pack tabs' endpoints AND their
+// packCode and name filters together, so a keyword sent there would match
+// neither a name nor a code that is not also the other — those tabs are
+// filtered in `sortRows` over the page already loaded instead. What matters is
+// that a tab picks one or the other: doing both changed the result the moment
+// you turned a page.
+const SERVER_SEARCH_TABS = ['cards', 'aiCards'];
+
 export default {
   name: 'RfidManagement',
     mixins: [listControls],
@@ -1222,6 +1232,7 @@ export default {
             // url -> PNG data URL, for the `.bin` frames decoded in the browser
             decodedThumbs: {},
             // list controls — one toolbar drives whichever tab is open
+            // switchTab re-picks sortBy per tab; see tabSortOptions
             sortBy: 'name',
             sortDir: 'asc',
             searchTimer: null,
@@ -1395,6 +1406,10 @@ export default {
         }
     },
     watch: {
+        searchKeyword() {
+            if (this.searchTimer) clearTimeout(this.searchTimer);
+            this.searchTimer = setTimeout(() => this.applySearch(), 350);
+        },
         '$route'(to) {
             const tab = to.params.tab;
             if (tab && tab !== this.activeTab && this.isValidTab(tab)) {
@@ -1445,34 +1460,63 @@ export default {
       })[this.activeTab] || 'items';
     },
     tabSearchPlaceholder() {
-      return this.activeTab === 'cards' || this.activeTab === 'aiCards'
-        ? 'Enter RFID UID (e.g. 5C42C905)'
-        : 'Search name or code';
-    },
-    tabSortOptions() {
-      const common = [{ label: 'Name', value: 'name' }, { label: 'Created', value: 'createDate' }];
       return ({
-        packs: [{ label: 'Pack code', value: 'packCode' }].concat(common),
-        cards: [{ label: 'Card UID', value: 'cardUid' }].concat(common),
-        aiCards: [
-          { label: 'Card UID', value: 'cardUid' },
-          { label: 'AI agent', value: 'actionData.agent_name' },
-          { label: 'Language', value: 'actionData.language_name' }
-        ].concat(common),
-        series: [{ label: 'Series code', value: 'seriesCode' }].concat(common),
-        contentPacks: common,
-        customCards: common
-      })[this.activeTab] || common;
+        packs: 'Pack code or name',
+        cards: 'Enter RFID UID (e.g. 5C42C905)',
+        aiCards: 'Enter RFID UID (e.g. 5C42C905)',
+        contentPacks: 'Pack name or code',
+        series: 'Series name or UID range',
+        customCards: 'RFID UID'
+      })[this.activeTab] || 'Search';
     },
-    tabGroupOptions() {
-      return [
-        { label: 'None', value: '' },
-        { label: 'Content pack', value: 'packName' },
-        { label: 'Card type', value: 'cardType' }
-      ];
+    // Each tab's own DTO, not a shared guess: a card has no `name` and a
+    // series has no code, and a sort on a field the rows do not carry silently
+    // does nothing.
+    tabSortOptions() {
+      const created = { label: 'Created', value: 'createDate' };
+      return ({
+        packs: [
+          { label: 'Pack code', value: 'packCode' },
+          { label: 'Name', value: 'name' },
+          created
+        ],
+        cards: [
+          { label: 'RFID UID', value: 'rfidUid' },
+          { label: 'Card type', value: 'cardType' },
+          { label: 'Product SKU', value: 'packCode' },
+          created
+        ],
+        aiCards: [
+          { label: 'RFID UID', value: 'rfidUid' },
+          { label: 'AI agent', value: 'actionData.agent_name' },
+          { label: 'Language', value: 'actionData.language_name' },
+          created
+        ],
+        series: [
+          { label: 'Start UID', value: 'startUid' },
+          { label: 'End UID', value: 'endUid' },
+          { label: 'Priority', value: 'priority' },
+          created
+        ],
+        contentPacks: [
+          { label: 'Name', value: 'name' },
+          { label: 'Pack code', value: 'packCode' },
+          { label: 'Content type', value: 'contentType' },
+          created
+        ],
+        customCards: [
+          { label: 'RFID UID', value: 'rfidUid' },
+          { label: 'Issued', value: 'createDate' }
+        ]
+      })[this.activeTab] || [created];
     },
     sourceRows() {
       return this.tabRows;
+    },
+    // The pack grid is not an el-table, so it needs the same searched+sorted
+    // list handed to it explicitly.
+    visibleContentPacks() {
+      return this.sortRows(this.contentPacksList);
     },
     selectedCount() {
       return this.tabRows.filter(row => row.selected).length;
@@ -1648,19 +1692,27 @@ export default {
       });
     },
 
+    // Server-searched tabs arrive already filtered; filtering them again here
+    // would narrow the result a second time with different rules.
+    applySearch() {
+      if (SERVER_SEARCH_TABS.indexOf(this.activeTab) === -1) return;
+      if (this.activeTab === 'cards') this.cardsCurrentPage = 1;
+      else this.aiCardsCurrentPage = 1;
+      this.fetchActiveTabList();
+    },
+
     sortRows(list) {
       const rows = (list || []).slice();
-      const q = (this.searchKeyword || '').trim().toLowerCase();
+      const q = SERVER_SEARCH_TABS.indexOf(this.activeTab) === -1
+        ? (this.searchKeyword || '').trim().toLowerCase()
+        : '';
       const filtered = !q ? rows : rows.filter(row =>
-        ['name', 'packCode', 'cardUid', 'seriesCode', 'packName'].some(field => {
+        ['name', 'seriesName', 'packCode', 'packName', 'rfidUid', 'startUid', 'endUid'].some(field => {
           const value = row[field];
           return value !== null && value !== undefined && String(value).toLowerCase().includes(q);
         }));
       if (this.sortBy) {
         filtered.sort((a, b) => this.compareRows(a, b, this.sortBy, this.sortDir));
-      }
-      if (this.groupBy) {
-        filtered.sort((a, b) => this.compareRows(a, b, this.groupBy, 'asc'));
       }
       return filtered;
     },
@@ -1767,6 +1819,11 @@ export default {
         switchTab(tab) {
             this.activeTab = tab;
             this.searchKeyword = '';
+            // Each tab offers its own sort vocabulary; carrying the old field
+            // over leaves the Sort box blank and the rows ordered by a column
+            // this tab does not have.
+            this.sortBy = (this.tabSortOptions[0] || {}).value || '';
+            this.sortDir = 'asc';
             this.contentPacksTypeFilter = '';
             if (tab === 'questions') this.fetchQuestions();
             else if (tab === 'packs') this.fetchPacks();
@@ -2189,8 +2246,7 @@ export default {
             this.packsLoading = true;
             Api.rfid.getPackPage({
                 page: this.packsCurrentPage,
-                limit: this.packsPageSize,
-                packCode: this.searchKeyword
+                limit: this.packsPageSize
             }, ({ data }) => {
                 this.packsLoading = false;
                 if (data.code === 0) {
@@ -2473,7 +2529,6 @@ export default {
             Api.rfid.getContentPackPage({
                 page: this.contentPacksCurrentPage,
                 limit: this.contentPacksPageSize,
-                packCode: this.searchKeyword,
                 contentType: showingCustom ? '' : this.contentPacksTypeFilter,
                 scope: showingCustom ? CUSTOM_PACK_SCOPE : ''
             }, ({ data }) => {
