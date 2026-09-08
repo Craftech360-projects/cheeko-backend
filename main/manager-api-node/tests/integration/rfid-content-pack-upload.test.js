@@ -179,10 +179,19 @@ describe('POST /admin/rfid/content-pack/upload — pack thumbnail', () => {
     expect(res.status).toBe(200);
     expect(toLvglRgb565Bin).not.toHaveBeenCalled();
     expect(storedCall()[1]).toBe('cover.png');
-    expect(rfidService.updateContentPack).toHaveBeenCalledWith(
-      expect.objectContaining({ id: '31', thumbnailUrl: res.body.data.url }),
-      1
-    );
+  });
+
+  // The upload hands back a URL and writes nothing. It used to save the pack's
+  // thumbnail on the spot, which meant the new cover reached the row before
+  // Save did — so the save that was meant to adopt it saw nothing new, judged
+  // the pack unchanged and left the version alone. The editor sends
+  // thumbnailUrl with the rest of the pack, so Save is what stores it.
+  it('does not write the pack row, even when the upload names a pack', async () => {
+    const res = await upload(PNG, 'cover.png', { contentPackId: 31 });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.url).toMatch(/cover\.png$/);
+    expect(rfidService.updateContentPack).not.toHaveBeenCalled();
   });
 
   it('converts item artwork even when the pack has an id', async () => {

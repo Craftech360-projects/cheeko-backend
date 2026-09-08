@@ -177,6 +177,7 @@ export default {
   data() {
     return {
       query: '',
+      searchField: 'query', // global search deep-link target
       searching: false,
       group: { kids: [], parents: [], devices: [] },
       families: [],

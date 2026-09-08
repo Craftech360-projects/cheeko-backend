@@ -207,6 +207,7 @@ export default {
       showViewPassword: false,
       currentPassword: "",
       searchPhone: "",
+      searchField: "searchPhone", // global search deep-link target
       userList: [],
       pageSizeOptions: [10, 20, 50, 100],
       currentPage: 1,

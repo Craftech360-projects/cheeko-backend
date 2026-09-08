@@ -32,6 +32,11 @@ export default {
       listSearch: '',
       searchFields: [],
 
+      // Which field the global search deep-link (/path?q=term) writes into.
+      // Views that drive ListToolbar from their own field (searchPhone,
+      // searchCode, …) override this in their own data().
+      searchField: 'listSearch',
+
       // The array the view loads into. A view with a different name should
       // override `sourceRows`.
       rowKey: 'id'
@@ -76,7 +81,18 @@ export default {
       return this.sourceRows.filter(row => keys.has(this.keyOf(row)));
     }
   },
+  created() {
+    this.applyDeepLinkSearch();
+  },
+  // These pages are keep-alive'd, so created() fires once; re-entry and
+  // in-place query changes come through here instead.
+  activated() {
+    this.applyDeepLinkSearch();
+  },
   watch: {
+    '$route'() {
+      this.applyDeepLinkSearch();
+    },
     // Leaving select mode drops the selection rather than keeping a hidden one.
     selecting(on) {
       if (!on) this.selectedKeys = [];
@@ -87,6 +103,29 @@ export default {
     }
   },
   methods: {
+    /**
+     * Global search opens a list page as /path?q=term. Deferred to nextTick
+     * because a view's own created()/route handler may reset its search box
+     * (RfidManagement.switchTab does) and would otherwise clear the term.
+     * Arriving without a `q` clears a term this mixin put there, so reaching
+     * the page from the sidebar does not leave it silently filtered.
+     */
+    applyDeepLinkSearch() {
+      const field = this.searchField;
+      if (!field || this[field] === undefined) return;
+
+      const term = this.$route.query.q || '';
+      if (!term && this._deepLinkTerm && this[field] === this._deepLinkTerm) {
+        this[field] = '';
+      }
+      this._deepLinkTerm = term;
+      if (!term) return;
+
+      this.$nextTick(() => {
+        this[field] = term;
+      });
+    },
+
     keyOf(row) {
       return row && row[this.rowKey] !== undefined ? row[this.rowKey] : row;
     },

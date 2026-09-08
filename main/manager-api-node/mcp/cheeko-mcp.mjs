@@ -238,7 +238,7 @@ export function buildServer({ api, canWrite, hasUserToken = false }) {
     }, (data) => api('/admin/rfid/content-pack', { method: 'POST', body: data }));
 
     server.registerTool('update_content_pack', {
-      description: 'Update an existing RFID content pack by numeric id. Only the fields you pass are changed. Writes to the database.',
+      description: 'Update an existing RFID content pack by numeric id. Only the fields you pass are changed, with one exception: sending `items` also makes the API rewrite the pack\'s content_hash from those items, and advance `version` by one if they differ from what is stored. That is what tells the toy to re-download, so let it happen — pass `version` yourself only to pin a specific number, which opts the pack out of the automatic bump. Writes to the database.',
       inputSchema: z.object({
         id: z.number().int().describe('Numeric pack id — get it from list_content_packs'),
         ...Object.fromEntries(Object.entries(packFields).map(([k, v]) => [k, v.optional()])),

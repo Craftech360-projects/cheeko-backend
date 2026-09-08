@@ -1235,9 +1235,14 @@ export default {
             // switchTab re-picks sortBy per tab; see tabSortOptions
             sortBy: 'name',
             sortDir: 'asc',
+            // True only while switchTab is re-picking the sort for the tab it is
+            // opening. That reset is not a sort choice, and the watcher that
+            // re-requests a server-paged tab must not act on it.
+            sortResetForTab: false,
             searchTimer: null,
             activeTab: 'contentPacks',
             searchKeyword: '',
+            searchField: 'searchKeyword', // global search deep-link target
             pageSizeOptions: [10, 20, 50, 100],
 
             // Custom Cards — issued UID allowlist plus the per-device packages
@@ -1410,6 +1415,12 @@ export default {
             if (this.searchTimer) clearTimeout(this.searchTimer);
             this.searchTimer = setTimeout(() => this.applySearch(), 350);
         },
+        // The content pack grid is paged by the server, so a new sort is a new
+        // request, not a rearrangement of the page already on screen. Back to
+        // page one with it: keeping the offset would land the reader in the
+        // middle of an order they have not seen the start of.
+        sortBy() { this.refetchSortedTab(); },
+        sortDir() { this.refetchSortedTab(); },
         '$route'(to) {
             const tab = to.params.tab;
             if (tab && tab !== this.activeTab && this.isValidTab(tab)) {
@@ -1513,10 +1524,13 @@ export default {
     sourceRows() {
       return this.tabRows;
     },
-    // The pack grid is not an el-table, so it needs the same searched+sorted
-    // list handed to it explicitly.
+    // The pack grid is not an el-table, so it needs the list handed to it
+    // explicitly. Searched only, not sorted: this tab is paged by the server,
+    // which now orders the whole table before slicing the page, and reordering
+    // that slice again here would rearrange it under a second, different
+    // comparator for no gain.
     visibleContentPacks() {
-      return this.sortRows(this.contentPacksList);
+      return this.searchRows(this.contentPacksList);
     },
     selectedCount() {
       return this.tabRows.filter(row => row.selected).length;
@@ -1701,16 +1715,27 @@ export default {
       this.fetchActiveTabList();
     },
 
-    sortRows(list) {
+    searchRows(list) {
       const rows = (list || []).slice();
       const q = SERVER_SEARCH_TABS.indexOf(this.activeTab) === -1
         ? (this.searchKeyword || '').trim().toLowerCase()
         : '';
-      const filtered = !q ? rows : rows.filter(row =>
+      if (!q) return rows;
+      return rows.filter(row =>
         ['name', 'seriesName', 'packCode', 'packName', 'rfidUid', 'startUid', 'endUid'].some(field => {
           const value = row[field];
           return value !== null && value !== undefined && String(value).toLowerCase().includes(q);
         }));
+    },
+    // Tabs whose rows are paged by the server have to re-ask for them; the rest
+    // already hold every row and re-sort on their own.
+    refetchSortedTab() {
+      if (this.sortResetForTab || this.activeTab !== 'contentPacks') return;
+      this.contentPacksCurrentPage = 1;
+      this.fetchContentPacks();
+    },
+    sortRows(list) {
+      const filtered = this.searchRows(list);
       if (this.sortBy) {
         filtered.sort((a, b) => this.compareRows(a, b, this.sortBy, this.sortDir));
       }
@@ -1822,8 +1847,10 @@ export default {
             // Each tab offers its own sort vocabulary; carrying the old field
             // over leaves the Sort box blank and the rows ordered by a column
             // this tab does not have.
+            this.sortResetForTab = true;
             this.sortBy = (this.tabSortOptions[0] || {}).value || '';
             this.sortDir = 'asc';
+            this.$nextTick(() => { this.sortResetForTab = false; });
             this.contentPacksTypeFilter = '';
             if (tab === 'questions') this.fetchQuestions();
             else if (tab === 'packs') this.fetchPacks();
@@ -2530,7 +2557,9 @@ export default {
                 page: this.contentPacksCurrentPage,
                 limit: this.contentPacksPageSize,
                 contentType: showingCustom ? '' : this.contentPacksTypeFilter,
-                scope: showingCustom ? CUSTOM_PACK_SCOPE : ''
+                scope: showingCustom ? CUSTOM_PACK_SCOPE : '',
+                sortBy: this.sortBy,
+                sortDir: this.sortDir
             }, ({ data }) => {
                 this.contentPacksLoading = false;
                 if (data.code === 0) {

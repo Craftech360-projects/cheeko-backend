@@ -3575,7 +3575,7 @@ router.get('/card/lookup-legacy/:rfidUid',
 router.get('/content-pack/page',
   requireAdmin,
   asyncHandler(async (req, res) => {
-    const { page, limit, packCode, name, contentType, language, active, scope } = req.query;
+    const { page, limit, packCode, name, contentType, language, active, scope, sortBy, sortDir } = req.query;
     const result = await rfidService.getContentPackPage({
       page: parseInt(page) || 1,
       limit: parseInt(limit) || 10,
@@ -3585,6 +3585,8 @@ router.get('/content-pack/page',
       language,
       active,
       scope,
+      sortBy,
+      sortDir,
     });
     success(res, result);
   })
@@ -3763,8 +3765,9 @@ router.get('/content-pack/code/:packCode',
  *               contentPackId:
  *                 type: string
  *                 description: >
- *                   When set, the resulting URL is saved as this pack's thumbnail, and
- *                   the upload is treated as a thumbnail.
+ *                   Legacy way of saying the upload is cover art; prefer `purpose`.
+ *                   Nothing is written to the pack — save the returned URL as the
+ *                   pack's thumbnailUrl through the content-pack update.
  *     responses:
  *       200:
  *         description: Uploaded successfully
@@ -3786,8 +3789,8 @@ router.post('/content-pack/upload',
     // the first answer and was wrong: the dialog has no pack id until the pack
     // is saved, so the cover art of a brand-new pack came through looking like
     // item artwork and was converted to a .bin the preview <img> cannot show.
-    // It still counts, because an upload carrying one is stored as that pack's
-    // thumbnail below — but `purpose` is what a client should send.
+    // It still counts as a signal that this is cover art — but `purpose` is
+    // what a client should send.
     const isPackThumbnail = req.body?.purpose === 'thumbnail' || Boolean(contentPackId);
 
     let artwork;
@@ -3813,13 +3816,15 @@ router.post('/content-pack/upload',
         artwork.mimeType
       );
 
-      if (contentPackId) {
-        await rfidService.updateContentPack({
-          id: contentPackId,
-          thumbnailUrl: result.url
-        }, req.user?.id);
-      }
-
+      // The URL is handed back and nothing else. Saving it here used to write
+      // the pack's thumbnail the moment the file landed, which put the new
+      // cover in the row before Save ran — so the save that was meant to adopt
+      // it saw a row that already had it, judged the pack unchanged, and left
+      // the version where it was. The editor sends thumbnailUrl with the rest
+      // of the pack anyway, so the write was only ever a duplicate; without it
+      // Save is the one thing that changes a pack, and cover art advances the
+      // version like every other edit. Uploading and then cancelling now leaves
+      // the pack alone, which is what Cancel is for.
       success(res, result);
     } catch (error) {
       logger.error('RFID content pack upload failed:', { error: error.message });

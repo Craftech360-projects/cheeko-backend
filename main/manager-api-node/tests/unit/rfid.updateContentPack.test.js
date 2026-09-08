@@ -21,14 +21,17 @@
 
 const mockTx = {
   content_item: { deleteMany: jest.fn(), createMany: jest.fn() },
-  rfid_content_pack: { updateMany: jest.fn() }
+  // findFirst reads the version the item write is about to add one to.
+  rfid_content_pack: { updateMany: jest.fn(), findFirst: jest.fn() }
 };
 
 const mockPrisma = {
   $queryRaw: jest.fn(),
   $transaction: jest.fn(),
   content_item: { deleteMany: jest.fn(), createMany: jest.fn(), findMany: jest.fn() },
-  rfid_content_pack: { updateMany: jest.fn() }
+  // findFirst reads the pack as it stands, before the header update overwrites
+  // it, so the item write can tell whether this save changed anything.
+  rfid_content_pack: { updateMany: jest.fn(), findFirst: jest.fn() }
 };
 
 jest.mock('../../src/config/database', () => ({ prisma: mockPrisma }));
@@ -51,6 +54,12 @@ beforeEach(() => {
   mockPrisma.$transaction.mockImplementation(async (fn) => fn(mockTx));
   // The pack row exists, so the header update matches it.
   mockPrisma.rfid_content_pack.updateMany.mockResolvedValue({ count: 1 });
+  // A pack at version 3 whose stored hash is not the one these items produce,
+  // so the write below is a change and the version moves.
+  const stored = { version: '3', content_hash: 'stale', name: null, description: null,
+    content_type: null, language: null, status: null, thumbnail_url: null, active: true };
+  mockPrisma.rfid_content_pack.findFirst.mockResolvedValue(stored);
+  mockTx.rfid_content_pack.findFirst.mockResolvedValue(stored);
 });
 
 describe('updateContentPack item write', () => {
@@ -69,9 +78,12 @@ describe('updateContentPack item write', () => {
         expect.objectContaining({ item_number: 2, audio_url: ITEMS[1].audioUrl })
       ]
     });
+    // The hash is written with the items and in the same transaction: the toy
+    // compares it before re-downloading, so a pack whose items just changed and
+    // whose hash did not is a pack the toy will never refresh.
     expect(mockTx.rfid_content_pack.updateMany).toHaveBeenCalledWith({
       where: { id: BigInt(PACK_ID) },
-      data: { total_items: 2 }
+      data: { total_items: 2, content_hash: expect.any(String), version: '4' }
     });
     expect(mockPrisma.content_item.deleteMany).not.toHaveBeenCalled();
     expect(mockPrisma.content_item.createMany).not.toHaveBeenCalled();
@@ -103,7 +115,7 @@ describe('updateContentPack item write', () => {
     expect(mockTx.content_item.createMany).not.toHaveBeenCalled();
     expect(mockTx.rfid_content_pack.updateMany).toHaveBeenCalledWith({
       where: { id: BigInt(PACK_ID) },
-      data: { total_items: 0 }
+      data: { total_items: 0, content_hash: expect.any(String), version: '4' }
     });
   });
 
