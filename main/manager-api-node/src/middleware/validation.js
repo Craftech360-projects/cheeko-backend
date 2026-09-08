@@ -155,7 +155,13 @@ const schemas = {
     langCode: Joi.string().max(10),
     language: Joi.string().max(50),
     isVisible: Joi.number().integer().valid(0, 1).default(1),
-    sort: Joi.number().integer().default(0)
+    sort: Joi.number().integer().default(0),
+    // The character's SD directory name. Optional — a template with no artwork
+    // has none — but a wrong one is not: the toy's card is mounted without
+    // long-filename support, so a name it cannot store fails invisibly on the
+    // device rather than erroring anywhere we would see.
+    sdFolder: Joi.string().pattern(/^[a-z0-9]{1,8}$/).allow(null, '')
+      .messages({ 'string.pattern.base': 'sdFolder must be 1-8 lowercase letters or digits' })
   }),
 
   // Kid profile

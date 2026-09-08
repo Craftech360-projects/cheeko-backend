@@ -2463,6 +2463,25 @@ const getTemplateById = async (templateId) => {
  * @param {Object} data - Template data
  * @returns {Promise<string>} Created template ID (matches Spring Boot Result<String>)
  */
+/**
+ * The character's SD directory name, or null, or a readable 400.
+ *
+ * Same shape the database check constraint enforces, checked here so a typo is
+ * a sentence rather than a Postgres constraint violation. The rule is not
+ * cosmetic: the toy's card is mounted without long-filename support, so a
+ * longer or upper-case name fails invisibly on the device — see the column
+ * comment in schema.prisma.
+ */
+const normalizeSdFolder = (value) => {
+  const folder = (value === '' || value === undefined || value === null) ? null : String(value);
+  if (folder !== null && !/^[a-z0-9]{1,8}$/.test(folder)) {
+    const err = new Error('sd_folder must be 1-8 lowercase letters or digits');
+    err.statusCode = 400;
+    throw err;
+  }
+  return folder;
+};
+
 const createTemplate = async (data) => {
   validateAgentMd(data.systemPrompt);
   const toNullIfEmpty = (val) => (val === '' || val === undefined) ? null : val;
@@ -2490,6 +2509,11 @@ const createTemplate = async (data) => {
       language: data.language || 'English',
       is_visible: data.isVisible !== undefined ? data.isVisible : 1,
       sort: data.sort || 0,
+      // Settable at creation so a new character can be given a folder in the
+      // same dialog it is named in. The four artwork URLs are not: they are
+      // written only by the upload endpoint, which needs a template id to
+      // build the storage path from and owns the all-four-or-nothing rule.
+      sd_folder: normalizeSdFolder(data.sdFolder),
     },
     select: { id: true },
   });
@@ -2550,19 +2574,7 @@ const updateTemplate = async (templateId, data) => {
   // artwork upload endpoint, which owns the all-four-or-nothing rule and the
   // version bump. Letting them be set individually is how a character ends up
   // with two of its four faces.
-  if (data.sdFolder !== undefined) {
-    const folder = toNullIfEmpty(data.sdFolder);
-    // Same shape the DB check constraint enforces, checked here so the error
-    // is a readable 400 rather than a Postgres constraint violation. A longer
-    // or upper-case name fails invisibly on the toy's FAT card — see the
-    // column comment in schema.prisma.
-    if (folder !== null && !/^[a-z0-9]{1,8}$/.test(folder)) {
-      const err = new Error('sd_folder must be 1-8 lowercase letters or digits');
-      err.statusCode = 400;
-      throw err;
-    }
-    updateData.sd_folder = folder;
-  }
+  if (data.sdFolder !== undefined) updateData.sd_folder = normalizeSdFolder(data.sdFolder);
 
   await prisma.ai_agent_template.update({
     where: { id: templateId },

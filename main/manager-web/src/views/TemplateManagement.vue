@@ -154,6 +154,24 @@
           </el-col>
         </el-row>
 
+        <el-row :gutter="16">
+          <el-col :span="12">
+            <el-form-item label="SD Folder" prop="sdFolder">
+              <el-input
+                v-model="form.sdFolder"
+                placeholder="e.g. cheeko — leave blank if this character has no artwork"
+                maxlength="8"
+                show-word-limit
+              />
+              <div class="art-hint">
+                Where the toy stores this character's four conversation pictures.
+                1&ndash;8 lowercase letters or digits. Upload the pictures themselves
+                from <strong>Artwork</strong> in the list.
+              </div>
+            </el-form-item>
+          </el-col>
+        </el-row>
+
         <el-form-item label="System Prompt" prop="systemPrompt">
           <el-input
             type="textarea"
@@ -332,6 +350,12 @@ export default {
         ],
         langCode: [
           { required: true, message: "Please select language code", trigger: "change" }
+        ],
+        // Optional, but wrong is not allowed: the toy's SD card cannot store a
+        // longer or upper-case name and fails silently when given one, so it is
+        // caught here rather than by the database.
+        sdFolder: [
+          { pattern: SD_FOLDER_PATTERN, message: 'Only lowercase letters and digits, 1-8 characters', trigger: 'blur' }
         ]
       }
     };
@@ -395,7 +419,8 @@ export default {
         summaryMemory: "",
         chatHistoryConf: 1,
         sort: 0,
-        visible: true
+        visible: true,
+        sdFolder: ""
       };
     },
     getEmptyArtForm() {
@@ -592,7 +617,8 @@ export default {
         summaryMemory: row.summaryMemory || "",
         chatHistoryConf: row.chatHistoryConf ?? 1,
         sort: row.sort ?? 0,
-        visible: row.isVisible === 1 || row.isVisible === true
+        visible: row.isVisible === 1 || row.isVisible === true,
+        sdFolder: row.sdFolder || ""
       };
       this.dialogVisible = true;
     },

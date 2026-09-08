@@ -160,3 +160,59 @@ describe('POST /agent/template/:id/art', () => {
     expect(res.status).toBe(404);
   });
 });
+
+/**
+ * The folder name is the one field an operator types by hand, and the one whose
+ * mistakes are invisible: the toy's card is mounted without long-filename
+ * support, so a name it cannot store produces no error anywhere between the
+ * dashboard and the child. Both writers are checked because both are reachable.
+ */
+describe('sd_folder validation', () => {
+  const VALID = 'newchar';
+  const INVALID = ['Cheeko', 'my-char', 'toolongname', 'a b'];
+
+  beforeEach(() => {
+    jest.spyOn(prisma.ai_agent_template, 'create').mockResolvedValue({ id: TEMPLATE_ID });
+  });
+
+  it.each(INVALID)('refuses "%s" when creating a template', async (folder) => {
+    const res = await request(app)
+      .post('/toy/agent/template')
+      .send({ agentName: 'New Character', systemPrompt: 'Be kind.', sdFolder: folder });
+
+    expect(res.status).toBe(400);
+    expect(prisma.ai_agent_template.create).not.toHaveBeenCalled();
+  });
+
+  it.each(INVALID)('refuses "%s" when updating a template', async (folder) => {
+    const res = await request(app)
+      .put(`/toy/agent/template/${TEMPLATE_ID}`)
+      .send({ sdFolder: folder });
+
+    expect(res.status).toBe(400);
+    expect(written).toBeNull();
+  });
+
+  it('stores a valid folder on create', async () => {
+    const res = await request(app)
+      .post('/toy/agent/template')
+      .send({ agentName: 'New Character', systemPrompt: 'Be kind.', sdFolder: VALID });
+
+    expect(res.status).toBe(200);
+    expect(prisma.ai_agent_template.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ sd_folder: VALID }) })
+    );
+  });
+
+  it('stores an omitted folder as null rather than an empty string', async () => {
+    // '' would satisfy neither the check constraint nor a path built from it,
+    // and the column is nullable precisely so a character can exist without art.
+    await request(app)
+      .post('/toy/agent/template')
+      .send({ agentName: 'New Character', systemPrompt: 'Be kind.', sdFolder: '' });
+
+    expect(prisma.ai_agent_template.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ sd_folder: null }) })
+    );
+  });
+});
