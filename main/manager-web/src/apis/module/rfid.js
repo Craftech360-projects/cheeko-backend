@@ -495,7 +495,11 @@ export default {
             contentType: params.contentType || '',
             language: params.language || '',
             active: params.active !== undefined ? params.active : '',
-            scope: params.scope || ''
+            scope: params.scope || '',
+            // Ordering decides which rows land on the page, so it has to travel
+            // with the page request rather than be applied to the answer.
+            sortBy: params.sortBy || '',
+            sortDir: params.sortDir || ''
         }).toString();
 
         RequestService.sendRequest()

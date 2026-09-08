@@ -11,7 +11,7 @@
     custom-class="custom-rfid-dialog"
     :show-close="false"
   >
-    <div class="dialog-container">
+    <div class="dialog-container" ref="scroller">
       <div class="dialog-header">
         <h2 class="dialog-title">{{ title }}</h2>
         <button class="custom-close-btn" @click="cancel">
@@ -112,8 +112,9 @@
           </el-radio-group>
         </el-form-item>
 
-        <el-form-item label="Version" prop="version" class="form-item">
-           <el-input-number v-model="form.version" :min="1" size="small"></el-input-number>
+        <el-form-item label="Version" class="form-item">
+           <span class="version-value">v{{ form.version || 1 }}</span>
+           <span class="field-hint">Advances by one each time you save a change. The toy re-downloads the pack when it moves.</span>
         </el-form-item>
 
         <!-- Story Grouping Toggle -->
@@ -135,14 +136,41 @@
                   @click="pickFolder">
                   {{ importing ? `Uploading ${importDone}/${importTotal}` : 'Import Folder' }}
                 </el-button>
-                <el-button size="mini" type="primary" icon="el-icon-plus" @click="addItem" :disabled="form.items.length >= 10">Add Item</el-button>
+                <el-button size="mini" type="primary" icon="el-icon-plus" @click="addItem()" :disabled="form.items.length >= 10">Add Item</el-button>
               </div>
            </div>
 
-           <div class="items-list">
-              <div v-for="(item, index) in form.items" :key="index" class="item-row">
+           <div class="items-list" :class="{ 'is-dragging': dragFrom !== null }">
+            <template v-for="(item, index) in form.items">
+              <div :key="'insert-' + item._rowKey" class="insert-divider">
+                <button
+                  type="button"
+                  class="insert-here"
+                  :disabled="form.items.length >= 10"
+                  @click="addItem(index)">
+                  + Add item here
+                </button>
+              </div>
+              <div :key="item._rowKey"
+                   class="item-row"
+                   :class="rowDragClass(index)"
+                   :draggable="armedRow === item._rowKey"
+                   @dragstart="onRowDragStart(index, $event)"
+                   @dragover.prevent="onRowDragOver(index)"
+                   @drop.prevent="onRowDrop(index)"
+                   @dragend="endRowDrag">
                   <div class="item-col seq-col">
                      <span class="seq-badge">{{ index + 1 }}</span>
+                     <span class="drag-handle"
+                           title="Drag to reorder"
+                           @mousedown="armedRow = item._rowKey"
+                           @mouseup="armedRow = null">
+                       <svg width="10" height="16" viewBox="0 0 10 16" aria-hidden="true">
+                         <circle cx="2" cy="3" r="1.3"/><circle cx="8" cy="3" r="1.3"/>
+                         <circle cx="2" cy="8" r="1.3"/><circle cx="8" cy="8" r="1.3"/>
+                         <circle cx="2" cy="13" r="1.3"/><circle cx="8" cy="13" r="1.3"/>
+                       </svg>
+                     </span>
                   </div>
                   <div class="item-col main-col">
                       <div class="inputs-wrapper" style="flex: 1; min-width: 0;">
@@ -177,15 +205,15 @@
                       </div>
                       <div v-if="item.imageUrl" class="img-preview-box">
                            <canvas v-if="isBinFile(item.imageUrl)"
-                                   :ref="'canvas-' + index"
+                                   :ref="'canvas-' + item._rowKey"
                                    class="bin-preview-canvas"
-                                   @load="loadBinPreview(item.imageUrl, index)">
+                                   @load="loadBinPreview(item.imageUrl, item._rowKey)">
                            </canvas>
                            <img v-else :src="item.imageUrl" alt="Preview" @error="handleImageError($event)"/>
-                           <div v-if="isBinFile(item.imageUrl) && binLoading[index]" class="bin-loading">
+                           <div v-if="isBinFile(item.imageUrl) && binLoading[item._rowKey]" class="bin-loading">
                              <i class="el-icon-loading"></i>
                            </div>
-                           <div v-if="isBinFile(item.imageUrl) && binError[index]" class="bin-error">
+                           <div v-if="isBinFile(item.imageUrl) && binError[item._rowKey]" class="bin-error">
                              <i class="el-icon-picture-outline"></i>
                              <span>.bin</span>
                            </div>
@@ -195,6 +223,7 @@
                       <el-button type="text" icon="el-icon-delete" class="text-danger" @click="removeItem(index)"></el-button>
                   </div>
               </div>
+            </template>
               <div v-if="form.items.length === 0" class="empty-items">
                   No items added. Click "Add Item" to start.
               </div>
@@ -224,10 +253,33 @@
                 </div>
               </div>
 
-              <div class="story-items">
-                <div v-for="(item, iIndex) in story.items" :key="'si-' + sIndex + '-' + iIndex" class="item-row">
+              <div class="story-items" :class="{ 'is-dragging': dragFrom !== null }">
+                <template v-for="(item, iIndex) in story.items">
+                <div :key="'insert-' + item._rowKey" class="insert-divider">
+                  <button type="button" class="insert-here" @click="addStoryItem(sIndex, iIndex)">
+                    + Add track here
+                  </button>
+                </div>
+                <div :key="item._rowKey"
+                     class="item-row"
+                     :class="rowDragClass(iIndex, sIndex)"
+                     :draggable="armedRow === item._rowKey"
+                     @dragstart="onRowDragStart(iIndex, $event, sIndex)"
+                     @dragover.prevent="onRowDragOver(iIndex, sIndex)"
+                     @drop.prevent="onRowDrop(iIndex, sIndex)"
+                     @dragend="endRowDrag">
                   <div class="item-col seq-col">
                     <span class="seq-badge">{{ iIndex + 1 }}</span>
+                    <span class="drag-handle"
+                          title="Drag to reorder"
+                          @mousedown="armedRow = item._rowKey"
+                          @mouseup="armedRow = null">
+                      <svg width="10" height="16" viewBox="0 0 10 16" aria-hidden="true">
+                        <circle cx="2" cy="3" r="1.3"/><circle cx="8" cy="3" r="1.3"/>
+                        <circle cx="2" cy="8" r="1.3"/><circle cx="8" cy="8" r="1.3"/>
+                        <circle cx="2" cy="13" r="1.3"/><circle cx="8" cy="13" r="1.3"/>
+                      </svg>
+                    </span>
                   </div>
                   <div class="item-col main-col">
                     <div class="inputs-wrapper" style="flex: 1; min-width: 0;">
@@ -261,7 +313,7 @@
                     </div>
                     <div v-if="item.imageUrl" class="img-preview-box">
                       <canvas v-if="isBinFile(item.imageUrl)"
-                              :ref="'canvas-s' + sIndex + '-' + iIndex"
+                              :ref="'canvas-s' + item._rowKey"
                               class="bin-preview-canvas">
                       </canvas>
                       <img v-else :src="item.imageUrl" alt="Preview" @error="handleImageError($event)"/>
@@ -271,6 +323,7 @@
                     <el-button type="text" icon="el-icon-delete" class="text-danger" @click="removeStoryItem(sIndex, iIndex)"></el-button>
                   </div>
                 </div>
+                </template>
                 <div v-if="story.items.length === 0" class="empty-items" style="padding: 10px;">
                   No tracks. Click "Add Track" above.
                 </div>
@@ -333,6 +386,22 @@ import {
 // Picking this in the select opens the name field instead of setting a value.
 const CREATE_SENTINEL = '__create_playlist__';
 
+// How close to an edge of the scrolling dialog a dragged row has to get before
+// the list starts moving under it, and how fast it travels once pinned there.
+// The zone is deeper than a row is tall so it can be entered deliberately, and
+// the speed is per frame — roughly 1000px/s at the edge, which crosses a
+// ten-item pack in about a second.
+const AUTO_SCROLL_EDGE = 72;
+const AUTO_SCROLL_MAX_STEP = 17;
+
+// A row identity that survives reordering. The array index cannot be it — moving
+// a row would hand its inputs, its canvas and its .bin loading state to whoever
+// took its place — and the database id cannot either, because a row added in
+// this dialog has none until it is saved. Stripped from the payload on submit.
+let rowKeySeed = 0;
+const nextRowKey = () => `row-${++rowKeySeed}`;
+const stripRowKey = ({ _rowKey, ...item }) => item;
+
 export default {
   mixins: [dialogDismiss],
   props: {
@@ -383,6 +452,17 @@ export default {
       binLoading: {},
       binError: {},
       binCache: {},
+      // Reordering by drag. `armedRow` is the row whose handle is under the
+      // mouse: rows are only draggable while it names them, so the title and
+      // URL fields stay selectable everywhere else. `dragFrom`/`dragOver` are
+      // the row in flight and the row it is currently over, and `dragStory` is
+      // the story it belongs to — a track can be dragged within its own story,
+      // not into another one, because moving between stories would change which
+      // story it is rather than where it sits.
+      armedRow: null,
+      dragFrom: null,
+      dragOver: null,
+      dragStory: null,
       rules: {
         packCode: [
           { required: true, message: "Please enter pack code", trigger: "blur" },
@@ -506,23 +586,50 @@ export default {
         )];
       });
     },
-    addItem() {
-        if (this.form.items.length < 10) {
-            this.form.items.push({
-                sequence: this.form.items.length + 1,
-                title: '',
-                audioUrl: '',
-                imageUrl: '',
-                text: ''  // Voice script / lyrics text
-            });
+    // Every row carries a key of its own, assigned once. Rows loaded from the API
+    // get theirs when the dialog opens; rows created here get theirs at creation.
+    ensureRowKeys(items) {
+        (items || []).forEach(item => {
+            if (!item._rowKey) this.$set(item, '_rowKey', nextRowKey());
+        });
+    },
+    // item_number is the pack's running order, and the array is the only thing
+    // that knows it, so it is rewritten from array position after every
+    // insertion, deletion and move: index 0 → 1, index 1 → 2, no gaps, no
+    // duplicates. submit() stamps itemNumber the same way.
+    resequence(items) {
+        items.forEach((item, idx) => { item.sequence = idx + 1; });
+    },
+    // `index` is the position to insert at; omitted, the item goes on the end.
+    addItem(index = null) {
+        if (this.form.items.length >= 10) return;
+        const item = {
+            _rowKey: nextRowKey(),
+            sequence: 0,
+            title: '',
+            audioUrl: '',
+            imageUrl: '',
+            text: ''  // Voice script / lyrics text
+        };
+        if (index === null || index >= this.form.items.length) {
+            this.form.items.push(item);
+        } else {
+            this.form.items.splice(index, 0, item);
         }
+        this.resequence(this.form.items);
+    },
+    // Moves a row to a position. splice moves the same object, so its database
+    // id and every field it holds travel with it.
+    moveWithin(items, from, to) {
+        if (from === to || to < 0 || to >= items.length) return;
+        const [moved] = items.splice(from, 1);
+        items.splice(to, 0, moved);
+        this.resequence(items);
     },
     removeItem(index) {
         this.form.items.splice(index, 1);
         // Re-sequence
-        this.form.items.forEach((item, idx) => {
-            item.sequence = idx + 1;
-        });
+        this.resequence(this.form.items);
     },
     // ---- Story Mode Methods ----
     onStoryModeChange(val) {
@@ -531,7 +638,7 @@ export default {
         if (this.form.items.length > 0 && this.stories.length === 0) {
           this.stories = [{
             title: '',
-            items: this.form.items.map(i => ({ ...i }))
+            items: this.form.items.map(i => ({ ...i, _rowKey: nextRowKey() }))
           }];
         }
         if (this.stories.length === 0) {
@@ -545,19 +652,128 @@ export default {
     removeStory(sIndex) {
       this.stories.splice(sIndex, 1);
     },
-    addStoryItem(sIndex) {
-      this.stories[sIndex].items.push({
-        title: '', audioUrl: '', imageUrl: '', text: ''
-      });
+    // `iIndex` is the position to insert at; omitted, the track goes on the end.
+    addStoryItem(sIndex, iIndex = null) {
+      const track = {
+        _rowKey: nextRowKey(), title: '', audioUrl: '', imageUrl: '', text: ''
+      };
+      const items = this.stories[sIndex].items;
+      if (iIndex === null || iIndex >= items.length) {
+        items.push(track);
+      } else {
+        items.splice(iIndex, 0, track);
+      }
+      this.resequence(items);
     },
     removeStoryItem(sIndex, iIndex) {
       this.stories[sIndex].items.splice(iIndex, 1);
+      this.resequence(this.stories[sIndex].items);
+    },
+    // ---- Reordering by drag ----
+    // The list a drag is happening in: the flat items, or one story's tracks.
+    dragList(storyIndex = null) {
+      return storyIndex === null ? this.form.items : this.stories[storyIndex].items;
+    },
+    onRowDragStart(index, event, storyIndex = null) {
+      this.dragFrom = index;
+      this.dragOver = index;
+      this.dragStory = storyIndex;
+      this.startAutoScroll();
+      if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = 'move';
+        // Firefox starts no drag at all unless the payload is set, and the row
+        // is identified by position, so there is nothing useful to carry.
+        event.dataTransfer.setData('text/plain', String(index));
+      }
+    },
+    onRowDragOver(index, storyIndex = null) {
+      if (this.dragFrom === null || storyIndex !== this.dragStory) return;
+      this.dragOver = index;
+    },
+    onRowDrop(index, storyIndex = null) {
+      if (this.dragFrom === null || storyIndex !== this.dragStory) return;
+      this.moveWithin(this.dragList(storyIndex), this.dragFrom, index);
+      this.endRowDrag();
+    },
+    endRowDrag() {
+      this.stopAutoScroll();
+      this.armedRow = null;
+      this.dragFrom = null;
+      this.dragOver = null;
+      this.dragStory = null;
+    },
+    // ---- Auto-scroll while a row is in flight ----
+    //
+    // Native HTML5 drag scrolls nothing for you: a row dragged to the top edge
+    // of the dialog just sits against it, so a track could only be moved as far
+    // as the list already happened to be scrolled. Dragging item 5 to the top of
+    // a ten-item pack was not possible at all without scrolling first, letting
+    // go, and dragging again.
+    //
+    // The scrolling runs off requestAnimationFrame rather than off dragover
+    // because the pointer is usually *still* at that moment: someone holding a
+    // row against the top edge is asking the list to keep moving, and a
+    // dragover-driven scroll would stop the instant they stopped wiggling the
+    // mouse. dragover only feeds it the pointer position.
+    startAutoScroll() {
+      const el = this.$refs.scroller;
+      if (!el || this.autoScrollRaf) return;
+
+      this.autoScrollY = null;
+      this.trackAutoScroll = (event) => { this.autoScrollY = event.clientY; };
+      // On the container, not the rows: the pointer spends part of a drag over
+      // the gaps between rows, and the edges themselves are padding.
+      el.addEventListener('dragover', this.trackAutoScroll);
+
+      const step = () => {
+        this.autoScrollRaf = requestAnimationFrame(step);
+        if (this.autoScrollY === null) return;
+
+        const box = el.getBoundingClientRect();
+        const fromTop = this.autoScrollY - box.top;
+        const fromBottom = box.bottom - this.autoScrollY;
+
+        // Speed ramps with depth into the zone, so easing towards the edge
+        // creeps and pinning against it travels — the list is being read on the
+        // way past, not just moved.
+        if (fromTop < AUTO_SCROLL_EDGE) {
+          el.scrollTop -= AUTO_SCROLL_MAX_STEP * (1 - Math.max(fromTop, 0) / AUTO_SCROLL_EDGE);
+        } else if (fromBottom < AUTO_SCROLL_EDGE) {
+          el.scrollTop += AUTO_SCROLL_MAX_STEP * (1 - Math.max(fromBottom, 0) / AUTO_SCROLL_EDGE);
+        }
+      };
+      this.autoScrollRaf = requestAnimationFrame(step);
+    },
+    stopAutoScroll() {
+      if (this.autoScrollRaf) cancelAnimationFrame(this.autoScrollRaf);
+      this.autoScrollRaf = null;
+      if (this.trackAutoScroll && this.$refs.scroller) {
+        this.$refs.scroller.removeEventListener('dragover', this.trackAutoScroll);
+      }
+      this.trackAutoScroll = null;
+      this.autoScrollY = null;
+    },
+    // Which side of the hovered row to draw the landing line on: above it when
+    // the row is travelling up the list, below it when travelling down.
+    rowDragClass(index, storyIndex = null) {
+      if (this.dragFrom === null || storyIndex !== this.dragStory) return null;
+      if (index === this.dragFrom) return 'is-dragging-row';
+      if (index !== this.dragOver) return null;
+      return this.dragFrom > index ? 'drop-above' : 'drop-below';
+    },
+    // The row object, not just its position: rows can be moved while the file
+    // picker is open, and an index captured here would then name a different row.
+    targetItemAt(itemIndex, storyIndex) {
+      return storyIndex === null
+        ? this.form.items[itemIndex]
+        : (this.stories[storyIndex] || {}).items?.[itemIndex];
     },
     pickAudioFile(itemIndex, storyIndex = null) {
       this.pendingUpload = {
         mode: storyIndex === null ? 'flat' : 'story',
         storyIndex,
         itemIndex,
+        item: this.targetItemAt(itemIndex, storyIndex),
         field: 'audioUrl'
       };
       if (this.$refs.audioFilePicker) {
@@ -569,6 +785,7 @@ export default {
         mode: storyIndex === null ? 'flat' : 'story',
         storyIndex,
         itemIndex,
+        item: this.targetItemAt(itemIndex, storyIndex),
         field: 'imageUrl'
       };
       if (this.$refs.imageFilePicker) {
@@ -596,16 +813,13 @@ export default {
     },
     getPendingTargetItem() {
       if (!this.pendingUpload) return null;
-      const { mode, storyIndex, itemIndex } = this.pendingUpload;
+      const { mode, item } = this.pendingUpload;
       if (mode === 'packThumbnail') {
         return this.form;
       }
-      if (mode === 'story') {
-        if (!this.stories[storyIndex] || !this.stories[storyIndex].items[itemIndex]) return null;
-        return this.stories[storyIndex].items[itemIndex];
-      }
-      if (!this.form.items[itemIndex]) return null;
-      return this.form.items[itemIndex];
+      // The row captured when the picker opened, so a reorder in the meantime
+      // cannot land the upload on a different row.
+      return item || null;
     },
     async handleAudioFileSelected(event) {
       const file = event?.target?.files?.[0];
@@ -719,7 +933,7 @@ export default {
       if (!(await this.confirmPairs(pairs, skipped, fileByPath))) return;
 
       // One item per pair; each file uploads into its own field.
-      const newItems = pairs.map(p => ({ sequence: 0, title: p.title, audioUrl: '', imageUrl: '', text: '' }));
+      const newItems = pairs.map(p => ({ _rowKey: nextRowKey(), sequence: 0, title: p.title, audioUrl: '', imageUrl: '', text: '' }));
       const jobs = [];
       pairs.forEach((p, i) => {
         jobs.push({ path: p.audio, category: 'audio', item: newItems[i], field: 'audioUrl' });
@@ -750,7 +964,7 @@ export default {
       // An item without audio is unusable, so drop it rather than adding a blank row.
       const imported = newItems.filter(item => item.audioUrl);
       imported.forEach(item => this.form.items.push(item));
-      this.form.items.forEach((item, idx) => { item.sequence = idx + 1; });
+      this.resequence(this.form.items);
 
       if (imported.length) {
         this.$message.success(`Imported ${imported.length} item(s).`);
@@ -923,17 +1137,19 @@ export default {
 
       return { imageData, width, height };
     },
-    async loadBinPreview(url, index) {
+    // Keyed by the row's own key, never its index: after a move, index-keyed
+    // loading flags and canvas refs would describe the row that took its place.
+    async loadBinPreview(url, rowKey) {
       if (!url || !this.isBinFile(url)) return;
 
       // Check cache first
       if (this.binCache[url]) {
-        this.renderCachedBin(url, index);
+        this.renderCachedBin(url, rowKey);
         return;
       }
 
-      this.$set(this.binLoading, index, true);
-      this.$set(this.binError, index, false);
+      this.$set(this.binLoading, rowKey, true);
+      this.$set(this.binError, rowKey, false);
 
       try {
         // Fetch the .bin file via proxy to avoid CORS issues
@@ -960,21 +1176,21 @@ export default {
         this.binCache[url] = this.decodeLvglBin(arrayBuffer);
 
         // Render to canvas
-        this.renderCachedBin(url, index);
+        this.renderCachedBin(url, rowKey);
 
       } catch (error) {
         console.error('Error loading .bin preview:', error);
-        this.$set(this.binError, index, true);
+        this.$set(this.binError, rowKey, true);
       } finally {
-        this.$set(this.binLoading, index, false);
+        this.$set(this.binLoading, rowKey, false);
       }
     },
-    renderCachedBin(url, index) {
+    renderCachedBin(url, rowKey) {
       const cached = this.binCache[url];
       if (!cached) return;
 
       this.$nextTick(() => {
-        const canvasRef = this.$refs['canvas-' + index];
+        const canvasRef = this.$refs['canvas-' + rowKey];
         const canvas = Array.isArray(canvasRef) ? canvasRef[0] : canvasRef;
 
         if (canvas) {
@@ -991,6 +1207,14 @@ export default {
           // Build the final form to submit
           const submitForm = { ...this.form };
           submitForm.contentType = this.normalizeContentType(this.form.contentType);
+          // Both are server-derived. Echoing the values read back on open pinned
+          // content_hash to whatever it was before the edit — so the toy, which
+          // compares the hash first, was never told the pack had changed — and
+          // pinned the version to whatever was in the box, which is why every
+          // pack sat at 1 no matter how often it was edited. Left out, the API
+          // derives both from what it actually writes.
+          delete submitForm.contentHash;
+          delete submitForm.version;
 
           if (this.storyMode) {
             // Flatten stories into items with storyNumber/storyTitle
@@ -1003,7 +1227,7 @@ export default {
               const storyNum = sIdx + 1;
               story.items.forEach((item, iIdx) => {
                 flatItems.push({
-                  ...item,
+                  ...stripRowKey(item),
                   itemNumber: iIdx + 1,
                   storyNumber: storyNum,
                   storyTitle: story.title || `Story ${storyNum}`
@@ -1017,8 +1241,11 @@ export default {
               this.$message.warning("Please add at least one item to the pack.");
               return;
             }
+            // itemNumber comes from array position, so the order shown here is
+            // the order that is saved. `id` rides along untouched, which is how
+            // the API keeps each item's stored metadata with the right item.
             submitForm.items = this.form.items.map((item, idx) => ({
-              ...item,
+              ...stripRowKey(item),
               itemNumber: idx + 1,
               storyNumber: null,
               storyTitle: null
@@ -1046,6 +1273,10 @@ export default {
       this.$emit('cancel');
     }
   },
+  beforeDestroy() {
+    // A drag in flight when the dialog is torn down never reaches dragend.
+    this.stopAutoScroll();
+  },
   watch: {
     'form.thumbnailUrl'() {
       // A new URL deserves a fresh load attempt, not the previous one's error state
@@ -1067,11 +1298,18 @@ export default {
             if (!storyMap[sn]) {
               storyMap[sn] = { title: item.storyTitle || '', items: [] };
             }
+            // Spread first: the four fields below are the only ones this editor
+            // shows, and rebuilding the track from them alone dropped `id` — and
+            // with it the row identity the API re-matches metadata by, so a
+            // reordered story used to inherit the duration, size and artwork of
+            // whichever track had previously held its position.
             storyMap[sn].items.push({
+              ...item,
               title: item.title || '',
               audioUrl: item.audioUrl || '',
               imageUrl: item.imageUrl || '',
-              text: item.text || ''
+              text: item.text || '',
+              _rowKey: nextRowKey()
             });
           }
           this.stories = Object.keys(storyMap)
@@ -1082,11 +1320,14 @@ export default {
           this.stories = [];
         }
 
+        this.ensureRowKeys(this.form.items);
+        this.stories.forEach(story => this.ensureRowKeys(story.items));
+
         // Load bin previews for existing items
         this.$nextTick(() => {
-          this.form.items.forEach((item, index) => {
+          this.form.items.forEach(item => {
             if (this.isBinFile(item.imageUrl)) {
-              this.loadBinPreview(item.imageUrl, index);
+              this.loadBinPreview(item.imageUrl, item._rowKey);
             }
           });
         });
@@ -1101,14 +1342,15 @@ export default {
         this.importing = false;
         this.importDone = 0;
         this.importTotal = 0;
+        this.endRowDrag();
       }
     },
     'form.items': {
       handler(items) {
         // Watch for imageUrl changes to load bin previews
-        items.forEach((item, index) => {
-          if (this.isBinFile(item.imageUrl) && !this.binLoading[index] && !this.binCache[item.imageUrl]) {
-            this.loadBinPreview(item.imageUrl, index);
+        items.forEach(item => {
+          if (this.isBinFile(item.imageUrl) && !this.binLoading[item._rowKey] && !this.binCache[item.imageUrl]) {
+            this.loadBinPreview(item.imageUrl, item._rowKey);
           }
         });
       },
@@ -1408,6 +1650,57 @@ export default {
       text-align: right;
     }
 
+    // The grip. It is the only thing that arms the drag, which is what keeps
+    // the title and URL fields selectable: a row draggable from anywhere would
+    // start a drag instead of a text selection on every click-and-sweep.
+    .drag-handle {
+      display: block;
+      margin: 8px 0 0 auto;
+      width: 14px;
+      cursor: grab;
+      line-height: 0;
+      color: $border-color;
+      transition: color 0.12s ease;
+
+      &:active {
+        cursor: grabbing;
+      }
+
+      svg {
+        display: block;
+        margin: 0 auto;
+        fill: currentColor;
+      }
+    }
+
+    .item-row:hover .drag-handle {
+      color: $text-light;
+    }
+
+    // The row in flight fades in place, so the list keeps its shape while the
+    // landing line does the talking.
+    .item-row.is-dragging-row {
+      opacity: 0.4;
+    }
+
+    .item-row.drop-above {
+      box-shadow: inset 0 2px 0 $text-dark;
+    }
+
+    .item-row.drop-below {
+      box-shadow: inset 0 -2px 0 $text-dark;
+    }
+
+    // The insertion strips sit in the gaps between rows. Mid-drag they would
+    // take the pointer events that tell us which row is being hovered, and the
+    // landing line would stall on whichever row was left.
+    .items-list.is-dragging,
+    .story-items.is-dragging {
+      .insert-divider {
+        pointer-events: none;
+      }
+    }
+
     .main-col {
       flex: 1;
       display: flex;
@@ -1479,9 +1772,54 @@ export default {
       }
     }
 
+    .version-value {
+      font-family: $font-mono;
+      font-size: 13px;
+      color: $text-dark;
+    }
+
     .action-col {
       width: 26px;
       padding-top: 4px;
+
+    }
+
+    // The insertion point between two cards. A hairline until the row is
+    // hovered, so ten of them do not read as ten more rows.
+    .insert-divider {
+      height: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      transition: opacity 0.12s ease;
+
+      &:hover,
+      &:focus-within {
+        opacity: 1;
+      }
+    }
+
+    .insert-here {
+      border: 1px dashed $border-color;
+      background: $surface-sunk;
+      border-radius: $radius-md;
+      color: $text-light;
+      font-family: $font-mono;
+      font-size: 10px;
+      line-height: 1;
+      padding: 3px 10px;
+      cursor: pointer;
+
+      &:hover:not(:disabled) {
+        color: $text-dark;
+        border-color: $text-light;
+      }
+
+      &:disabled {
+        cursor: not-allowed;
+        opacity: 0.4;
+      }
     }
 
     .mb-1 {

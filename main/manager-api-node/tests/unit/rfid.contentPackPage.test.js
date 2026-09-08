@@ -121,3 +121,95 @@ describe('getContentPackPage', () => {
     expect(result.list[0]).toMatchObject({ id: 1, packCode: 'sty_bed', totalItems: 5 });
   });
 });
+
+/**
+ * Ordering.
+ *
+ * It has to be part of the paged query, because it decides which rows are on
+ * the page at all. It used to be a fixed `ORDER BY name ASC` with the dashboard
+ * sorting the ten rows it got back — so every choice but "Name, A-Z" reordered
+ * a slice that name-ascending had already picked, and the packs on screen were
+ * the wrong ones in a convincing order.
+ *
+ * The column is spliced into the SQL rather than bound, because a column name
+ * cannot be a bind parameter. That makes the whitelist load-bearing, so these
+ * check it holds rather than merely that the happy path works.
+ */
+describe('getContentPackPage ordering', () => {
+  /** The ORDER BY of the paged query (the second statement). */
+  const orderBy = () => {
+    const page = capturedQueries()[1].sql;
+    return page.slice(page.indexOf('ORDER BY')).split('LIMIT')[0].trim();
+  };
+
+  it('orders by name ascending when nothing is asked for', async () => {
+    await rfidService.getContentPackPage({ page: 1, limit: 10 });
+
+    expect(orderBy()).toMatch(/^ORDER BY name ASC/);
+  });
+
+  it.each([
+    ['name', 'name'],
+    ['packCode', 'pack_code'],
+    ['contentType', 'content_type'],
+    ['createDate', 'create_date'],
+    ['language', 'language'],
+    ['status', 'status'],
+    ['version', 'version'],
+    ['totalItems', 'total_items'],
+    ['updateDate', 'update_date']
+  ])('sorts by %s using the %s column', async (sortBy, column) => {
+    await rfidService.getContentPackPage({ page: 1, limit: 10, sortBy });
+
+    expect(orderBy()).toMatch(new RegExp(`^ORDER BY ${column} ASC`));
+  });
+
+  it('honours the direction, and only the two it knows', async () => {
+    await rfidService.getContentPackPage({ page: 1, limit: 10, sortBy: 'createDate', sortDir: 'desc' });
+    expect(orderBy()).toContain('create_date DESC');
+
+    mockPrisma.$queryRaw.mockReset();
+    mockPrisma.$queryRaw.mockResolvedValueOnce([{ count: 0 }]).mockResolvedValueOnce([]);
+    await rfidService.getContentPackPage({ page: 1, limit: 10, sortBy: 'createDate', sortDir: 'DESC' });
+    expect(orderBy()).toContain('create_date DESC');
+
+    mockPrisma.$queryRaw.mockReset();
+    mockPrisma.$queryRaw.mockResolvedValueOnce([{ count: 0 }]).mockResolvedValueOnce([]);
+    await rfidService.getContentPackPage({ page: 1, limit: 10, sortBy: 'createDate', sortDir: 'sideways' });
+    expect(orderBy()).toContain('create_date ASC');
+  });
+
+  it('puts packs missing the field last in both directions', async () => {
+    // A pack with no status must not lead a status sort just because NULL
+    // happens to collate first. The grid's own comparator sinks empties too.
+    await rfidService.getContentPackPage({ page: 1, limit: 10, sortBy: 'status', sortDir: 'desc' });
+
+    expect(orderBy()).toContain('NULLS LAST');
+  });
+
+  it('breaks ties on id, so paging cannot show or skip a row', async () => {
+    // Without a tiebreak, two packs sharing a content_type can swap places
+    // between the request for page 1 and the request for page 2 — one of them
+    // appears twice and the other never.
+    await rfidService.getContentPackPage({ page: 1, limit: 10, sortBy: 'contentType' });
+
+    expect(orderBy()).toMatch(/id ASC$/);
+  });
+
+  it.each(['id', 'pack_code; DROP TABLE rfid_content_pack', 'name; --', '', null, 42])(
+    'falls back to name for %s, which is not on the whitelist',
+    async (sortBy) => {
+      await rfidService.getContentPackPage({ page: 1, limit: 10, sortBy });
+
+      expect(orderBy()).toMatch(/^ORDER BY name ASC/);
+    }
+  );
+
+  it('still excludes the custom packs whatever the sort', async () => {
+    await rfidService.getContentPackPage({ page: 1, limit: 10, sortBy: 'createDate', sortDir: 'desc' });
+
+    for (const { sql } of capturedQueries()) {
+      expect(sql).toContain('pack_code !~');
+    }
+  });
+});

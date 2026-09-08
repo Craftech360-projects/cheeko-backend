@@ -7,6 +7,7 @@
  * Migrated from Supabase to Prisma ORM.
  */
 
+const { createHash } = require('crypto');
 const { Prisma } = require('@prisma/client');
 const { prisma } = require('../config/database');
 const { ApiError } = require('../middleware/errorHandler');
@@ -3918,6 +3919,60 @@ const appendOptionalContentItemFields = (row, normalized, columns) => {
   return row;
 };
 
+/**
+ * The freshness token the toy compares before it re-downloads a pack, and the
+ * signal that decides whether a save is a change at all.
+ *
+ * Every field the editor can alter is in it, because both things it drives are
+ * meant to answer "did anything move?" and any field left out is a change that
+ * silently reads as no change: the toy keeps its cached copy, and the version
+ * does not advance.
+ *
+ * item_number is in it because it is the only thing a reorder changes at all.
+ * story_number and story_title cover the same move at the group level. The text
+ * fields are in it because they have no object behind them — nothing else would
+ * differ when only a title or a voice script is corrected.
+ */
+const contentItemsHash = (rows = []) => createHash('sha256')
+  .update(rows.map((row) => [
+    row.item_number,
+    row.story_number ?? '',
+    row.story_title || '',
+    row.audio_url || '',
+    row.image_url || '',
+    row.title || '',
+    row.description || '',
+    row.lyrics_text || '',
+    row.content_text || ''
+  ].join('\u0000')).join('\u0001'))
+  .digest('hex');
+
+// The pack-level fields this editor can change. A rename or a new cover is a
+// change to the card as much as a new recording is — the toy's download
+// manifest carries all of them — so they count towards the version bump too.
+// Scalars only, and compared as strings: cached_audio_urls and content_md ride
+// along on every save as objects the client parsed and re-serialised, and
+// comparing those would read as an edit every time.
+const VERSIONED_PACK_FIELDS = [
+  'name', 'description', 'content_type', 'language', 'status', 'thumbnail_url', 'active'
+];
+
+const packHeaderChanged = (updateData, current) => VERSIONED_PACK_FIELDS
+  .filter((field) => updateData[field] !== undefined)
+  .some((field) => String(updateData[field] ?? '') !== String(current?.[field] ?? ''));
+
+/**
+ * The pack's next version: the stored one plus one.
+ *
+ * Stored versions are integers held as strings, but older rows carry dotted
+ * forms ("1.0.0", which versionsMatch already treats as equal to "1"), so the
+ * leading integer is what gets incremented. Anything unparseable starts at 1.
+ */
+const nextContentPackVersion = (version) => {
+  const current = parseInt(String(version ?? '').trim(), 10);
+  return String(Number.isFinite(current) && current > 0 ? current + 1 : 1);
+};
+
 const buildExistingContentItemMap = (items = []) => {
   const byId = new Map();
   const byItemNumber = new Map();
@@ -3939,7 +3994,26 @@ const buildExistingContentItemMap = (items = []) => {
  * @param {Object} params - Pagination and filter options
  * @returns {Promise<Object>} Paginated content pack list
  */
-const getContentPackPage = async ({ page = 1, limit = 10, packCode, name, contentType, language, active, scope } = {}) => {
+// What the grid's Sort box may order by, and the column each choice means. A
+// whitelist because the value is interpolated into the ORDER BY rather than
+// bound as a parameter — a column name cannot be a bind variable — so nothing
+// outside this map is ever allowed to reach the SQL.
+const CONTENT_PACK_SORT_COLUMNS = {
+  name: 'name',
+  packCode: 'pack_code',
+  contentType: 'content_type',
+  language: 'language',
+  createDate: 'create_date',
+  updateDate: 'update_date',
+  totalItems: 'total_items',
+  status: 'status',
+  version: 'version'
+};
+
+const getContentPackPage = async ({
+  page = 1, limit = 10, packCode, name, contentType, language, active, scope,
+  sortBy, sortDir
+} = {}) => {
   const offset = (page - 1) * limit;
 
   const filters = [];
@@ -3963,12 +4037,24 @@ const getContentPackPage = async ({ page = 1, limit = 10, packCode, name, conten
 
   const where = Prisma.sql`WHERE ${Prisma.join(filters, ' AND ')}`;
 
+  // Ordering has to happen here, next to LIMIT/OFFSET, because it decides which
+  // rows are on the page at all. It used to be a fixed `ORDER BY name ASC` and
+  // the dashboard sorted the page it got back, which reordered ten rows out of
+  // however many and left every other page exactly as name-ascending had left
+  // it — so any sort but "Name, A-Z" showed the wrong packs in a plausible
+  // order. NULLS LAST so packs missing the field sort to the bottom either way,
+  // matching how the grid's own comparator treats empties.
+  const sortColumn = CONTENT_PACK_SORT_COLUMNS[sortBy] || 'name';
+  const direction = String(sortDir).toLowerCase() === 'desc' ? 'DESC' : 'ASC';
+  // Both halves come from constants above, never from the request.
+  const orderBy = Prisma.raw(`ORDER BY ${sortColumn} ${direction} NULLS LAST, id ASC`);
+
   try {
     const [countRows, packs] = await Promise.all([
       prisma.$queryRaw`SELECT COUNT(*)::int AS count FROM rfid_content_pack ${where}`,
       prisma.$queryRaw`
         SELECT * FROM rfid_content_pack ${where}
-        ORDER BY name ASC
+        ${orderBy}
         LIMIT ${limit} OFFSET ${offset}
       `
     ]);
@@ -4128,7 +4214,10 @@ const createContentPack = async (data, userId) => {
     language: data.language || 'en',
     active: data.active !== false,
     cached_audio_urls: data.cachedAudioUrls || null,
-    version: data.version != null ? String(data.version) : null,
+    // A new pack starts at 1 and is advanced by one on every save that changes
+    // it. Left null, the dashboard's Version column showed nothing and the
+    // first edit would have had to invent a starting point.
+    version: data.version != null ? String(data.version) : '1',
     content_hash: data.contentHash || null,
     thumbnail_url: data.thumbnailUrl || data.thumbnail_url || null,
     status: data.status || null,
@@ -4223,6 +4312,18 @@ const updateContentPack = async (data, userId) => {
   }
   if (data.status !== undefined) updateData.status = data.status;
 
+  // The pack as it stands, read before anything is written to it: the version
+  // bump below asks whether this save changed anything, and once the header
+  // update has run the row already says yes-it-is-the-new-name. Only needed
+  // when an item write is coming and the caller has not named its own version.
+  const bumpsVersion = Array.isArray(data.items) && data.version === undefined;
+  const packBeforeWrite = bumpsVersion
+    ? await prisma.rfid_content_pack.findFirst({
+      where: { id: BigInt(data.id) },
+      select: { content_hash: true, ...Object.fromEntries(VERSIONED_PACK_FIELDS.map(f => [f, true])) }
+    })
+    : null;
+
   let updated;
   try {
     updated = await prisma.rfid_content_pack.updateMany({
@@ -4259,11 +4360,22 @@ const updateContentPack = async (data, userId) => {
     }
 
     const contentItemColumns = data.items.length > 0 ? await getContentItemColumns() : null;
+    // Matching a payload item to its stored row by item_number is only sound
+    // while item_number means the same row before and after the write. Once a
+    // caller can rearrange a pack it does not: item 3 in the payload may be the
+    // row that was item 1, and the fields this payload leaves undefined
+    // (duration, byte size, images_json, description) would be grafted on from
+    // whichever row used to hold that number. So position-matching is allowed
+    // only for payloads that carry no ids at all — the custom-card flow and the
+    // bulk importer, which send a complete item and never reorder. The moment
+    // any item names its id, identity is by id alone and an item without one is
+    // a new item that inherits nothing.
+    const payloadCarriesIds = data.items.some(item => item.id !== undefined && item.id !== null);
     const itemsData = data.items.map((item, index) => {
       const payloadItemNumber = getFirstDefined(item.itemNumber, item.item_number, item.sequence, index + 1);
       const existingItem = item.id !== undefined && item.id !== null
         ? existingItemMap.byId.get(String(item.id))
-        : existingItemMap.byItemNumber.get(Number(payloadItemNumber));
+        : (payloadCarriesIds ? null : existingItemMap.byItemNumber.get(Number(payloadItemNumber)));
       const normalized = normalizeContentPackItemPayload(item, index, existingItem);
 
       const row = {
@@ -4283,6 +4395,19 @@ const updateContentPack = async (data, userId) => {
       return appendOptionalContentItemFields(row, normalized, contentItemColumns);
     });
 
+    // The toy compares content_hash before it re-downloads a pack, and the
+    // dashboard's editor has no field for it — it round-tripped the value it
+    // read on open, so a reorder, an added item or a corrected title left the
+    // hash exactly as it was and the toy went on playing its cached copy.
+    // Derive it here from the rows actually written. A caller that computes its
+    // own still wins: the custom-card flow folds its version into the hash so
+    // that replacing the bytes behind an unchanged URL still registers.
+    const derivedHash = data.contentHash === undefined ? contentItemsHash(itemsData) : null;
+    const packUpdate = { total_items: itemsData.length };
+    if (derivedHash !== null) {
+      packUpdate.content_hash = derivedHash;
+    }
+
     // Delete-all-then-reinsert, in one transaction and with nothing swallowed.
     // Both halves used to be caught and logged, which meant a failed delete
     // answered 200 with the rows still there (the custom-card delete bug) and a
@@ -4290,6 +4415,32 @@ const updateContentPack = async (data, userId) => {
     // the pack exactly as it was, and the throw becomes a 500 the caller can
     // see.
     await prisma.$transaction(async (tx) => {
+      // The version advances by one per save that actually changed something —
+      // a moved card, a replaced recording, a deleted track, a rename. Nothing
+      // did this before: the dashboard's Version box was a plain number the
+      // admin had to type, so every pack sat at whatever it was first given.
+      //
+      // What changed is judged against the row as it stood at the top of this
+      // call, not against what the client sent — the client's copy is as old as
+      // the moment the dialog opened. The number to add one to is read here
+      // inside the transaction instead, so a concurrent save cannot hand this
+      // one a baseline it is about to overwrite.
+      //
+      // A caller that supplies its own version owns it and is left alone: the
+      // custom-card flow computes the next one itself and would otherwise be
+      // bumped twice for one write.
+      // Only the hash this call derived can speak for the items. When the caller
+      // brought its own the service cannot tell what moved, so it judges the
+      // header alone rather than guessing.
+      const itemsChanged = derivedHash !== null && packBeforeWrite?.content_hash !== derivedHash;
+      if (packBeforeWrite && (itemsChanged || packHeaderChanged(updateData, packBeforeWrite))) {
+        const current = await tx.rfid_content_pack.findFirst({
+          where: { id: BigInt(data.id) },
+          select: { version: true }
+        });
+        packUpdate.version = nextContentPackVersion(current?.version);
+      }
+
       await tx.content_item.deleteMany({
         where: { content_pack_id: BigInt(data.id) }
       });
@@ -4298,7 +4449,7 @@ const updateContentPack = async (data, userId) => {
       }
       await tx.rfid_content_pack.updateMany({
         where: { id: BigInt(data.id) },
-        data: { total_items: itemsData.length }
+        data: packUpdate
       });
     });
   }

@@ -140,6 +140,7 @@ export default {
             ],
             searchTimer: null,
             searchCode: "",
+            searchField: "searchCode", // global search deep-link target
             paramsList: [],
             currentPage: 1,
             loading: false,

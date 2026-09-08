@@ -192,6 +192,7 @@ export default {
                 sort: 0
             },
             search: '',
+            searchField: 'search', // global search deep-link target
             // Add pagination related data
             pageSizeOptions: [10, 20, 50, 100],
             currentPage: 1,

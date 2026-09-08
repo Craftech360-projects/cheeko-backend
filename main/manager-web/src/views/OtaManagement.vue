@@ -198,6 +198,7 @@ export default {
             ],
             searchTimer: null,
             searchName: "",
+            searchField: "searchName", // global search deep-link target
             loading: false,
             paramsList: [],
             firmwareList: [],
