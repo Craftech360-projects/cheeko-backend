@@ -177,6 +177,27 @@ export default {
                 });
             }).send();
     },
+    // Upload a character's conversation sprites. `files` is a FormData whose
+    // fields are named connect/listen/think/talk — any subset of the four.
+    //
+    // Deliberately NOT wrapped in reAjaxFun like its neighbours: every upload
+    // bumps art_version, so a silent retry of a request that actually succeeded
+    // would bump it twice and push a second needless download to every toy.
+    // A failure here surfaces to the caller instead.
+    uploadTemplateArt(templateId, files, callback, onError) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/agent/template/${templateId}/art`)
+            .method('POST')
+            .data(files)
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .networkFail((err) => {
+                console.error('Failed to upload character artwork:', err);
+                if (onError) onError(err);
+            }).send();
+    },
     // Delete agent template
     deleteAgentTemplate(templateId, callback) {
         RequestService.sendRequest()

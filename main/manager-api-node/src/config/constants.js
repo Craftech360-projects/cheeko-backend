@@ -72,8 +72,20 @@ const Pagination = {
 // Date format pattern (matching Java DateUtils.DATE_TIME_PATTERN)
 const DATE_TIME_PATTERN = 'yyyy-MM-dd HH:mm:ss';
 
+/**
+ * The four conversation states a character has artwork for, in the order the
+ * toy moves through them.
+ *
+ * Here rather than in upload.service because the upload route builds its
+ * multipart field list from it at module load, and upload.service is a common
+ * jest.mock target — a suite that stubs it without spreading requireActual
+ * would otherwise take the whole route file down with it.
+ */
+const CHARACTER_ART_STATES = ['connect', 'listen', 'think', 'talk'];
+
 module.exports = {
   ErrorCode,
   Pagination,
-  DATE_TIME_PATTERN
+  DATE_TIME_PATTERN,
+  CHARACTER_ART_STATES
 };

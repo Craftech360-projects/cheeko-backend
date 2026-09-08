@@ -472,6 +472,61 @@ async function uploadCustomCardImage(binBuffer, kidId, { reuseKey = null } = {})
 }
 
 /**
+ * The four conversation sprites of one character, at one version.
+ *
+ * Key layout — `chars/<sd_folder>/v<version>/<state>.bin`, matching the 44
+ * objects already serving the shipped characters. sd_folder is the same string
+ * the device uses as its SD directory name, so the CDN path and the card's path
+ * read the same when something goes wrong at 3am.
+ *
+ * A NEW VERSION IS A NEW PREFIX, never an overwrite. The toy keeps the folder
+ * across taps and only re-downloads when art_version changes, so replacing the
+ * bytes under v1 ships artwork no device would ever fetch. That also makes an
+ * upload non-destructive: the old version stays on the CDN, still serving every
+ * toy that has not yet seen the bump.
+ *
+ * Long cache, unlike the custom-card path above: these keys are immutable by
+ * construction, so there is nothing to revalidate and no invalidation to issue.
+ *
+ * @param {Buffer} binBuffer - LVGL RGB565A8 binary, from toLvglRgb565A8Bin
+ * @param {string} sdFolder - the character's SD directory name
+ * @param {number} version - art_version this upload belongs to
+ * @param {string} state - one of connect | listen | think | talk
+ * @returns {Promise<{s3Key: string, url: string}>}
+ */
+const { CHARACTER_ART_STATES } = require('../config/constants');
+const CHARACTER_ART_CACHE_CONTROL = 'public, max-age=31536000, immutable';
+
+async function uploadCharacterArt(binBuffer, sdFolder, version, state) {
+  // Both of these are path segments built from caller input. The DB check
+  // constraint enforces the same shape on sd_folder, but this function is also
+  // reachable from a script, and a `..` here would write outside the prefix.
+  if (!/^[a-z0-9]{1,8}$/.test(sdFolder || '')) {
+    throw new Error(`Invalid sd_folder "${sdFolder}": expected 1-8 lowercase letters or digits`);
+  }
+  if (!CHARACTER_ART_STATES.includes(state)) {
+    throw new Error(`Invalid character art state "${state}"`);
+  }
+  if (!Number.isInteger(version) || version < 1) {
+    throw new Error(`Invalid art version "${version}"`);
+  }
+
+  const s3Key = `chars/${sdFolder}/v${version}/${state}.bin`;
+
+  await s3Client.send(new PutObjectCommand({
+    Bucket: S3_BUCKET,
+    Key: s3Key,
+    Body: binBuffer,
+    ContentType: 'application/octet-stream',
+    CacheControl: CHARACTER_ART_CACHE_CONTROL
+  }));
+
+  const url = `${IMAGINE_PUBLIC_BASE}/${s3Key}`;
+  logger.info('Character art uploaded to S3', { s3Key, size: binBuffer.length });
+  return { s3Key, url };
+}
+
+/**
  * Delete a retired custom card object — a recording or a picture. Best-effort:
  * an orphaned object is preferable to failing a request whose DB write already
  * succeeded.
@@ -495,6 +550,7 @@ module.exports = {
   listImagineImagesForKid,
   uploadCustomCardAudio,
   uploadCustomCardImage,
+  uploadCharacterArt,
   customCardKeyFromUrl,
   invalidateCloudFront,
   deleteCustomCardObject,

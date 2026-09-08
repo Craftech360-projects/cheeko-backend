@@ -1,5 +1,5 @@
 /**
- * Reader for the LVGL v9 RGB565 `.bin` frames the toy's screen draws.
+ * Reader for the LVGL v9 `.bin` frames the toy's screen draws.
  *
  * Most content items store their artwork as one of these rather than a PNG,
  * because the firmware has no JPEG decoder and PNG would cost decode RAM — see
@@ -7,18 +7,25 @@
  *
  *   0  u8   0x19   magic, LVGL v9
  *   1  u8   0x12   LV_COLOR_FORMAT_RGB565
+ *          0x14   LV_COLOR_FORMAT_RGB565A8
  *   2  u16  flags
  *   4  u16  width
  *   6  u16  height
- *   8  u16  stride (bytes per row)
+ *   8  u16  stride (bytes per row of the COLOUR plane, both formats)
  *   10 u16  reserved
  *
- * A browser cannot put one in an <img>, so anything that wants to show device
- * artwork decodes it to a canvas through here.
+ * Two colour formats, because two kinds of picture. Content artwork fills the
+ * panel and is RGB565. A character's conversation sprite is drawn OVER the
+ * background, so it is RGB565A8: the same colour plane with a w*h byte alpha
+ * plane appended, which is what keeps a face from arriving as a rectangle.
+ *
+ * A browser cannot put either in an <img>, so anything that wants to show
+ * device artwork decodes it to a canvas through here.
  */
 
 export const LVGL_MAGIC = 0x19;
 export const LVGL_RGB565 = 0x12;
+export const LVGL_RGB565A8 = 0x14;
 export const LVGL_HEADER_BYTES = 12;
 
 /** True for a URL that points at a device frame rather than a web image. */
@@ -43,10 +50,16 @@ export function decodeLvglBin(arrayBuffer) {
   const stride = view.getUint16(8, true) || width * 2;
 
   if (magic !== LVGL_MAGIC) throw new Error(`Not an LVGL frame (magic 0x${magic.toString(16)})`);
-  if (colorFormat !== LVGL_RGB565) throw new Error(`Unsupported colour format 0x${colorFormat.toString(16)}`);
+  if (colorFormat !== LVGL_RGB565 && colorFormat !== LVGL_RGB565A8) {
+    throw new Error(`Unsupported colour format 0x${colorFormat.toString(16)}`);
+  }
   if (!width || !height) throw new Error('LVGL frame has no dimensions');
 
-  const needed = LVGL_HEADER_BYTES + stride * height;
+  // The alpha plane sits after the whole colour plane, one byte per pixel, and
+  // is indexed by pixel rather than by stride.
+  const hasAlpha = colorFormat === LVGL_RGB565A8;
+  const alphaOffset = LVGL_HEADER_BYTES + stride * height;
+  const needed = alphaOffset + (hasAlpha ? width * height : 0);
   if (arrayBuffer.byteLength < needed) {
     throw new Error(`LVGL frame is truncated: ${arrayBuffer.byteLength} of ${needed} bytes`);
   }
@@ -57,7 +70,8 @@ export function decodeLvglBin(arrayBuffer) {
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const src = LVGL_HEADER_BYTES + (y * stride) + (x * 2);
-      const dst = (y * width + x) * 4;
+      const pixel = (y * width) + x;
+      const dst = pixel * 4;
       const rgb565 = view.getUint16(src, true);
 
       const r = ((rgb565 >> 11) & 0x1f) << 3;
@@ -69,7 +83,7 @@ export function decodeLvglBin(arrayBuffer) {
       pixels[dst] = r | (r >> 5);
       pixels[dst + 1] = g | (g >> 6);
       pixels[dst + 2] = b | (b >> 5);
-      pixels[dst + 3] = 255;
+      pixels[dst + 3] = hasAlpha ? view.getUint8(alphaOffset + pixel) : 255;
     }
   }
 
