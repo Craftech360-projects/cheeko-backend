@@ -2543,6 +2543,27 @@ const updateTemplate = async (templateId, data) => {
   if (data.isVisible !== undefined) updateData.is_visible = data.isVisible;
   if (data.sort !== undefined) updateData.sort = data.sort;
 
+  // Character artwork. sd_folder is editable here because it has to be set
+  // BEFORE any sprite can be uploaded — it is the CDN prefix and the device's
+  // SD directory name, so uploadCharacterArt has nowhere to put a file without
+  // it. The four URLs are NOT editable here: they are written only by the
+  // artwork upload endpoint, which owns the all-four-or-nothing rule and the
+  // version bump. Letting them be set individually is how a character ends up
+  // with two of its four faces.
+  if (data.sdFolder !== undefined) {
+    const folder = toNullIfEmpty(data.sdFolder);
+    // Same shape the DB check constraint enforces, checked here so the error
+    // is a readable 400 rather than a Postgres constraint violation. A longer
+    // or upper-case name fails invisibly on the toy's FAT card — see the
+    // column comment in schema.prisma.
+    if (folder !== null && !/^[a-z0-9]{1,8}$/.test(folder)) {
+      const err = new Error('sd_folder must be 1-8 lowercase letters or digits');
+      err.statusCode = 400;
+      throw err;
+    }
+    updateData.sd_folder = folder;
+  }
+
   await prisma.ai_agent_template.update({
     where: { id: templateId },
     data: updateData,
@@ -2564,6 +2585,120 @@ const updateTemplate = async (templateId, data) => {
   }
 
   return null;
+};
+
+/**
+ * Replace some or all of a character's four conversation sprites.
+ *
+ * The device shows a different picture while connecting, listening, thinking and
+ * talking. Before this endpoint the six artwork columns had no write path at all
+ * — the shipped characters were populated by hand-written SQL against the
+ * database, which is why nothing but those eleven has ever had a face.
+ *
+ * PARTIAL UPLOADS ARE ALLOWED, A PARTIAL CHARACTER IS NOT. You may re-upload
+ * one state and leave the other three alone; what is refused is ending up with
+ * fewer than four URLs on the row. A half-populated character loses its face
+ * partway through talking, which a child reads as the toy crashing rather than
+ * as missing content — the RFID lookup and the firmware both drop an incomplete
+ * set for the same reason, and refusing it here is what stops it existing.
+ *
+ * EVERY UPLOAD BUMPS art_version, even a one-file one. The toy keeps the sprite
+ * folder across taps and only re-downloads when the version changes, so artwork
+ * saved without a bump is artwork no device would ever fetch. The states that
+ * were not re-uploaded keep pointing at their older version's objects, which
+ * stay on the CDN — the URLs are absolute, so a mixed-version set is fine and
+ * costs one upload instead of four.
+ *
+ * Not atomic across S3 and the database, deliberately: objects are written
+ * first and the row only after all of them land, so a failure part-way leaves
+ * unreferenced objects under the new prefix and a row still pointing entirely
+ * at the old one. Orphaned bytes are the cheap failure; a row referencing a
+ * key that was never written is the expensive one.
+ *
+ * @param {string} templateId
+ * @param {Object<string, Buffer>} files - state name -> uploaded image bytes,
+ *   any subset of connect | listen | think | talk
+ * @returns {Promise<Object>} the artwork state after the write
+ */
+const updateTemplateArt = async (templateId, files) => {
+  const uploadService = require('./upload.service');
+  const { toLvglRgb565A8Bin } = require('../utils/lvglImage');
+  const { CHARACTER_ART_STATES } = require('../config/constants');
+
+  const fail = (message, statusCode = 400) => {
+    const err = new Error(message);
+    err.statusCode = statusCode;
+    return err;
+  };
+
+  const states = Object.keys(files || {});
+  if (states.length === 0) throw fail('No artwork files were uploaded');
+  const unknown = states.filter((s) => !CHARACTER_ART_STATES.includes(s));
+  if (unknown.length) throw fail(`Unknown artwork state(s): ${unknown.join(', ')}`);
+
+  const template = await prisma.ai_agent_template.findUnique({
+    where: { id: templateId },
+    select: {
+      agent_name: true, sd_folder: true, art_version: true,
+      art_connect_url: true, art_listen_url: true, art_think_url: true, art_talk_url: true
+    }
+  });
+  if (!template) throw fail('Template not found', 404);
+
+  // sd_folder is the CDN prefix and the device's SD directory name both. There
+  // is nowhere to put a file without it, so this is a precondition rather than
+  // something to invent a default for.
+  if (!template.sd_folder) {
+    throw fail('Set the character\'s SD folder before uploading artwork');
+  }
+
+  const nextVersion = (template.art_version || 1) + 1;
+  const urlColumn = (state) => `art_${state}_url`;
+
+  // Convert everything before uploading anything: a picture ffmpeg cannot read
+  // should fail the request outright, not after three of its siblings are
+  // already on the CDN under a version the row will never reference.
+  const converted = {};
+  for (const state of states) {
+    converted[state] = await toLvglRgb565A8Bin(files[state]);
+  }
+
+  const updateData = { art_version: nextVersion, updated_at: new Date() };
+  for (const state of states) {
+    const { url } = await uploadService.uploadCharacterArt(
+      converted[state], template.sd_folder, nextVersion, state
+    );
+    updateData[urlColumn(state)] = url;
+  }
+
+  // The all-or-nothing check runs on the MERGED result — what the row will hold
+  // after this write, not what arrived in it.
+  const missing = CHARACTER_ART_STATES.filter(
+    (state) => !(updateData[urlColumn(state)] || template[urlColumn(state)])
+  );
+  if (missing.length) {
+    throw fail(
+      `A character needs all four sprites. Still missing: ${missing.join(', ')}. ` +
+      `The uploaded file(s) are on the CDN under v${nextVersion} and will be picked up ` +
+      'once the rest are supplied.'
+    );
+  }
+
+  await prisma.ai_agent_template.update({ where: { id: templateId }, data: updateData });
+
+  logger.info(
+    `[CHARACTER-ART] ${template.agent_name} (${template.sd_folder}) -> v${nextVersion}, ` +
+    `replaced: ${states.join(', ')}`
+  );
+
+  const after = await prisma.ai_agent_template.findUnique({
+    where: { id: templateId },
+    select: {
+      sd_folder: true, art_version: true,
+      art_connect_url: true, art_listen_url: true, art_think_url: true, art_talk_url: true
+    }
+  });
+  return transformKeysToCamel(after);
 };
 
 /**
@@ -3150,6 +3285,7 @@ module.exports = {
   getTemplateById,
   createTemplate,
   updateTemplate,
+  updateTemplateArt,
   deleteTemplate,
   applyTemplateToAgents,
   // MCP Access Point methods

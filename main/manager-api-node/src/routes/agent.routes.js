@@ -6,8 +6,10 @@
  */
 
 const express = require('express');
+const multer = require('multer');
 const router = express.Router();
 const agentService = require('../services/agent.service');
+const { CHARACTER_ART_STATES } = require('../config/constants');
 const {
   getWorkspaceFiles,
   saveWorkspaceFiles,
@@ -379,6 +381,66 @@ router.put('/template/:id',
     } catch (error) {
       badRequest(res, error.message);
     }
+  })
+);
+
+/**
+ * @swagger
+ * /agent/template/{id}/art:
+ *   post:
+ *     tags: [Agent]
+ *     summary: Upload a character's conversation sprites
+ *     description: >
+ *       Multipart upload of any subset of the four conversation-state pictures.
+ *       Each is converted to the LVGL RGB565A8 binary the toy's panel draws,
+ *       stored under chars/<sd_folder>/v<version>/, and the template's
+ *       art_version is bumped so devices re-download. The character's SD folder
+ *       must already be set, and the row must end up with all four sprites.
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               connect: { type: string, format: binary }
+ *               listen:  { type: string, format: binary }
+ *               think:   { type: string, format: binary }
+ *               talk:    { type: string, format: binary }
+ *     responses:
+ *       200:
+ *         description: Artwork stored; returns the sprite URLs and new version
+ *       400:
+ *         description: No files, unreadable picture, missing SD folder, or an incomplete set
+ */
+// One panel-sized PNG is well under this; the cap is here so a mistaken upload
+// of a camera original is refused at the edge rather than handed to ffmpeg.
+const artUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 8 * 1024 * 1024, files: 4 },
+  fileFilter: (req, file, cb) => {
+    // PNG is what a sprite should be — it is the only one of the formats ffmpeg
+    // will take here that carries the alpha channel the panel composites with.
+    if (file.mimetype === 'image/png') return cb(null, true);
+    cb(new Error(`${file.fieldname}: character sprites must be PNG (transparency is required)`));
+  }
+}).fields(CHARACTER_ART_STATES.map((name) => ({ name, maxCount: 1 })));
+
+router.post('/template/:id/art',
+  requireAuth,
+  // Wrap multer so a size/mime rejection is a deterministic 400 rather than an
+  // unhandled error, matching how imagine.routes.js handles the same case.
+  (req, res, next) => artUpload(req, res, (err) => (err ? badRequest(res, err.message) : next())),
+  asyncHandler(async (req, res) => {
+    const files = {};
+    for (const state of CHARACTER_ART_STATES) {
+      const file = req.files?.[state]?.[0];
+      if (file) files[state] = file.buffer;
+    }
+
+    const result = await agentService.updateTemplateArt(req.params.id, files);
+    success(res, result, 'Character artwork updated');
   })
 );
 
