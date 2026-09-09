@@ -56,6 +56,11 @@ test('streams the decrypted file for a sealed object', async () => {
   expect(res.body).toEqual(MP3);
 });
 
+test('sets X-Content-Type-Options: nosniff on the streamed response', async () => {
+  const res = await request(app).get('/admin/rfid/content-pack/preview').query({ url: `${CDN}/rfidcontent/audio/x.mp3`, packCode: 'STORY01' }).buffer().parse((r, cb) => { const c = []; r.on('data', (d) => c.push(d)); r.on('end', () => cb(null, Buffer.concat(c))); });
+  expect(res.headers['x-content-type-options']).toBe('nosniff');
+});
+
 test('runs requireAdmin for a successful preview request', async () => {
   await request(app).get('/admin/rfid/content-pack/preview').query({ url: `${CDN}/rfidcontent/audio/x.mp3`, packCode: 'STORY01' }).buffer().parse((r, cb) => { const c = []; r.on('data', (d) => c.push(d)); r.on('end', () => cb(null, Buffer.concat(c))); });
   expect(mockRequireAdmin).toHaveBeenCalledTimes(1);
@@ -66,10 +71,12 @@ test('calls fetch with redirect: manual', async () => {
   expect(global.fetch).toHaveBeenCalledWith(`${CDN}/rfidcontent/audio/x.mp3`, expect.objectContaining({ redirect: 'manual' }));
 });
 
-test('redirects to CloudFront for a legacy plaintext object', async () => {
-  const res = await request(app).get('/admin/rfid/content-pack/preview').query({ url: `${CDN}/rfidcontent/audio/plain.mp3`, packCode: 'STORY01' });
-  expect(res.status).toBe(302);
-  expect(res.headers.location).toBe(`${CDN}/rfidcontent/audio/plain.mp3`);
+test('returns 200 with the original bytes for a legacy plaintext object, not a redirect', async () => {
+  const res = await request(app).get('/admin/rfid/content-pack/preview').query({ url: `${CDN}/rfidcontent/audio/plain.mp3`, packCode: 'STORY01' }).buffer().parse((r, cb) => { const c = []; r.on('data', (d) => c.push(d)); r.on('end', () => cb(null, Buffer.concat(c))); });
+  expect(res.status).toBe(200);
+  expect(res.headers.location).toBeUndefined();
+  expect(res.headers['content-type']).toMatch(/audio\/mpeg/);
+  expect(res.body).toEqual(MP3);
 });
 
 test('refuses a URL off the CloudFront domain', async () => {

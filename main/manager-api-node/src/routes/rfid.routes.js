@@ -4027,13 +4027,54 @@ router.post('/content-pack/delete',
 const PREVIEW_MAX_BYTES = 50 * 1024 * 1024;
 
 /**
+ * @swagger
+ * /admin/rfid/content-pack/preview:
+ *   get:
+ *     tags: [RFID Content Pack]
+ *     summary: Decrypt-and-stream proxy for previewing a pack object in the dashboard
+ *     description: >
+ *       Fetches the object from the content CDN server-side, unseals it if it carries a
+ *       CKE1 header, and streams the resulting bytes back. A browser cannot fetch the CDN
+ *       object directly (no CORS headers) or decrypt it (no key), so both plaintext and
+ *       sealed objects are served through this route.
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: url
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Absolute https URL on the content CDN
+ *       - in: query
+ *         name: packCode
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Pack code, used to look up the pack's content key when the object is sealed
+ *     responses:
+ *       200:
+ *         description: File content (plaintext passthrough or decrypted bytes)
+ *         content:
+ *           application/octet-stream:
+ *             schema:
+ *               type: string
+ *               format: binary
+ *       400:
+ *         description: Invalid url/packCode, or the object is off the CDN or too large
+ *       404:
+ *         description: Upstream object not found, or no content key for this pack
+ */
+/**
  * Admin-only decrypt proxy for the dashboard's play button (spec §8). The
  * pack key is fetched and used server-side and only decrypted bytes go to
  * the browser. `url` is pinned to the content CDN by parsing it (not by
  * string-prefix matching) so a lookalike hostname, credentials embedded in
  * the URL, or an upstream redirect to another host can't be used to turn
- * this into an open proxy. Legacy plaintext objects (no CKE1 header) redirect
- * straight to the CDN url, so the dialog needs no special case for them.
+ * this into an open proxy. Legacy plaintext objects (no CKE1 header) are sent
+ * through as-is — a browser can't fetch them directly either, since the CDN
+ * sends no Access-Control-Allow-Origin header, so this route is the only path
+ * for both plaintext and sealed objects.
  *
  * Binary streaming response: the {code,msg,data} envelope does not apply
  * here, only to the 400/404 error paths.
@@ -4084,14 +4125,23 @@ router.get('/content-pack/preview',
 
     const bytes = Buffer.from(await upstream.arrayBuffer());
     const header = parseHeader(bytes);
-    if (!header) return res.redirect(parsed.href);
+    const contentType = parsed.pathname.toLowerCase().endsWith('.mp3') ? 'audio/mpeg' : 'application/octet-stream';
+
+    if (!header) {
+      // Legacy plaintext object: no key involved, send the bytes as fetched.
+      res.type(contentType);
+      res.set('Cache-Control', 'private, no-store');
+      res.set('X-Content-Type-Options', 'nosniff');
+      return res.send(bytes);
+    }
     if (header.version !== 2) return badRequest(res, 'unsupported content encryption version');
 
     const key = await contentKeys.getPackKey(packCode);
     if (!key) return notFound(res, 'No content key for this pack');
 
-    res.type(parsed.pathname.toLowerCase().endsWith('.mp3') ? 'audio/mpeg' : 'application/octet-stream');
+    res.type(contentType);
     res.set('Cache-Control', 'private, no-store');
+    res.set('X-Content-Type-Options', 'nosniff');
     pipeline(
       Readable.from([bytes.subarray(HEADER_BYTES)]),
       createUnsealStream(key, header.nonce),
