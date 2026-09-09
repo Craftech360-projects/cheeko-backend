@@ -22,7 +22,7 @@ Eight tools. Three are always registered; five need `ALLOW_WRITES=1`.
 | `admin_request` | GET no · others yes | Call **any** route under `/toy`. See [§6 safety](#6-safety-model) for what it refuses |
 | `create_content_pack` | yes | New pack row |
 | `update_content_pack` | yes | Change pack fields and/or **replace** its items |
-| `upload_pack_file` | yes | Local audio / image / `.bin` → CDN URL. PNG/JPEG auto-convert to the LVGL `.bin` the toy renders |
+| `upload_pack_file` | yes | Local audio / image / `.bin` → CDN URL. PNG/JPEG auto-convert to the LVGL `.bin` the toy renders. Pass `packCode` (except for a thumbnail) so the file is sealed under that pack's key when SD content encryption is on — omit it and the tool warns that the upload may have landed in plaintext |
 
 The first five are "curated" — typed inputs, good descriptions, the daily
 content job. The proxy trio reaches everything else (devices, agents,
@@ -35,8 +35,8 @@ analytics, users, stats…) without a hand-written tool per route.
 ```
 create_content_pack  { packCode: "STORY_JUNGLE_EN", name: "Jungle stories", contentType: "rfidcontent", language: "en" }
 list_content_packs   { packCode: "STORY_JUNGLE_EN" }               → id 71
-upload_pack_file     { path: "D:\\packs\\jungle\\01.mp3", category: "STORY_JUNGLE_EN" }   → url
-upload_pack_file     { path: "D:\\packs\\jungle\\01.png", category: "STORY_JUNGLE_EN" }   → url (.bin)
+upload_pack_file     { path: "D:\\packs\\jungle\\01.mp3", category: "STORY_JUNGLE_EN", packCode: "STORY_JUNGLE_EN" }   → url
+upload_pack_file     { path: "D:\\packs\\jungle\\01.png", category: "STORY_JUNGLE_EN", packCode: "STORY_JUNGLE_EN" }   → url (.bin)
 update_content_pack  { id: 71, items: [{ itemNumber: 1, title: "Tiger", audioUrl: "…01.mp3", imageUrl: "…01.bin" }] }
 get_content_pack     { packCode: "STORY_JUNGLE_EN" }               → verify
 ```
