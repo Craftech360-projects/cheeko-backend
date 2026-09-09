@@ -942,3 +942,20 @@ export default {
             }).send()
     }
 }
+
+/**
+ * Sealed pack audio cannot be handed to <audio> directly (spec §8). Fetch it
+ * through the admin-only decrypt proxy with the bearer token and play a blob.
+ * The caller revokes the returned URL when playback stops.
+ */
+export async function previewAudioObjectUrl(url, packCode) {
+    const stored = localStorage.getItem('token');
+    let token = stored;
+    try { token = JSON.parse(stored).token || stored; } catch (e) { /* plain token */ }
+    const q = `url=${encodeURIComponent(url)}&packCode=${encodeURIComponent(packCode || '')}`;
+    const res = await fetch(`${getServiceUrl()}/admin/rfid/content-pack/preview?${q}`, {
+        headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) throw new Error(`preview ${res.status}`);
+    return URL.createObjectURL(await res.blob());
+}

@@ -322,6 +322,7 @@
 import dialogDismiss from '@/mixins/dialogDismiss';
 import Api from "@/apis/api";
 import { pairMediaFiles, fileName } from "@/utils/pairMediaFiles.mjs";
+import { previewAudioObjectUrl } from "@/apis/module/rfid";
 import {
   DEFAULT_CONTENT_TYPES,
   contentTypeLabel,
@@ -365,6 +366,7 @@ export default {
       dialogKey: Date.now(),
       saving: false,
       currentAudio: null,
+      currentObjectUrl: null,
       playingUrl: null,
       storyMode: false,
       stories: [],  // [{title: '', items: [{title, audioUrl, imageUrl, text}]}]
@@ -633,6 +635,9 @@ export default {
       formData.append('file', file);
       formData.append('contentType', 'rfidcontent');
       formData.append('category', category);
+      if (this.form.packCode) {
+        formData.append('packCode', this.form.packCode);
+      }
       if (contentPackId) {
         formData.append('contentPackId', contentPackId);
       }
@@ -659,6 +664,32 @@ export default {
       }
       return result.data.url;
     },
+    // Item files upload to S3 as soon as they're picked, before the dialog's
+    // Save button is pressed. For a brand-new pack that means no row exists
+    // yet to hang an encryption key on, so create it early.
+    async ensurePackId() {
+      if (this.form.id) return this.form.id;
+      const created = await new Promise((resolve, reject) => {
+        Api.rfid.addContentPack({
+          packCode: this.form.packCode,
+          name: this.form.name,
+          description: this.form.description,
+          contentType: this.normalizeContentType(this.form.contentType),
+          language: this.form.language,
+          status: this.form.status,
+          version: this.form.version,
+          active: this.form.active
+        }, ({ data }) => {
+          if (data && data.code === 0 && data.data && data.data.id) {
+            resolve(data.data.id);
+          } else {
+            reject(new Error((data && data.msg) || 'Enter a Pack Code and Name before uploading files.'));
+          }
+        });
+      });
+      this.form.id = created;
+      return created;
+    },
     async uploadFileToS3(file, type) {
       if (!this.pendingUpload) {
         this.$message.error('No target item selected for upload.');
@@ -675,6 +706,9 @@ export default {
 
       this.uploadingMedia = true;
       try {
+        if (!isPackThumbnail && !this.form.id) {
+          await this.ensurePackId();
+        }
         targetItem[this.pendingUpload.field] = await this.uploadOne(
           file,
           type === 'audio' ? 'audio' : 'images',
@@ -717,6 +751,15 @@ export default {
       pairs = pairs.slice(0, room);
 
       if (!(await this.confirmPairs(pairs, skipped, fileByPath))) return;
+
+      if (!this.form.id) {
+        try {
+          await this.ensurePackId();
+        } catch (error) {
+          this.$message.error(`Import failed: ${error.message}`);
+          return;
+        }
+      }
 
       // One item per pair; each file uploads into its own field.
       const newItems = pairs.map(p => ({ sequence: 0, title: p.title, audioUrl: '', imageUrl: '', text: '' }));
@@ -829,9 +872,9 @@ export default {
       );
       await Promise.all(runners);
     },
-    toggleAudio(url) {
+    async toggleAudio(url) {
       if (!url) return;
-      
+
       if (this.playingUrl === url) {
         // Pause current
         if (this.currentAudio) {
@@ -841,24 +884,29 @@ export default {
       } else {
         // Stop previous
         this.stopAudio();
-        
-        // Play new
-        this.currentAudio = new Audio(url);
-        this.currentAudio.onended = () => {
-          this.playingUrl = null;
-        };
-        this.currentAudio.play().catch(err => {
-          console.error('Audio playback failed', err);
+
+        try {
+          const objectUrl = await previewAudioObjectUrl(url, this.form.packCode);
+          this.currentObjectUrl = objectUrl;
+          this.currentAudio = new Audio(objectUrl);
+          this.currentAudio.onended = () => { this.playingUrl = null; };
+          await this.currentAudio.play();
+          this.playingUrl = url;
+        } catch (err) {
+          console.error('Audio preview failed', err);
           this.$message.error('Could not play audio');
           this.playingUrl = null;
-        });
-        this.playingUrl = url;
+        }
       }
     },
     stopAudio() {
         if (this.currentAudio) {
             this.currentAudio.pause();
             this.currentAudio = null;
+        }
+        if (this.currentObjectUrl) {
+            URL.revokeObjectURL(this.currentObjectUrl);
+            this.currentObjectUrl = null;
         }
         this.playingUrl = null;
     },

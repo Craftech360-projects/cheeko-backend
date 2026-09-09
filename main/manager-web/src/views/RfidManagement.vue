@@ -1194,6 +1194,7 @@ import RfidPackDialog from "@/components/RfidPackDialog.vue";
 import RfidCardDialog from "@/components/RfidCardDialog.vue";
 import RfidContentPackDialog from "@/components/RfidContentPackDialog.vue";
 import RfidSeriesDialog from "@/components/RfidSeriesDialog.vue";
+import { previewAudioObjectUrl } from "@/apis/module/rfid";
 import { contentTypeLabel, customContentTypes } from "@/utils/contentTypes";
 import { isBinUrl, loadLvglBinAsDataUrl } from "@/utils/lvglBin";
 
@@ -1765,25 +1766,33 @@ export default {
         // Broken pack thumbnail → fall back to the placeholder icon
         // Preview-only playback for the Lookup & Test result. One element, so a
         // second play always replaces the first rather than stacking.
-        togglePreviewAudio(url) {
+        async togglePreviewAudio(url) {
             if (this.playingUrl === url) {
                 this.stopPreviewAudio();
                 return;
             }
             this.stopPreviewAudio();
-            this._previewAudio = new Audio(url);
-            this._previewAudio.addEventListener('ended', () => { this.playingUrl = null; });
-            this._previewAudio.play().catch(() => {
+            try {
+                const packCode = (this.consoleLookupResult && this.consoleLookupResult.data && this.consoleLookupResult.data.packCode) || '';
+                this._previewObjectUrl = await previewAudioObjectUrl(url, packCode);
+                this._previewAudio = new Audio(this._previewObjectUrl);
+                this._previewAudio.addEventListener('ended', () => { this.playingUrl = null; });
+                await this._previewAudio.play();
+                this.playingUrl = url;
+            } catch (e) {
                 this.$message.error('Could not play this audio');
                 this.playingUrl = null;
-            });
-            this.playingUrl = url;
+            }
         },
 
         stopPreviewAudio() {
             if (this._previewAudio) {
                 this._previewAudio.pause();
                 this._previewAudio = null;
+            }
+            if (this._previewObjectUrl) {
+                URL.revokeObjectURL(this._previewObjectUrl);
+                this._previewObjectUrl = null;
             }
             this.playingUrl = null;
         },
