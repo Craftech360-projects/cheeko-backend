@@ -1542,6 +1542,7 @@ export default {
                     audioUrl: item.audioUrl,
                     imageUrl: item.imageUrl,
                     imageKind: imageKind(item.imageUrl),
+                    packCode: data.packCode,
                     story: null
                 });
             });
@@ -1556,6 +1557,7 @@ export default {
                         audioUrl: audio.url,
                         imageUrl: image ? image.url : null,
                         imageKind: imageKind(image ? image.url : null),
+                        packCode: data.packCode,
                         story: `Story ${story.index || sIndex + 1}`
                     });
                 });
@@ -1687,7 +1689,7 @@ export default {
       // Mark it in flight so the getter does not queue the same URL again on
       // every re-render.
       this.$set(this.decodedThumbs, track.imageUrl, null);
-      loadLvglBinAsDataUrl(track.imageUrl).then(dataUrl => {
+      loadLvglBinAsDataUrl(track.imageUrl, track.packCode).then(dataUrl => {
         if (dataUrl) this.$set(this.decodedThumbs, track.imageUrl, dataUrl);
         else this.$set(this.failedThumbs, track.key, true);
       });
