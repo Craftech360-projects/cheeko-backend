@@ -20,7 +20,6 @@ const { createHash } = require('crypto');
 const { prisma } = require('../config/database');
 const uploadService = require('./upload.service');
 const rfidService = require('./rfid.service');
-const contentKeys = require('./contentKeys.service');
 const { packCodeForKid } = require('../utils/helpers');
 const { toLvglRgb565Bin, toDeviceFrame, RAW_FRAME_BYTES, LVGL_FRAME_BYTES } = require('../utils/lvglImage');
 const { toDeviceMp3, TARGET_EXT: AUDIO_EXT, TARGET_MIME: AUDIO_MIME } = require('../utils/audioTranscode');
@@ -389,13 +388,23 @@ const uploadDeviceImage = async (bin, kidId, sealKey = null) => {
 };
 
 /**
- * The pack's content key, or null when encryption is off or the pack has none
- * yet. A missing key is not an error — every upload call degrades to plaintext
- * when sealKey is null, which is required behaviour, not a fallback of last
- * resort (spec §6).
+ * Custom-card content is deliberately NOT sealed, even though this pack has a
+ * content key like any other (spec §6 covers this path too). Always resolves
+ * to null so every uploadCustomCardAudio / uploadCustomCardImage call below
+ * degrades to its plaintext path.
+ *
+ * Why: GET /api/mobile/kids/:kidId/custom-card (mobile.routes.js) hands
+ * fileUrl straight to the parent's shipped Flutter app, which has no key and
+ * no decrypt proxy — a sealed URL would play as noise for every new parent
+ * recording the moment the flag is on. The toy is the only consumer that
+ * needs sealing here, and it has no firmware for this content path yet, so
+ * sealing buys nothing today and costs a real regression. Re-enable this
+ * (call contentKeys.getOrCreatePackKey(pack.pack_code) again) once both the
+ * parent app and the firmware can decrypt custom-card content. Do not re-add
+ * it just because the sealKey parameter is sitting right there on the upload
+ * functions below — it stays wired for that reason.
  */
-const resolvePackSealKey = async (pack) =>
-  (contentKeys.isEnabled() ? contentKeys.getOrCreatePackKey(pack.pack_code) : null);
+const resolvePackSealKey = async (_pack) => null;
 
 /**
  * Pair the multipart parts of an add request.
