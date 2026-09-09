@@ -22,25 +22,62 @@ describe('contentKeys.service', () => {
     const svc = require('../../src/services/contentKeys.service');
     expect(svc.isEnabled()).toBe(false);
     expect(await svc.getOrCreatePackKey('STORY01')).toBeNull();
+    expect(await svc.getPackKey('STORY01')).toBeNull();
     expect(await svc.getDeviceSecret('AA:BB:CC:DD:EE:FF')).toBeNull();
+    await svc.registerDeviceSecret('AA:BB:CC:DD:EE:FF', crypto.randomBytes(32).toString('hex'));
     expect(mockPrisma.rfid_content_pack.findFirst).not.toHaveBeenCalled();
+    expect(mockPrisma.rfid_content_pack.updateMany).not.toHaveBeenCalled();
+    expect(mockPrisma.ai_device.findFirst).not.toHaveBeenCalled();
+    expect(mockPrisma.ai_device.updateMany).not.toHaveBeenCalled();
   });
 
   test('getOrCreatePackKey creates a 16-byte key once and returns the same key after', async () => {
     const svc = require('../../src/services/contentKeys.service');
     const cc = require('../../src/utils/contentCrypto');
     let stored = null;
+    let capturedArgs = null;
     mockPrisma.rfid_content_pack.findFirst.mockImplementation(async () => ({ id: 7n, content_key: stored }));
-    mockPrisma.rfid_content_pack.updateMany.mockImplementation(async ({ data }) => { stored = data.content_key; return { count: 1 }; });
+    mockPrisma.rfid_content_pack.updateMany.mockImplementation(async (args) => {
+      capturedArgs = args;
+      stored = args.data.content_key;
+      return { count: 1 };
+    });
 
     const k1 = await svc.getOrCreatePackKey('STORY01');
     expect(k1.length).toBe(16);
     expect(mockPrisma.rfid_content_pack.updateMany).toHaveBeenCalledTimes(1);
     expect(cc.decryptAtRest(stored, Buffer.from(MASTER, 'hex'))).toEqual(k1);
+    // Compare-and-swap guard: the update must only apply while the row is still keyless.
+    expect(capturedArgs.where).toMatchObject({ id: 7n, content_key: null });
 
     const k2 = await svc.getOrCreatePackKey('STORY01');
     expect(k2).toEqual(k1);
     expect(mockPrisma.rfid_content_pack.updateMany).toHaveBeenCalledTimes(1);
+  });
+
+  test('getOrCreatePackKey returns the winner\'s key when it loses the CAS race', async () => {
+    const svc = require('../../src/services/contentKeys.service');
+    const cc = require('../../src/utils/contentCrypto');
+    const mk = Buffer.from(MASTER, 'hex');
+    const winnerKey = crypto.randomBytes(16);
+    const winnerEncrypted = cc.encryptAtRest(winnerKey, mk);
+
+    // First read: no key yet, so we'll try to create one. Second read (after
+    // losing the CAS): another caller's key is already in place.
+    mockPrisma.rfid_content_pack.findFirst
+      .mockResolvedValueOnce({ id: 9n, content_key: null })
+      .mockResolvedValueOnce({ content_key: winnerEncrypted });
+    // Postgres reports 0 rows matched when the `content_key: null` guard fails
+    // because someone else's write landed first.
+    let capturedWhere = null;
+    mockPrisma.rfid_content_pack.updateMany.mockImplementation(async (args) => {
+      capturedWhere = args.where;
+      return { count: 0 };
+    });
+
+    const result = await svc.getOrCreatePackKey('STORY01');
+    expect(capturedWhere).toMatchObject({ id: 9n, content_key: null });
+    expect(result).toEqual(winnerKey);
   });
 
   test('getOrCreatePackKey returns null for an unknown pack code', async () => {
