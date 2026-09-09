@@ -115,7 +115,7 @@ router.post('/',
         'client-id': req.headers['client-id'],
         'content-type': req.headers['content-type']
       },
-      body: req.body
+      body: { ...req.body, content_secret: req.body.content_secret ? '[REDACTED]' : undefined }
     }, null, 2));
 
     // Spring Boot compatibility: MAC comes from Device-Id header, not body
