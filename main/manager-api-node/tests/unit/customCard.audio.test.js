@@ -162,6 +162,24 @@ describe('the bytes that reach S3', () => {
     expect(mockUpload.uploadCustomCardAudio).not.toHaveBeenCalled();
     expect(mockRfid.updateContentPack).not.toHaveBeenCalled();
   });
+
+  test('custom card audio is uploaded with the pack key as sealKey when encryption is on', async () => {
+    const contentKeys = require('../../src/services/contentKeys.service');
+    const K = Buffer.alloc(16, 9);
+    const isEnabledSpy = jest.spyOn(contentKeys, 'isEnabled').mockReturnValue(true);
+    const getOrCreatePackKeySpy = jest.spyOn(contentKeys, 'getOrCreatePackKey').mockResolvedValue(K);
+
+    try {
+      await customCardService.addCustomCardContent(USER_ID, KID_ID, [mp3Upload()], {});
+
+      const opts = audioCall()[4];
+      expect(opts.sealKey).toEqual(K);
+      expect(contentKeys.getOrCreatePackKey).toHaveBeenCalledWith(PACK.pack_code);
+    } finally {
+      isEnabledSpy.mockRestore();
+      getOrCreatePackKeySpy.mockRestore();
+    }
+  });
 });
 
 // ── what reaches the database ───────────────────────────────────────────────

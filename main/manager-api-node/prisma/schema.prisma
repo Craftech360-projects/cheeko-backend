@@ -101,6 +101,7 @@ model ai_agent_template {
   art_listen_url     String?
   art_think_url      String?
   art_talk_url       String?
+  art_content_key    Bytes?
 }
 
 model ai_device {

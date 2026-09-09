@@ -2634,6 +2634,7 @@ const updateTemplate = async (templateId, data) => {
  */
 const updateTemplateArt = async (templateId, files) => {
   const uploadService = require('./upload.service');
+  const contentKeys = require('./contentKeys.service');
   const { toLvglRgb565A8Bin } = require('../utils/lvglImage');
   const { CHARACTER_ART_STATES } = require('../config/constants');
 
@@ -2675,10 +2676,17 @@ const updateTemplateArt = async (templateId, files) => {
     converted[state] = await toLvglRgb565A8Bin(files[state]);
   }
 
+  // Missing or disabled degrades to a plaintext upload (spec §6) — never an
+  // exception, since a character losing its face is worse than it being
+  // unencrypted.
+  const sealKey = contentKeys.isEnabled()
+    ? await contentKeys.getOrCreateCharacterKey(template.sd_folder)
+    : null;
+
   const updateData = { art_version: nextVersion, updated_at: new Date() };
   for (const state of states) {
     const { url } = await uploadService.uploadCharacterArt(
-      converted[state], template.sd_folder, nextVersion, state
+      converted[state], template.sd_folder, nextVersion, state, { sealKey }
     );
     updateData[urlColumn(state)] = url;
   }

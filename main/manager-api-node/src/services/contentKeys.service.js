@@ -50,6 +50,37 @@ const getOrCreatePackKey = async (packCode) => {
   return cc.decryptAtRest(Buffer.from(again.content_key), mk);
 };
 
+const getCharacterKey = async (sdFolder) => {
+  const mk = masterKey();
+  if (!mk || !sdFolder) return null;
+  const row = await prisma.ai_agent_template.findFirst({
+    where: { sd_folder: sdFolder },
+    select: { id: true, art_content_key: true },
+  });
+  if (!row || !row.art_content_key) return null;
+  return cc.decryptAtRest(Buffer.from(row.art_content_key), mk);
+};
+
+const getOrCreateCharacterKey = async (sdFolder) => {
+  const mk = masterKey();
+  if (!mk || !sdFolder) return null;
+  const row = await prisma.ai_agent_template.findFirst({
+    where: { sd_folder: sdFolder },
+    select: { id: true, art_content_key: true },
+  });
+  if (!row) return null;
+  if (row.art_content_key) return cc.decryptAtRest(Buffer.from(row.art_content_key), mk);
+
+  const key = crypto.randomBytes(16);
+  await prisma.ai_agent_template.updateMany({
+    where: { id: row.id, art_content_key: null },   // never overwrite a key that landed first
+    data: { art_content_key: cc.encryptAtRest(key, mk) },
+  });
+  // Re-read: if a concurrent upload won the race, use its key, not ours.
+  const again = await prisma.ai_agent_template.findFirst({ where: { id: row.id }, select: { art_content_key: true } });
+  return cc.decryptAtRest(Buffer.from(again.art_content_key), mk);
+};
+
 const registerDeviceSecret = async (mac, secretHex) => {
   const mk = masterKey();
   if (!mk) return;
@@ -75,4 +106,12 @@ const getDeviceSecret = async (mac) => {
   return cc.decryptAtRest(Buffer.from(row.content_secret), mk);
 };
 
-module.exports = { isEnabled, getPackKey, getOrCreatePackKey, registerDeviceSecret, getDeviceSecret };
+module.exports = {
+  isEnabled,
+  getPackKey,
+  getOrCreatePackKey,
+  getCharacterKey,
+  getOrCreateCharacterKey,
+  registerDeviceSecret,
+  getDeviceSecret,
+};
