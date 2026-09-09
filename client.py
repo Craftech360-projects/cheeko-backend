@@ -15,6 +15,7 @@ from typing import Dict, Optional, Tuple
 import requests
 import paho.mqtt.client as mqtt_client
 from client_storage import DeviceStore
+import client_crypto
 from paho.mqtt.enums import CallbackAPIVersion
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
@@ -168,6 +169,10 @@ class TestClient:
         # Persona requested in the hello (firmware GetSelectedCharacterId mimic).
         self.character_id = None
 
+        # Whether on_mqtt_message auto-downloads a card_content payload to the
+        # SD mimic. Off by default; enabled via --download-pack.
+        self.auto_download_packs = False
+
         logger.info(
             f"Client initialized with unique MAC: {self.device_mac_formatted}")
 
@@ -272,10 +277,80 @@ class TestClient:
                 except Empty:
                     pass
 
+            elif payload.get("type") == "card_content" and self.auto_download_packs:
+                try:
+                    self.download_card_content(payload)
+                except Exception as exc:
+                    logger.error("[PACK] download failed: %s", exc)
+                mqtt_message_queue.put(payload)
+
             else:
                 mqtt_message_queue.put(payload)
         except (json.JSONDecodeError, Exception) as e:
             logger.error(f"Error processing MQTT message: {e}")
+
+    def download_card_content(self, card_content: Dict) -> Dict:
+        """Mimic ContentManager::HandleServerResponse for a card_content payload.
+
+        Files are stored EXACTLY as the CDN serves them — sealed stays sealed.
+        Decryption happens at playback (see play_skill), which is what the toy
+        does and what keeps a copied card useless.
+        """
+        skill_id = (card_content.get("skill_id") or "").lower()
+        if not skill_id:
+            raise ValueError("card_content has no skill_id")
+        skill_dir = self.store.skill_dir(skill_id)
+
+        enc = card_content.get("encryption") or None
+        if enc and not (enc.get("v") == 2 and len(enc.get("key", "")) == 32
+                        and len(enc.get("nonce", "")) == 16):
+            logger.warning("[PACK] encryption block malformed; treating pack as plaintext")
+            enc = None
+
+        written = []
+
+        def fetch(url, dest):
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            resp = requests.get(url, timeout=60)
+            resp.raise_for_status()
+            with open(dest, "wb") as fh:
+                fh.write(resp.content)
+            written.append(dest)
+            state = "sealed" if client_crypto.parse_header(resp.content) else "plaintext"
+            logger.info("[PACK] %s -> %s (%d bytes, %s)", url, dest, len(resp.content), state)
+
+        stories = card_content.get("stories") or []
+        if stories:
+            for story in stories:
+                group = os.path.join(skill_dir, "s%02d" % int(story.get("index", 1)))
+                for item in story.get("audio", []):
+                    fetch(item["url"], os.path.join(group, "audio", "%02d.mp3" % int(item["index"])))
+                for item in story.get("images", []):
+                    fetch(item["url"], os.path.join(group, "images", "%02d.bin" % int(item["index"])))
+        else:
+            for item in card_content.get("audio", []):
+                fetch(item["url"], os.path.join(skill_dir, "audio", "%02d.mp3" % int(item["index"])))
+            for item in card_content.get("images", []):
+                fetch(item["url"], os.path.join(skill_dir, "images", "%02d.bin" % int(item["index"])))
+
+        # manifest.jsn LAST — it is the completion marker, same as the firmware.
+        manifest = {
+            "skill_id": skill_id,
+            "skill_name": card_content.get("skill_name") or skill_id,
+            "version": card_content.get("version") or 1,
+            "content_hash": card_content.get("latest_content_hash") or "",
+            "content_type": card_content.get("content_type") or "",
+        }
+        if enc:
+            # The WRAPPED key. Unwrapping needs the NVS secret, so this file on
+            # its own gets an attacker nothing.
+            manifest["enc"] = {"v": 2, "key": enc["key"], "nonce": enc["nonce"]}
+        with open(os.path.join(skill_dir, "manifest.jsn"), "w", encoding="utf-8") as fh:
+            json.dump(manifest, fh, indent=2)
+
+        logger.info("[PACK] skill '%s' ready: %d files, %s", skill_id, len(written),
+                    "sealed" if enc else "plaintext")
+        return {"skill_id": skill_id, "files": written, "sealed": bool(enc)}
 
     def publish_device_message(self, payload: Dict) -> None:
         """Publish a raw device message to the gateway."""
@@ -1213,8 +1288,10 @@ class TestClient:
         request_download: bool = False,
         download_current_version: Optional[str] = None,
         analytics_token: Optional[str] = None,
+        download_pack: bool = False,
     ):
         """Run a focused RFID tap/version test against local services."""
+        self.auto_download_packs = download_pack
         self.setup_local_test_config()
         if not self.connect_mqtt():
             return
@@ -1380,6 +1457,12 @@ if __name__ == "__main__":
     parser.add_argument("--download-current-version", default=os.getenv("TEST_DOWNLOAD_CURRENT_VERSION"))
     parser.add_argument("--analytics-token", default=os.getenv("TEST_MANAGER_API_TOKEN"))
     parser.add_argument(
+        "--download-pack",
+        action="store_true",
+        help="rfid mode: auto-download a card_content payload to the SD mimic, "
+             "keeping any pack key wrapped on disk.",
+    )
+    parser.add_argument(
         "--register-secret",
         action="store_true",
         help="Register this client's content secret with the server before the test. "
@@ -1423,6 +1506,7 @@ if __name__ == "__main__":
                 request_download=args.request_download,
                 download_current_version=args.download_current_version,
                 analytics_token=args.analytics_token,
+                download_pack=args.download_pack,
             )
     except KeyboardInterrupt:
         logger.info("Manual interruption detected. Cleaning up...")
