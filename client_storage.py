@@ -89,6 +89,25 @@ class DeviceStore:
         with open(self._fingerprint_path(), "w", encoding="utf-8") as fh:
             fh.write(fingerprint)
 
+    def _pending_path(self) -> str:
+        return os.path.join(self.sd_root(), "secret.pending")
+
+    def registration_pending(self) -> bool:
+        """True if a rotation was detected whose new secret has not yet been
+        confirmed registered with the server. Persisted on the SD mimic (not
+        just in memory) so a reboot between the rotation and the successful
+        registration does not lose track of it."""
+        return os.path.exists(self._pending_path())
+
+    def mark_registration_complete(self) -> None:
+        """Call only after the server has confirmed the new secret. Clearing
+        this on anything less (e.g. just attempting a download) would let a
+        pack silently get wrapped under the secret the server still holds."""
+        try:
+            os.remove(self._pending_path())
+        except FileNotFoundError:
+            pass
+
     def reconcile_secret(self) -> bool:
         """Detect that NVS was erased (secret regenerated) since the SD mimic
         was last written, and if so wipe downloaded content so the next tap
@@ -112,6 +131,12 @@ class DeviceStore:
         shutil.rmtree(skills_dir, ignore_errors=True)
         os.makedirs(skills_dir, exist_ok=True)
         self._write_fingerprint(current)
+        # The server still holds the OLD secret until told otherwise, so the
+        # next download would come back wrapped under it -- undecryptable by
+        # this device's new secret. Mark that pending until a registration
+        # actually succeeds; see registration_pending()/mark_registration_complete().
+        with open(self._pending_path(), "w", encoding="utf-8") as fh:
+            fh.write(current)
         logger.warning(
             "[SECRET] device secret changed (fingerprint %s -> %s) -- NVS was "
             "likely erased. Wiped %s; every wrapped pack key on the card was "

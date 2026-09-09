@@ -302,6 +302,32 @@ class TestClient:
         except (json.JSONDecodeError, Exception) as e:
             logger.error(f"Error processing MQTT message: {e}")
 
+    def _ensure_secret_registered(self, context: str) -> bool:
+        """If reconcile_secret() flagged a rotation whose new secret the
+        server hasn't confirmed yet, register it now via the existing OTA
+        call (register_content_secret).
+
+        The server wraps every pack key under whatever secret it currently
+        holds for this MAC, so proceeding while a registration is pending
+        would hand back a pack wrapped under the OLD secret -- exactly the
+        bug this closes. Returns False if a pending registration exists and
+        could not be resolved; callers must not download in that case.
+        """
+        if not self.store.registration_pending():
+            return True
+        logger.warning(
+            "[SECRET] %s: secret was rotated and is not yet registered with "
+            "the server -- registering it now before proceeding.", context)
+        if self.register_content_secret():
+            self.store.mark_registration_complete()
+            return True
+        logger.error(
+            "[SECRET] %s: registration failed -- the server still holds the "
+            "OLD secret, so anything it wraps right now would be "
+            "undecryptable by this device. Not downloading; retry once the "
+            "server is reachable.", context)
+        return False
+
     def download_card_content(self, card_content: Dict) -> Dict:
         """Mimic ContentManager::HandleServerResponse for a card_content payload.
 
@@ -313,6 +339,10 @@ class TestClient:
         skill_id = (card_content.get("skill_id") or "").lower()
         if not skill_id:
             raise ValueError("card_content has no skill_id")
+
+        if not self._ensure_secret_registered("skill '%s' download" % skill_id):
+            return {"skill_id": skill_id, "files": [], "sealed": False, "skipped": True}
+
         skill_dir = self.store.skill_dir(skill_id)
 
         enc = card_content.get("encryption") or None
@@ -470,8 +500,22 @@ class TestClient:
                 logger.info("[PLAY] %s OK (%d bytes)", path, len(data))
                 played += 1
 
+        if key is None:
+            key_status = "none (plaintext, no key needed)"
+        elif failed == 0:
+            key_status = "unwrapped, content decoded"
+        elif played == 0:
+            key_status = (
+                "unwrapped but EVERY file failed to decode -- this usually means "
+                "the server wrapped this pack under a DIFFERENT secret than the "
+                "one this device now holds (a rotation whose new secret was never "
+                "registered with the server). Register the secret and re-download."
+            )
+        else:
+            key_status = "unwrapped, %d of %d file(s) failed to decode" % (failed, played + failed)
+
         logger.info("[PLAY] skill '%s': %d played, %d failed, key=%s",
-                    skill_id, played, failed, "unwrapped" if key else "none (plaintext)")
+                    skill_id, played, failed, key_status)
         return {"played": played, "failed": failed}
 
     def publish_device_message(self, payload: Dict) -> None:
@@ -1416,6 +1460,17 @@ class TestClient:
         """Run a focused RFID tap/version test against local services."""
         self.auto_download_packs = download_pack
         self.setup_local_test_config()
+
+        if download_pack:
+            # The server wraps a pack's key under whatever secret it holds
+            # for this MAC AT LOOKUP TIME -- that's baked into the
+            # card_content response, before download_card_content() ever
+            # runs. So a pending registration (from a rotation this local
+            # mode never reported, since it skips OTA) must be resolved here,
+            # before the tap below, not merely before the download.
+            self.store.reconcile_secret()
+            self._ensure_secret_registered("RFID tap for %s" % rfid_uid)
+
         if not self.connect_mqtt():
             return
 

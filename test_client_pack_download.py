@@ -178,6 +178,49 @@ def test_on_mqtt_message_queues_card_content_before_download_finishes():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_download_skips_until_pending_secret_registration_succeeds():
+    """After a rotation, a download must not proceed until the new secret is
+    registered with the server -- the server wraps under whatever secret it
+    currently holds, so downloading first would just produce another
+    undecryptable pack. A failed registration must skip the download outright
+    rather than burning bandwidth on a pack that can never play.
+    """
+    tmp = tempfile.mkdtemp()
+    try:
+        c = _client(tmp)
+        c.store.reconcile_secret()  # records the baseline fingerprint
+        c.store.rotate_secret()
+
+        payload = {
+            "type": "card_content", "rfid_uid": "AABBCCDD",
+            "skill_id": "rot01", "skill_name": "Rotated", "version": 1,
+            "audio": [{"index": 1, "url": "https://cdn/a.mp3"}], "images": [],
+        }
+        manifest_path = os.path.join(c.store.skill_dir("rot01"), "manifest.jsn")
+
+        # Registration fails -> must not touch the network for the pack at all.
+        with mock.patch.object(c, "register_content_secret", return_value=False), \
+             mock.patch("client.requests.get") as get_mock:
+            result = c.download_card_content(payload)
+        get_mock.assert_not_called()
+        assert result["files"] == []
+        assert result.get("skipped") is True
+        assert c.store.registration_pending() is True
+        assert not os.path.exists(manifest_path)
+
+        # Registration succeeds -> download proceeds and the flag clears.
+        fake_get = _fake_get(MP3)
+        with mock.patch.object(c, "register_content_secret", return_value=True), \
+             mock.patch("client.requests.get", fake_get):
+            result = c.download_card_content(payload)
+        assert fake_get.called
+        assert result["files"]
+        assert c.store.registration_pending() is False
+        assert os.path.exists(manifest_path)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):
