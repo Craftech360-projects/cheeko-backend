@@ -25,7 +25,7 @@ const bulkImportService = require('../services/bulkImport.service');
 const uploadService = require('../services/upload.service');
 const contentKeys = require('../services/contentKeys.service');
 const { parseHeader, createUnsealStream, HEADER_BYTES } = require('../utils/contentCrypto');
-const { Readable } = require('stream');
+const { Readable, pipeline } = require('stream');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { requireAuth, requireAdmin } = require('../middleware/auth');
 const { success, badRequest, notFound } = require('../utils/response');
@@ -4021,6 +4021,11 @@ router.post('/content-pack/delete',
   })
 );
 
+// Matches contentPackUpload's fileSize limit above (50 MB) — that limit
+// constrains objects written through the API, this constrains objects read
+// back from arbitrary CDN paths for preview, but the intent is the same cap.
+const PREVIEW_MAX_BYTES = 50 * 1024 * 1024;
+
 /**
  * Admin-only decrypt proxy for the dashboard's play button (spec §8). The
  * pack key is fetched and used server-side and only decrypted bytes go to
@@ -4037,6 +4042,8 @@ router.get('/content-pack/preview',
   requireAdmin,
   asyncHandler(async (req, res) => {
     const { url, packCode } = req.query;
+    if (typeof url !== 'string') return badRequest(res, 'url must be a valid absolute URL on the content CDN');
+    if (typeof packCode !== 'string') return badRequest(res, 'packCode must be a string');
     const cloudfrontHost = process.env.CLOUDFRONT_DOMAIN || 'dsmzc13oafp54.cloudfront.net';
 
     let parsed;
@@ -4045,7 +4052,13 @@ router.get('/content-pack/preview',
     } catch {
       return badRequest(res, 'url must be a valid absolute URL on the content CDN');
     }
-    if (parsed.protocol !== 'https:' || parsed.hostname !== cloudfrontHost || parsed.username || parsed.password) {
+    if (
+      parsed.protocol !== 'https:' ||
+      parsed.hostname !== cloudfrontHost ||
+      parsed.port !== '' ||
+      parsed.username ||
+      parsed.password
+    ) {
       return badRequest(res, 'url must be on the content CDN');
     }
 
@@ -4054,16 +4067,37 @@ router.get('/content-pack/preview',
     // failed fetch below.
     const upstream = await fetch(parsed.href, { redirect: 'manual' });
     if (!upstream.ok) return notFound(res, `upstream ${upstream.status}`);
+
+    // Reject on size before buffering: this route can be pointed at any
+    // object on the CDN, not just ones multer wrote, so there is no upload-
+    // time guarantee it is small. A missing/unparseable Content-Length is
+    // treated as a reject too, rather than guessing a length to read up to —
+    // CloudFront always sends it for these objects, so its absence means
+    // something is already off with the response.
+    const contentLength = Number(upstream.headers.get('content-length'));
+    if (!Number.isFinite(contentLength) || contentLength < 0) {
+      return badRequest(res, 'upstream did not report a usable Content-Length');
+    }
+    if (contentLength > PREVIEW_MAX_BYTES) {
+      return badRequest(res, 'object exceeds the preview size cap');
+    }
+
     const bytes = Buffer.from(await upstream.arrayBuffer());
     const header = parseHeader(bytes);
     if (!header) return res.redirect(parsed.href);
+    if (header.version !== 2) return badRequest(res, 'unsupported content encryption version');
 
     const key = await contentKeys.getPackKey(packCode);
     if (!key) return notFound(res, 'No content key for this pack');
 
     res.type(parsed.pathname.toLowerCase().endsWith('.mp3') ? 'audio/mpeg' : 'application/octet-stream');
     res.set('Cache-Control', 'private, no-store');
-    Readable.from([bytes.subarray(HEADER_BYTES)]).pipe(createUnsealStream(key, header.nonce)).pipe(res);
+    pipeline(
+      Readable.from([bytes.subarray(HEADER_BYTES)]),
+      createUnsealStream(key, header.nonce),
+      res,
+      (err) => { if (err) logger.error('preview stream failed', { error: err.message }); }
+    );
   })
 );
 
