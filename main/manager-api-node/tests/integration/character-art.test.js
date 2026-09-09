@@ -39,6 +39,28 @@ jest.mock('../../src/services/upload.service', () => ({
   ...mockUpload
 }));
 
+// Disabled by default (matches no CONTENT_MASTER_KEY set), so the existing
+// tests above see the same plaintext behaviour they did before this mock
+// existed. Individual tests below turn it on to check the sealKey wiring.
+const mockContentKeys = {
+  isEnabled: jest.fn(() => false),
+  getOrCreateCharacterKey: jest.fn(async () => null)
+};
+jest.mock('../../src/services/contentKeys.service', () => mockContentKeys);
+
+// A real config/database import builds a live pg Pool and Supabase client
+// against whatever DATABASE_URL/.env this process has — this suite only ever
+// wants the three ai_agent_template methods it spies on below.
+jest.mock('../../src/config/database', () => ({
+  prisma: {
+    ai_agent_template: {
+      findUnique: jest.fn(),
+      update: jest.fn(),
+      create: jest.fn()
+    }
+  }
+}));
+
 const request = require('supertest');
 const app = require('../../src/app');
 const { prisma } = require('../../src/config/database');
@@ -100,7 +122,7 @@ describe('POST /agent/template/:id/art', () => {
     // are still on the CDN. A mixed-version set is fine — the URLs are absolute.
     expect(written.art_connect_url).toBeUndefined();
     expect(mockUpload.uploadCharacterArt).toHaveBeenCalledWith(
-      expect.any(Buffer), 'cheeko', 2, 'talk'
+      expect.any(Buffer), 'cheeko', 2, 'talk', { sealKey: null }
     );
   });
 
@@ -158,6 +180,31 @@ describe('POST /agent/template/:id/art', () => {
     const res = await request(app).post(BASE).attach('connect', PNG, 'connect.png');
 
     expect(res.status).toBe(404);
+  });
+
+  // Caller-level coverage for the sealKey wiring: nothing else exercised it
+  // reaching uploadCharacterArt at all, so setting the call site to null in
+  // updateTemplateArt passed 153/153 tests before this was added.
+  it('uploads artwork with the character key as sealKey when encryption is on', async () => {
+    const K = Buffer.alloc(16, 3);
+    mockContentKeys.isEnabled.mockReturnValueOnce(true);
+    mockContentKeys.getOrCreateCharacterKey.mockResolvedValueOnce(K);
+
+    const res = await request(app).post(BASE).attach('talk', PNG, 'talk.png');
+
+    expect(res.status).toBe(200);
+    expect(mockContentKeys.getOrCreateCharacterKey).toHaveBeenCalledWith('cheeko');
+    const opts = mockUpload.uploadCharacterArt.mock.calls[0][4];
+    expect(opts.sealKey).toEqual(K);
+  });
+
+  it('uploads with no sealKey when encryption is off', async () => {
+    const res = await request(app).post(BASE).attach('talk', PNG, 'talk.png');
+
+    expect(res.status).toBe(200);
+    expect(mockContentKeys.getOrCreateCharacterKey).not.toHaveBeenCalled();
+    const opts = mockUpload.uploadCharacterArt.mock.calls[0][4];
+    expect(opts.sealKey).toBeNull();
   });
 });
 
