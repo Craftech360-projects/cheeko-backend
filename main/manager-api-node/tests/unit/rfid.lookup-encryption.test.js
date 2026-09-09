@@ -59,3 +59,18 @@ test('no field when no mac was supplied', async () => {
   const res = await rfid.lookupCardByUid('04A1B2C3', undefined);
   expect(res.encryption).toBeUndefined();
 });
+
+test('download manifest carries a wrapped key the device secret can unwrap', async () => {
+  const res = await rfid.getContentDownloadManifest('04A1B2C3', 'AA:BB:CC:DD:EE:FF');
+  expect(res.encryption.v).toBe(2);
+  const wrapKey = crypto.createHmac('sha256', S).update(cc.WRAP_INFO).digest().subarray(0, 16);
+  const iv = Buffer.concat([Buffer.from(res.encryption.nonce, 'hex'), Buffer.alloc(8, 0)]);
+  expect(crypto.createDecipheriv('aes-128-ctr', wrapKey, iv).update(Buffer.from(res.encryption.key, 'hex'))).toEqual(K);
+});
+
+test('download manifest has no encryption field when the device has no secret', async () => {
+  mockKeys.getDeviceSecret.mockResolvedValueOnce(null);
+  const res = await rfid.getContentDownloadManifest('04A1B2C3', 'AA:BB:CC:DD:EE:FF');
+  expect(res.encryption).toBeUndefined();
+  expect(res.packCode).toBe('STORY01');
+});

@@ -3665,7 +3665,7 @@ const getContentDownloadManifest = async (rfidUid, mac) => {
     // issued-UID allowlist to the tapping device's own pack.
     const customPack = await resolveCustomCardPack(normalizedUid, mac);
     if (customPack) {
-      return getContentDownloadManifestByPackId(customPack.id, normalizedUid);
+      return getContentDownloadManifestByPackId(customPack.id, normalizedUid, mac);
     }
 
     logger.info('No RFID mapping found for UID:', { rfidUid: normalizedUid });
@@ -3677,16 +3677,19 @@ const getContentDownloadManifest = async (rfidUid, mac) => {
     return null;
   }
 
-  return getContentDownloadManifestByPackId(mapping.content_pack_id, normalizedUid);
+  return getContentDownloadManifestByPackId(mapping.content_pack_id, normalizedUid, mac);
 };
 
 /**
  * Get content download manifest by pack ID (matches Java getContentDownloadManifestByPackId)
  * @param {number|BigInt} contentPackId - Content pack ID
  * @param {string} rfidUid - RFID UID for response
+ * @param {string} [mac] - MAC of the tapping device, for key delivery (spec §6).
+ *   Optional: callers that cannot supply one (e.g. no mac on hand) simply get
+ *   no `encryption` field back, same as an unencrypted pack.
  * @returns {Promise<Object|null>} ContentDownloadDTO or null
  */
-const getContentDownloadManifestByPackId = async (contentPackId, rfidUid) => {
+const getContentDownloadManifestByPackId = async (contentPackId, rfidUid, mac) => {
   // Get content pack
   let contentPack = null;
   try {
@@ -3721,6 +3724,7 @@ const getContentDownloadManifestByPackId = async (contentPackId, rfidUid) => {
     totalItems: contentPack.total_items || items.length,
     language: contentPack.language,
     thumbnailUrl: contentPack.thumbnail_url || null,
+    encryption: await encryptionFieldFor(contentPack.pack_code, mac),
   };
 
   if (hasStories) {
