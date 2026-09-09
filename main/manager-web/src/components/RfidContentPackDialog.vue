@@ -718,6 +718,8 @@ export default {
           } else {
             reject(new Error((data && data.msg) || 'Failed to create the pack.'));
           }
+        }, (info) => {
+          reject(new Error(this.extractApiErrorMessage(info) || 'Failed to create the pack.'));
         }),
         'Creating the pack timed out. Check your connection and try again.'
       );
@@ -729,18 +731,34 @@ export default {
           } else {
             reject(new Error('The pack was created, but its id could not be loaded. Reopen this pack and try again.'));
           }
+        }, (info) => {
+          reject(new Error(this.extractApiErrorMessage(info) || 'The pack was created, but looking it up failed. Reopen this pack and try again.'));
         }),
         'The pack was created, but looking it up timed out. Reopen this pack and try again.'
       );
     },
-    // httpRequest.js's success callback is the ONLY signal Api.rfid's GET/POST
-    // helpers ever invoke — they don't wire httpRequest's `.fail()`, so on a
-    // 4xx/5xx (or a dropped/timed-out network request the built-in retry
-    // declines to auto-retry for a non-GET) that callback simply never fires
-    // and an un-timed promise would hang forever. `run` gets `(resolve,
-    // reject)` and must call one of them on success — this wrapper guarantees
-    // the other side settles too.
-    callWithTimeout(run, timeoutMessage, ms = 35000) {
+    // httpHandlerError (httpRequest.js) calls a wired `.fail()` callback on a
+    // 4xx, or on a 200 whose envelope carries a non-zero `code` — passing it
+    // the raw success `res` in the latter case (msg at `info.data.msg`) and
+    // the raw axios error in the former (msg at `info.response.data.msg`).
+    // Read both shapes so the server's own message surfaces either way.
+    extractApiErrorMessage(info) {
+      return info?.data?.msg || info?.response?.data?.msg;
+    },
+    // A dropped/timed-out request, or a 5xx, still never reaches either
+    // callback: httpRequest.js only wires the fail path above for 4xx/bad-code
+    // responses, and for anything else (including a real network drop) it
+    // falls through to `.networkFail()`, which for a non-GET just shows a
+    // warning toast and gives up (no retry, no callback) — see reAjaxFun in
+    // httpRequest.js. So a genuinely dropped request would hang forever
+    // without this backstop. `run` gets `(resolve, reject)` and must call one
+    // of them on success/failure; this wrapper guarantees the other side
+    // settles too. Kept comfortably above axios's own 30s `http.defaults.timeout`
+    // (httpRequest.js) so a legitimately slow-but-succeeding request isn't cut
+    // off first — shortened from the original 35s now that ordinary server
+    // errors are caught immediately via `.fail()` above and this only has to
+    // cover a genuinely dropped request or an unwired 5xx.
+    callWithTimeout(run, timeoutMessage, ms = 32000) {
       return new Promise((resolve, reject) => {
         let settled = false;
         const timer = setTimeout(() => {
