@@ -31,6 +31,8 @@
     "migrate:mysql:dry": "node scripts/migrate-mysql-to-supabase.js --dry-run",
     "backfill:chat-history": "node scripts/backfill-ai-agent-chat-history-to-voice-sessions.js",
     "backfill:chat-history:dry": "node scripts/backfill-ai-agent-chat-history-to-voice-sessions.js --dry-run",
+    "backfill:seal-content": "node scripts/backfill-seal-content.js",
+    "backfill:seal-content:dry": "node scripts/backfill-seal-content.js --dry-run",
     "import:quiz-bank": "node scripts/import-quiz-questions.js",
     "import:quiz-bank:dry": "node scripts/import-quiz-questions.js --dry-run",
     "import:riddle-bank": "node scripts/import-quiz-questions.js --bank riddle",
