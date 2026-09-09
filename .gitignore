@@ -220,6 +220,9 @@ clerk-nextjs-guide
 # Device simulator imagine output (client.py --mode imagine)
 imagine_outputs/
 
+# Device simulator's NVS/SD-card stand-in (client.py, client_storage.py)
+client_state/
+
 # MCP server config — shared with the team (see main/manager-api-node/mcp/)
 !.mcp.json
 

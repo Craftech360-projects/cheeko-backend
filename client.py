@@ -14,6 +14,7 @@ import keyboard
 from typing import Dict, Optional, Tuple
 import requests
 import paho.mqtt.client as mqtt_client
+from client_storage import DeviceStore
 from paho.mqtt.enums import CallbackAPIVersion
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
@@ -22,7 +23,7 @@ import opuslib
 
 # --- Configuration ---
 
-SERVER_IP = os.getenv("TEST_SERVER_IP", "192.168.0.246")
+SERVER_IP = os.getenv("TEST_SERVER_IP", "192.168.0.10")
 OTA_PORT = 8002
 MQTT_BROKER_HOST = os.getenv("TEST_MQTT_BROKER_HOST", SERVER_IP)
 
@@ -126,6 +127,11 @@ class TestClient:
         self.device_mac_formatted = device_mac or "00:16:3e:7a:11:c6"
         print(f"Generated unique MAC address: {self.device_mac_formatted}")
 
+        # Stand-ins for the toy's NVS and SD card. The content secret is
+        # generated on first run and reused, exactly as the firmware does.
+        self.store = DeviceStore(base_dir=os.getenv("TEST_CLIENT_STATE", "client_state"),
+                                 mac=self.device_mac_formatted)
+
         # MQTT credentials will be set from OTA response
         self.mqtt_credentials = None
 
@@ -181,6 +187,8 @@ class TestClient:
             MQTT_BROKER_PORT,
             self.mqtt_credentials["client_id"],
         )
+        logger.info("[RFID-TEST] Local mode: no OTA call, so content_secret is NOT registered. "
+                    "Run once with --register-secret if the server has no secret for this MAC.")
 
     def on_mqtt_connect(self, client, userdata, flags, rc, properties=None):
         """Callback for MQTT connection."""
@@ -581,7 +589,11 @@ class TestClient:
                 "board": {
                     "type": "doit-ai-01-kit"
                 },
-                "client_id": session_client_id
+                "client_id": session_client_id,
+                # Spec section 6: the toy registers its content secret on the
+                # OTA call it already makes. Write-only — the server never
+                # returns it.
+                "content_secret": self.store.secret_hex(),
             }
             response = requests.post(
                 f"http://{SERVER_IP}:{OTA_PORT}/toy/ota/", headers=headers, json=data, timeout=5)
@@ -659,6 +671,34 @@ class TestClient:
             return True
         except requests.exceptions.RequestException as e:
             logger.error(f"[ERROR] Failed to get OTA config: {e}")
+            return False
+
+    def register_content_secret(self) -> bool:
+        """POST the content secret to the OTA endpoint without the full handshake.
+
+        RFID mode configures MQTT locally and never calls OTA, so a fresh MAC has
+        no secret on the server and every lookup comes back unencrypted. This is
+        the one call that fixes that.
+        """
+        url = f"http://{SERVER_IP}:{OTA_PORT}/toy/ota/"
+        body = {
+            "application": {"version": "1.7.6", "name": "cheeko-client-mimic"},
+            "board": {"type": "doit-ai-01-kit"},
+            "mac_address": self.device_mac_formatted,
+            "content_secret": self.store.secret_hex(),
+        }
+        try:
+            resp = requests.post(url, headers={"device-id": self.device_mac_formatted},
+                                 json=body, timeout=10)
+            logger.info("[SECRET] Registered content secret for %s: HTTP %s",
+                        self.device_mac_formatted, resp.status_code)
+            body_text = resp.text or ""
+            if self.store.secret_hex() in body_text:
+                logger.error("[SECRET] SERVER ECHOED THE SECRET BACK — that is a leak, report it")
+                return False
+            return resp.ok
+        except requests.exceptions.RequestException as exc:
+            logger.error("[SECRET] Failed to register content secret: %s", exc)
             return False
 
     def connect_mqtt(self) -> bool:
@@ -1339,6 +1379,12 @@ if __name__ == "__main__":
     parser.add_argument("--request-download", action="store_true")
     parser.add_argument("--download-current-version", default=os.getenv("TEST_DOWNLOAD_CURRENT_VERSION"))
     parser.add_argument("--analytics-token", default=os.getenv("TEST_MANAGER_API_TOKEN"))
+    parser.add_argument(
+        "--register-secret",
+        action="store_true",
+        help="Register this client's content secret with the server before the test. "
+             "Needed once per MAC in rfid mode, which does not call OTA.",
+    )
     args = parser.parse_args()
 
     print(f"[SEQ] Sequence logging: {'ENABLED' if ENABLE_SEQUENCE_LOGGING else 'DISABLED'}")
@@ -1367,6 +1413,8 @@ if __name__ == "__main__":
         else:
             if not args.rfid_uid:
                 raise SystemExit("--rfid-uid is required in --mode rfid")
+            if args.register_secret:
+                client.register_content_secret()
             client.run_rfid_test(
                 rfid_uid=args.rfid_uid,
                 local_version=args.local_version,
