@@ -1,6 +1,10 @@
 // node --test mcp/cheeko-mcp.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import os from 'node:os';
+import path from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { writeFile, unlink } from 'node:fs/promises';
 import { buildServer, toToolResult } from './cheeko-mcp.mjs';
 
 const names = (s) => Object.keys(s._registeredTools ?? s.registeredTools ?? {});
@@ -97,4 +101,83 @@ test('makeApi sends the bearer only when a user token is given', async () => {
   assert.equal(seen[1].headers['X-Service-Key'], 'KEY');
   assert.equal(seen[1].headers.Authorization, 'Bearer TOK');
   assert.match(seen[1].headers['X-Request-ID'], /^mcp-.+-[0-9a-f]{8}$/);
+});
+
+// ── upload_pack_file: packCode form field + the plaintext warning ──────────
+// test:mcp passed 10/10 without exercising either of these — the sealing
+// wiring (packCode reaching the upload) and the warning that fires when it's
+// missing (spec: rfid.routes.js seals only when packCode is sent).
+
+async function withFixture(name, fn) {
+  const file = path.join(os.tmpdir(), `mcp-upload-test-${randomUUID()}-${name}`);
+  await writeFile(file, Buffer.from('ID3-fake-mp3-bytes'));
+  try {
+    await fn(file);
+  } finally {
+    await unlink(file);
+  }
+}
+
+function fakeApi(responder) {
+  const calls = [];
+  const api = async (route, opts) => {
+    calls.push({ route, opts });
+    return responder ? responder(route, opts) : { content: [{ text: '{"url":"https://cdn.test/x.mp3"}' }], isError: false };
+  };
+  api.calls = calls;
+  return api;
+}
+
+test('upload_pack_file sends packCode as a multipart form field', async () => {
+  await withFixture('song.mp3', async (file) => {
+    const api = fakeApi();
+    const server = buildServer({ api, canWrite: true });
+    const tool = server._registeredTools.upload_pack_file;
+
+    const result = await tool.handler({ path: file, packCode: 'STORY_JUNGLE_EN' });
+
+    assert.equal(api.calls[0].route, '/admin/rfid/content-pack/upload');
+    assert.equal(api.calls[0].opts.form.get('packCode'), 'STORY_JUNGLE_EN');
+    assert.equal(result.isError, false);
+    assert.doesNotMatch(result.content[0].text, /WARNING/);
+  });
+});
+
+test('upload_pack_file warns about likely plaintext storage when packCode and contentPackId are both absent', async () => {
+  await withFixture('song.mp3', async (file) => {
+    const api = fakeApi();
+    const server = buildServer({ api, canWrite: true });
+    const tool = server._registeredTools.upload_pack_file;
+
+    const result = await tool.handler({ path: file });
+
+    assert.equal(api.calls[0].opts.form.has('packCode'), false);
+    assert.match(result.content[0].text, /WARNING/);
+    assert.match(result.content[0].text, /PLAINTEXT/);
+  });
+});
+
+test('upload_pack_file does not warn for a thumbnail upload (contentPackId set, plaintext by design)', async () => {
+  await withFixture('cover.mp3', async (file) => {
+    const api = fakeApi();
+    const server = buildServer({ api, canWrite: true });
+    const tool = server._registeredTools.upload_pack_file;
+
+    const result = await tool.handler({ path: file, contentPackId: 31 });
+
+    assert.doesNotMatch(result.content[0].text, /WARNING/);
+  });
+});
+
+test('upload_pack_file does not warn on an error response, only on a successful plaintext one', async () => {
+  await withFixture('song.mp3', async (file) => {
+    const api = fakeApi(() => ({ content: [{ text: 'upstream failed' }], isError: true }));
+    const server = buildServer({ api, canWrite: true });
+    const tool = server._registeredTools.upload_pack_file;
+
+    const result = await tool.handler({ path: file });
+
+    assert.equal(result.isError, true);
+    assert.doesNotMatch(result.content[0].text, /WARNING/);
+  });
 });
