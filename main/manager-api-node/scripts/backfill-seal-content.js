@@ -65,9 +65,20 @@ async function resealOne(url, packCode, d) {
   if (!url) return 'skipped';
   const bytes = await d.fetchBytes(url);
   if (parseHeader(bytes)) return 'already';
+
+  if (d.dryRun) {
+    // Read-only lookup. contentKeys.getOrCreatePackKey is a get-OR-CREATE: for
+    // a pack with no content_key yet it generates one and persists it via
+    // prisma.rfid_content_pack.updateMany BEFORE any dryRun check could run —
+    // so calling it here would make `--dry-run` provision real encryption keys
+    // in the live table. getPackKey only reads, so a dry run can report
+    // accurately without side effects.
+    const key = await d.getPackKey(packCode);
+    return key ? 'would-seal' : 'nokey';
+  }
+
   const key = await d.getOrCreatePackKey(packCode);
   if (!key) return 'nokey';
-  if (d.dryRun) return 'would-seal';
 
   const category = categoryFromUrl(url) || (url.includes('/images/') ? 'images' : 'audio');
   const name = decodeURIComponent(stripUuidSuffix(path.basename(new URL(url).pathname)));
@@ -82,16 +93,42 @@ async function resealOne(url, packCode, d) {
 }
 
 async function resealItem(item, d) {
-  const audio = await resealOne(item.audio_url, item.pack_code, d);
-  const image = await resealOne(item.image_url, item.pack_code, d);
   const patch = {};
-  if (audio.startsWith('http')) patch.audio_url = audio;
-  if (image.startsWith('http')) patch.image_url = image;
-  if (Object.keys(patch).length && !d.dryRun) await d.updateItem(item.id, patch);
-  return {
-    audio: audio.startsWith('http') ? 'sealed' : audio,
-    image: image.startsWith('http') ? 'sealed' : image
-  };
+  const status = {};
+
+  for (const [field, url] of [['audio', item.audio_url], ['image', item.image_url]]) {
+    try {
+      const r = await resealOne(url, item.pack_code, d);
+      if (r.startsWith('http')) {
+        patch[`${field}_url`] = r;
+        status[field] = 'sealed';
+      } else {
+        status[field] = r;
+      }
+    } catch (err) {
+      // A failure on one field (e.g. the image upload) must not swallow a
+      // field that already succeeded (e.g. the audio was already sealed and
+      // uploaded) — that upload still lands in patch below and gets a row
+      // reference, so it isn't orphaned just because its sibling field failed.
+      status[field] = 'error';
+      console.error(`item ${item.id} ${field}: reseal failed - ${err.message}`);
+    }
+  }
+
+  if (Object.keys(patch).length && !d.dryRun) {
+    try {
+      await d.updateItem(item.id, patch);
+    } catch (err) {
+      // The sealed object(s) in `patch` already landed in S3, but the row
+      // update that would reference them just failed — they're orphaned in
+      // the bucket until an operator finds them from this log line.
+      for (const url of Object.values(patch)) {
+        console.error(`ORPHANED sealed object (item ${item.id} row update failed): ${url}`);
+      }
+      throw err;
+    }
+  }
+  return status;
 }
 
 function parseArgs(argv) {
@@ -131,6 +168,7 @@ async function main() {
   const d = {
     dryRun,
     fetchBytes: async (url) => Buffer.from(await (await fetch(url)).arrayBuffer()),
+    getPackKey: contentKeys.getPackKey,
     getOrCreatePackKey: contentKeys.getOrCreatePackKey,
     // Intentionally 3 params, no sealKey slot — see the comment in resealOne.
     upload: (buf, name, category) =>
@@ -146,9 +184,17 @@ async function main() {
       image_url: row.image_url,
       pack_code: row.rfid_content_pack?.pack_code || null
     };
-    const r = await resealItem(item, d);
-    for (const v of Object.values(r)) tally[v] = (tally[v] || 0) + 1;
-    console.log(`${item.pack_code || '(no pack)'} item ${item.id}: audio=${r.audio} image=${r.image}`);
+    // One bad row must not abort the whole run — record it as failed and
+    // keep going, so the tally below still reflects every row that made it
+    // through, and still gets printed even when some rows failed.
+    try {
+      const r = await resealItem(item, d);
+      for (const v of Object.values(r)) tally[v] = (tally[v] || 0) + 1;
+      console.log(`${item.pack_code || '(no pack)'} item ${item.id}: audio=${r.audio} image=${r.image}`);
+    } catch (err) {
+      tally.failed = (tally.failed || 0) + 1;
+      console.error(`${item.pack_code || '(no pack)'} item ${item.id}: FAILED - ${err.message}`);
+    }
   }
   console.log(tally);
   await prisma.$disconnect();
