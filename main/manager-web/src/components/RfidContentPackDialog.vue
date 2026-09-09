@@ -371,6 +371,7 @@ export default {
       storyMode: false,
       stories: [],  // [{title: '', items: [{title, audioUrl, imageUrl, text}]}]
       pendingUpload: null, // { mode: 'flat'|'story'|'packThumbnail', storyIndex, itemIndex, field: 'audioUrl'|'imageUrl'|'thumbnailUrl' }
+      _ensurePackIdPromise: null, // in-flight create+lookup, shared so two files picked at once can't create two packs
       thumbnailPreviewError: false,
       uploadingMedia: false,
       importing: false,
@@ -667,12 +668,44 @@ export default {
     // Item files upload to S3 as soon as they're picked, before the dialog's
     // Save button is pressed. For a brand-new pack that means no row exists
     // yet to hang an encryption key on, so create it early.
-    async ensurePackId() {
-      if (this.form.id) return this.form.id;
-      const created = await new Promise((resolve, reject) => {
-        Api.rfid.addContentPack({
-          packCode: this.form.packCode,
-          name: this.form.name,
+    //
+    // POST /admin/rfid/content-pack never returns the created row (its `data`
+    // is always null — see rfid.routes.js), so success is read from the
+    // envelope's `code`, not from a returned id. The id then comes from a
+    // second call, GET /admin/rfid/content-pack/code/:packCode.
+    //
+    // A single cached promise is returned to every caller while it's in
+    // flight, so two files picked in quick succession can't race two creates
+    // for the same pack.
+    ensurePackId() {
+      if (this.form.id) return Promise.resolve(this.form.id);
+      if (this._ensurePackIdPromise) return this._ensurePackIdPromise;
+
+      this._ensurePackIdPromise = this.createPackAndFetchId()
+        .then((id) => {
+          this.form.id = id;
+          return id;
+        })
+        .finally(() => {
+          this._ensurePackIdPromise = null;
+        });
+
+      return this._ensurePackIdPromise;
+    },
+    async createPackAndFetchId() {
+      const packCode = String(this.form.packCode || '').trim();
+      const name = String(this.form.name || '').trim();
+      if (!packCode || !name) {
+        // Checked here, before the request, because the server 400s this
+        // exact case and that failure never reaches our callback (see
+        // callWithTimeout below) — better to never send it.
+        throw new Error('Enter a Pack Code and Name before uploading files.');
+      }
+
+      await this.callWithTimeout(
+        (resolve, reject) => Api.rfid.addContentPack({
+          packCode,
+          name,
           description: this.form.description,
           contentType: this.normalizeContentType(this.form.contentType),
           language: this.form.language,
@@ -680,15 +713,56 @@ export default {
           version: this.form.version,
           active: this.form.active
         }, ({ data }) => {
+          if (data && data.code === 0) {
+            resolve();
+          } else {
+            reject(new Error((data && data.msg) || 'Failed to create the pack.'));
+          }
+        }),
+        'Creating the pack timed out. Check your connection and try again.'
+      );
+
+      return this.callWithTimeout(
+        (resolve, reject) => Api.rfid.getContentPackByCode(packCode, ({ data }) => {
           if (data && data.code === 0 && data.data && data.data.id) {
             resolve(data.data.id);
           } else {
-            reject(new Error((data && data.msg) || 'Enter a Pack Code and Name before uploading files.'));
+            reject(new Error('The pack was created, but its id could not be loaded. Reopen this pack and try again.'));
           }
-        });
+        }),
+        'The pack was created, but looking it up timed out. Reopen this pack and try again.'
+      );
+    },
+    // httpRequest.js's success callback is the ONLY signal Api.rfid's GET/POST
+    // helpers ever invoke — they don't wire httpRequest's `.fail()`, so on a
+    // 4xx/5xx (or a dropped/timed-out network request the built-in retry
+    // declines to auto-retry for a non-GET) that callback simply never fires
+    // and an un-timed promise would hang forever. `run` gets `(resolve,
+    // reject)` and must call one of them on success — this wrapper guarantees
+    // the other side settles too.
+    callWithTimeout(run, timeoutMessage, ms = 35000) {
+      return new Promise((resolve, reject) => {
+        let settled = false;
+        const timer = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          reject(new Error(timeoutMessage));
+        }, ms);
+        run(
+          (value) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            resolve(value);
+          },
+          (err) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            reject(err);
+          }
+        );
       });
-      this.form.id = created;
-      return created;
     },
     async uploadFileToS3(file, type) {
       if (!this.pendingUpload) {
