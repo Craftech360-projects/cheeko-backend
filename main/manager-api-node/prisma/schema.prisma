@@ -116,6 +116,7 @@ model ai_device {
   mode                       String?                      @default("conversation") @db.VarChar(50)
   device_mode                String?                      @default("auto") @db.VarChar(50)
   app_version                String?                      @db.VarChar(50)
+  content_secret             Bytes?
   sort                       Int?                         @default(0)
   creator                    BigInt?
   create_date                DateTime?                    @default(now()) @db.Timestamptz(6)
@@ -848,6 +849,7 @@ model rfid_content_pack {
   age_range         String?             @db.VarChar(50)
   thumbnail_url     String?             @db.VarChar(500)
   content_hash      String?             @db.VarChar(255)
+  content_key       Bytes?
   active            Boolean?            @default(true)
   creator           BigInt?
   create_date       DateTime?           @default(now()) @db.Timestamptz(6)
