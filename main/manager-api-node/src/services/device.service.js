@@ -7,6 +7,7 @@
 const { prisma } = require('../config/database');
 const logger = require('../utils/logger');
 const { generateDeviceCode, normalizeMacAddress, ownerKeyForDevice } = require('../utils/helpers');
+const contentKeys = require('./contentKeys.service');
 // Binding fails for ordinary user reasons — a mistyped code, an expired one, a toy
 // that belongs to someone else. Those were plain Errors, so the route answered 500,
 // and the app both mis-reported them and retried the whole create-then-bind flow,
@@ -889,6 +890,17 @@ const checkOtaVersion = async (mac, clientIdOrVersion, deviceReportOrBoard) => {
       version: clientIdOrVersion || null,
       board: deviceReportOrBoard || null,
     };
+  }
+
+  // Spec §6: the toy registers its content secret on the OTA call it already
+  // makes. Best effort and never in the response: a bad value is the toy's
+  // problem to fix, not a reason to refuse an OTA answer.
+  if (deviceReport?.contentSecret) {
+    try {
+      await contentKeys.registerDeviceSecret(normalizedMac, deviceReport.contentSecret);
+    } catch (err) {
+      logger.warn(`[OTA] content_secret rejected for ${normalizedMac}: ${err.message}`);
+    }
   }
 
   // Extract device info from report (Spring Boot DeviceReportReqDTO format)
