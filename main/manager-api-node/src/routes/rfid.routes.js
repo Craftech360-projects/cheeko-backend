@@ -24,6 +24,8 @@ const rfidService = require('../services/rfid.service');
 const bulkImportService = require('../services/bulkImport.service');
 const uploadService = require('../services/upload.service');
 const contentKeys = require('../services/contentKeys.service');
+const { parseHeader, createUnsealStream, HEADER_BYTES } = require('../utils/contentCrypto');
+const { Readable } = require('stream');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { requireAuth, requireAdmin } = require('../middleware/auth');
 const { success, badRequest, notFound } = require('../utils/response');
@@ -4016,6 +4018,52 @@ router.post('/content-pack/delete',
 
     await rfidService.deleteContentPacks(ids);
     success(res, null, 'Content packs deleted successfully');
+  })
+);
+
+/**
+ * Admin-only decrypt proxy for the dashboard's play button (spec §8). The
+ * pack key is fetched and used server-side and only decrypted bytes go to
+ * the browser. `url` is pinned to the content CDN by parsing it (not by
+ * string-prefix matching) so a lookalike hostname, credentials embedded in
+ * the URL, or an upstream redirect to another host can't be used to turn
+ * this into an open proxy. Legacy plaintext objects (no CKE1 header) redirect
+ * straight to the CDN url, so the dialog needs no special case for them.
+ *
+ * Binary streaming response: the {code,msg,data} envelope does not apply
+ * here, only to the 400/404 error paths.
+ */
+router.get('/content-pack/preview',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { url, packCode } = req.query;
+    const cloudfrontHost = process.env.CLOUDFRONT_DOMAIN || 'dsmzc13oafp54.cloudfront.net';
+
+    let parsed;
+    try {
+      parsed = new URL(url);
+    } catch {
+      return badRequest(res, 'url must be a valid absolute URL on the content CDN');
+    }
+    if (parsed.protocol !== 'https:' || parsed.hostname !== cloudfrontHost || parsed.username || parsed.password) {
+      return badRequest(res, 'url must be on the content CDN');
+    }
+
+    // 'manual' so an upstream redirect (CloudFront misconfig or a crafted
+    // response) is never followed off-domain; it's simply treated as a
+    // failed fetch below.
+    const upstream = await fetch(parsed.href, { redirect: 'manual' });
+    if (!upstream.ok) return notFound(res, `upstream ${upstream.status}`);
+    const bytes = Buffer.from(await upstream.arrayBuffer());
+    const header = parseHeader(bytes);
+    if (!header) return res.redirect(parsed.href);
+
+    const key = await contentKeys.getPackKey(packCode);
+    if (!key) return notFound(res, 'No content key for this pack');
+
+    res.type(parsed.pathname.toLowerCase().endsWith('.mp3') ? 'audio/mpeg' : 'application/octet-stream');
+    res.set('Cache-Control', 'private, no-store');
+    Readable.from([bytes.subarray(HEADER_BYTES)]).pipe(createUnsealStream(key, header.nonce)).pipe(res);
   })
 );
 

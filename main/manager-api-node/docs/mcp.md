@@ -41,6 +41,11 @@ update_content_pack  { id: 71, items: [{ itemNumber: 1, title: "Tiger", audioUrl
 get_content_pack     { packCode: "STORY_JUNGLE_EN" }               → verify
 ```
 
+`GET /admin/rfid/content-pack/preview` (the dashboard's decrypt-and-stream play
+button) is admin-only and read-only, and returns binary audio rather than the
+`{code,msg,data}` envelope, so it is intentionally not wrapped in a curated
+tool — no MCP change was needed for it.
+
 In practice you type one sentence and the model does this:
 
 > Create a pack STORY_JUNGLE_EN from the files in D:\packs\jungle — each mp3 is an item, the png with the same name is its picture.
