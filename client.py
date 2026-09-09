@@ -296,6 +296,7 @@ class TestClient:
         Decryption happens at playback (see play_skill), which is what the toy
         does and what keeps a copied card useless.
         """
+        self.store.reconcile_secret()
         skill_id = (card_content.get("skill_id") or "").lower()
         if not skill_id:
             raise ValueError("card_content has no skill_id")
@@ -420,6 +421,7 @@ class TestClient:
         fails is counted and logged, never handed onward as audio — playing
         ciphertext is the one outcome the firmware must also refuse.
         """
+        self.store.reconcile_secret()
         key = self.skill_key(skill_id)
         skill_dir = self.store.skill_dir(skill_id)
         played = failed = 0

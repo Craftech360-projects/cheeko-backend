@@ -64,6 +64,73 @@ def test_skill_dir_layout_matches_the_toy():
         shutil.rmtree(d, ignore_errors=True)
 
 
+def test_reconcile_first_run_records_fingerprint_without_wiping():
+    """An existing card from before this check existed (or a genuine first
+    run) must not be treated as a rotation -- there is nothing to compare
+    against yet."""
+    store, d = _store()
+    try:
+        skill = store.skill_dir("story01")
+        manifest = os.path.join(skill, "manifest.jsn")
+        open(manifest, "w").write("{}")
+
+        wiped = store.reconcile_secret()
+
+        assert wiped is False
+        assert os.path.exists(manifest)
+        assert os.path.exists(os.path.join(store.sd_root(), "secret.fp"))
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def test_reconcile_is_a_noop_when_the_secret_is_unchanged():
+    store, d = _store()
+    try:
+        skill = store.skill_dir("story01")
+        manifest = os.path.join(skill, "manifest.jsn")
+        open(manifest, "w").write("{}")
+        store.reconcile_secret()  # records the baseline fingerprint
+
+        wiped = store.reconcile_secret()
+
+        assert wiped is False
+        assert os.path.exists(manifest)
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def test_reconcile_wipes_skills_when_the_secret_changed():
+    store, d = _store()
+    try:
+        skill = store.skill_dir("story01")
+        manifest = os.path.join(skill, "manifest.jsn")
+        open(manifest, "w").write("{}")
+        store.reconcile_secret()  # records the baseline fingerprint
+
+        store.rotate_secret()
+        wiped = store.reconcile_secret()
+
+        assert wiped is True
+        assert not os.path.exists(manifest)
+        assert os.listdir(os.path.join(store.sd_root(), "skills")) == []
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def test_secret_itself_is_never_written_to_the_fingerprint_file():
+    store, d = _store()
+    try:
+        store.reconcile_secret()
+        fp_path = os.path.join(store.sd_root(), "secret.fp")
+        contents = open(fp_path).read().strip()
+
+        assert store.secret_hex() not in contents
+        assert contents == store.secret_fingerprint()
+        assert len(contents) == 8
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

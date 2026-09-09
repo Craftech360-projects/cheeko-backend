@@ -101,13 +101,30 @@ def test_unknown_extension_fails_closed_instead_of_playing_unchecked():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def test_rotating_the_secret_kills_the_pack_the_way_an_nvs_erase_would():
+def test_rotating_the_secret_wipes_the_pack_so_the_next_tap_redownloads():
+    """An NVS erase (mimicked by rotate_secret) must not brick the pack: the
+    toy is supposed to notice its secret changed, wipe the now-undecryptable
+    content, and let the next tap re-download cleanly -- see
+    docs/sd-content-encryption.md section 7."""
     tmp = tempfile.mkdtemp()
     try:
         c = _client_with_pack(tmp)
-        assert c.play_skill("story01")["played"] == 2
+        skill_dir = c.store.skill_dir("story01")
+        manifest_path = os.path.join(skill_dir, "manifest.jsn")
+
+        # First playback records the SD mimic's secret fingerprint (no prior
+        # fingerprint existed, so nothing is wiped) and plays fine.
+        assert c.play_skill("story01") == {"played": 2, "failed": 0}
+        assert os.path.exists(manifest_path)
+
         c.store.rotate_secret()
-        assert c.play_skill("story01")["failed"] == 2
+
+        # The next playback attempt notices the fingerprint no longer matches
+        # and wipes the pack instead of failing to decrypt it.
+        result = c.play_skill("story01")
+        assert result == {"played": 0, "failed": 0}
+        assert not os.path.exists(manifest_path)
+        assert os.listdir(skill_dir) == []  # empty and ready for a re-download
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

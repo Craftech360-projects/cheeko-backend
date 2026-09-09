@@ -2,6 +2,7 @@
 
 client_state/
   nvs.json                                  {"dev_secret": {"<mac>": "<64 hex>"}}
+  sdcard/cheeko/secret.fp                   first 8 hex chars of SHA-256(secret)
   sdcard/cheeko/skills/<skill_id>/manifest.jsn
   sdcard/cheeko/skills/<skill_id>/audio/01.mp3
   sdcard/cheeko/skills/<skill_id>/images/01.bin
@@ -9,9 +10,15 @@ client_state/
 Paths and filenames match the firmware exactly (8.3 names, "manifest.jsn" not
 "manifest.json"), so a directory produced here could be copied onto a real card.
 """
+import hashlib
 import json
+import logging
 import os
 import secrets
+import shutil
+from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 class DeviceStore:
@@ -61,3 +68,54 @@ class DeviceStore:
         path = os.path.join(self.sd_root(), "skills", skill_id)
         os.makedirs(path, exist_ok=True)
         return path
+
+    def secret_fingerprint(self) -> str:
+        """First 8 hex chars of SHA-256(secret). Safe to keep on the SD mimic --
+        unlike the secret itself, it does not let anyone rewrap a key."""
+        return hashlib.sha256(self.secret()).hexdigest()[:8]
+
+    def _fingerprint_path(self) -> str:
+        return os.path.join(self.sd_root(), "secret.fp")
+
+    def _read_fingerprint(self) -> Optional[str]:
+        try:
+            with open(self._fingerprint_path(), "r", encoding="utf-8") as fh:
+                value = fh.read().strip()
+        except FileNotFoundError:
+            return None
+        return value or None
+
+    def _write_fingerprint(self, fingerprint: str) -> None:
+        with open(self._fingerprint_path(), "w", encoding="utf-8") as fh:
+            fh.write(fingerprint)
+
+    def reconcile_secret(self) -> bool:
+        """Detect that NVS was erased (secret regenerated) since the SD mimic
+        was last written, and if so wipe downloaded content so the next tap
+        re-downloads instead of failing to decrypt.
+
+        No fingerprint on the card yet means an existing card from before this
+        check existed, or a genuine first run -- not evidence of a rotation,
+        so the current fingerprint is recorded without wiping anything.
+
+        Returns True if a wipe happened.
+        """
+        current = self.secret_fingerprint()
+        stored = self._read_fingerprint()
+        if stored is None:
+            self._write_fingerprint(current)
+            return False
+        if stored == current:
+            return False
+
+        skills_dir = os.path.join(self.sd_root(), "skills")
+        shutil.rmtree(skills_dir, ignore_errors=True)
+        os.makedirs(skills_dir, exist_ok=True)
+        self._write_fingerprint(current)
+        logger.warning(
+            "[SECRET] device secret changed (fingerprint %s -> %s) -- NVS was "
+            "likely erased. Wiped %s; every wrapped pack key on the card was "
+            "dead, so the next tap will re-download cleanly.",
+            stored, current, skills_dir,
+        )
+        return True
