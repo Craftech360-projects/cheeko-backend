@@ -87,6 +87,20 @@ def test_sealed_file_with_no_key_raises_rather_than_returning_ciphertext():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_unknown_extension_fails_closed_instead_of_playing_unchecked():
+    tmp = tempfile.mkdtemp()
+    try:
+        c = _client_with_pack(tmp, sealed=False)
+        skill = c.store.skill_dir("story01")
+        # Any bytes at all — decode_check has no magic-byte rule for this
+        # extension, so it must never be waved through as "played".
+        open(os.path.join(skill, "audio", "01.dat"), "wb").write(b"not audio, not lvgl")
+        result = c.play_skill("story01")
+        assert result == {"played": 2, "failed": 1}
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def test_rotating_the_secret_kills_the_pack_the_way_an_nvs_erase_would():
     tmp = tempfile.mkdtemp()
     try:

@@ -382,8 +382,12 @@ class TestClient:
     def read_skill_file(self, path: str, key) -> bytes:
         """Read a pack file, decrypting in 2048-byte chunks like the firmware.
 
-        READ_BUF_SIZE on the toy is 2048 and those boundaries are not 16-byte
-        aligned, so this is the case worth exercising here rather than on device.
+        Mirrors the firmware's READ_BUF_SIZE (2048), and the decryptor is a
+        single `decrypt_stream` instance whose keystream state carries across
+        chunk boundaries — that statefulness is what matters here, not chunk
+        alignment (2048 is in fact a multiple of the AES block size; the
+        unaligned-boundary case is covered separately by
+        test_client_crypto.py::test_stream_decrypt_across_unaligned_chunks).
         """
         CHUNK = 2048
         with open(path, "rb") as fh:
@@ -433,8 +437,15 @@ class TestClient:
                     continue
 
                 if decode_check:
-                    ok = (data[:3] == b"ID3" or data[:2] == b"\xff\xfb") if name.endswith(".mp3") \
-                        else (data[:1] == b"\x19") if name.endswith(".bin") else True
+                    if name.endswith(".mp3"):
+                        ok = data[:3] == b"ID3" or data[:2] == b"\xff\xfb"
+                    elif name.endswith(".bin"):
+                        ok = data[:1] == b"\x19"
+                    else:
+                        logger.error("[PLAY] %s: unrecognised file type, refusing to "
+                                     "count as played. First bytes: %s", path, data[:8].hex())
+                        failed += 1
+                        continue
                     if not ok:
                         logger.error("[PLAY] %s decrypted to garbage — wrong key. "
                                      "Refusing to play. First bytes: %s", path, data[:8].hex())
