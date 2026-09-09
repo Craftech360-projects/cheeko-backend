@@ -25,16 +25,39 @@ test("fetchRfidContentFromManagerApi whitelists encryption", () => {
   assert.match(fn, /encryption:\s*data\.encryption\s*\|\|\s*null/);
 });
 
-test("card_content (grouped + flat) and card_ai forward rfidContent.encryption", () => {
-  const occurrences =
-    src.match(
-      /\.\.\.\(rfidContent\.encryption \? \{ encryption: rfidContent\.encryption \} : \{\}\)/g
-    ) || [];
-  assert.strictEqual(
-    occurrences.length,
-    3,
-    "expected encryption spread in grouped card_content, flat card_content, and card_ai"
-  );
+// Each builder is checked against its OWN slice of the source, not the whole
+// file: a prior version of this test counted the spread literal across the
+// whole file (expecting 3, anywhere), and missed the card_ai spread being
+// deleted while a duplicate was added elsewhere in the file — the count held
+// at 3 and every test stayed green while card_ai shipped with no key.
+const ENCRYPTION_SPREAD =
+  /\.\.\.\(rfidContent\.encryption \? \{ encryption: rfidContent\.encryption \} : \{\}\)/g;
+
+test("card_content (grouped) forwards rfidContent.encryption", () => {
+  const start = src.indexOf("if (hasStories) {");
+  const end = src.indexOf("// Flat content");
+  assert.ok(start !== -1 && end !== -1 && start < end, "could not locate grouped card_content boundaries");
+  const fn = src.slice(start, end);
+  const occurrences = fn.match(ENCRYPTION_SPREAD) || [];
+  assert.strictEqual(occurrences.length, 1, "expected encryption spread in grouped card_content");
+});
+
+test("card_content (flat) forwards rfidContent.encryption", () => {
+  const start = src.indexOf("// Flat content");
+  const end = src.indexOf("BRANCH C: AI PROMPT CARD");
+  assert.ok(start !== -1 && end !== -1 && start < end, "could not locate flat card_content boundaries");
+  const fn = src.slice(start, end);
+  const occurrences = fn.match(ENCRYPTION_SPREAD) || [];
+  assert.strictEqual(occurrences.length, 1, "expected encryption spread in flat card_content");
+});
+
+test("card_ai forwards rfidContent.encryption", () => {
+  const start = src.indexOf("send card_ai to set device into conversation mode");
+  const end = src.indexOf("BRANCH B: Q&A");
+  assert.ok(start !== -1 && end !== -1 && start < end, "could not locate card_ai boundaries");
+  const fn = src.slice(start, end);
+  const occurrences = fn.match(ENCRYPTION_SPREAD) || [];
+  assert.strictEqual(occurrences.length, 1, "expected encryption spread in card_ai");
 });
 
 test("handleContentDownloadRequest's download_response (grouped + flat) forward manifest.encryption", () => {
