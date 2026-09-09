@@ -23,6 +23,7 @@ const path = require('path');
 const rfidService = require('../services/rfid.service');
 const bulkImportService = require('../services/bulkImport.service');
 const uploadService = require('../services/upload.service');
+const contentKeys = require('../services/contentKeys.service');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { requireAuth, requireAdmin } = require('../middleware/auth');
 const { success, badRequest, notFound } = require('../utils/response');
@@ -3805,12 +3806,23 @@ router.post('/content-pack/upload',
     }
 
     try {
+      // Pack thumbnails stay plaintext: the dashboard shows them in an <img>.
+      // Everything else on this route lands on an SD card, so it is sealed
+      // under the pack's key when encryption is on. packCode is required for
+      // that; without it the file goes out plaintext and we say so in the log.
+      const packCode = req.body?.packCode || null;
+      let sealKey = null;
+      if (!isPackThumbnail && contentKeys.isEnabled()) {
+        sealKey = packCode ? await contentKeys.getOrCreatePackKey(packCode) : null;
+        if (!sealKey) logger.warn(`[RFID-UPLOAD] no pack key for packCode=${packCode || 'none'}; uploading plaintext`);
+      }
       const result = await uploadService.uploadContentFile(
         artwork.buffer,
         artwork.filename,
         'rfidcontent',
         category,
-        artwork.mimeType
+        artwork.mimeType,
+        { sealKey }
       );
 
       if (contentPackId) {

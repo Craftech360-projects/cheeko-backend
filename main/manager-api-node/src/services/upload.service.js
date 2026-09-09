@@ -9,6 +9,12 @@ const logger = require('../utils/logger');
 const { prisma } = require('../config/database');
 const { normalizeMacAddress, ownerKeyForDevice } = require('../utils/helpers');
 const path = require('path');
+const { seal } = require('../utils/contentCrypto');
+
+// Spec §4: every writer whose output lands on an SD card runs its body through
+// this. A null key means the feature is off or the caller wants plaintext (pack
+// thumbnails), and the bytes go out exactly as before.
+const maybeSeal = (buffer, sealKey) => (sealKey ? seal(buffer, sealKey) : buffer);
 
 // S3 Configuration
 const AWS_REGION = process.env.AWS_DEFAULT_REGION || 'eu-north-1';
@@ -52,7 +58,7 @@ const s3Client = new S3Client({
  * @param {string} mimeType - File MIME type
  * @returns {Promise<Object>} Upload result with URL
  */
-const uploadContentFile = async (fileBuffer, filename, contentType, category, mimeType) => {
+const uploadContentFile = async (fileBuffer, filename, contentType, category, mimeType, { sealKey = null } = {}) => {
   try {
     // Determine S3 folder based on content type
     let folder = 'stories';
@@ -85,7 +91,7 @@ const uploadContentFile = async (fileBuffer, filename, contentType, category, mi
     const command = new PutObjectCommand({
       Bucket: S3_BUCKET,
       Key: s3Key,
-      Body: fileBuffer,
+      Body: maybeSeal(fileBuffer, sealKey),
       ContentType: mimeType || 'audio/mpeg',
       CacheControl: 'max-age=31536000' // 1 year cache
     });
@@ -405,14 +411,15 @@ async function invalidateCloudFront(keys) {
  * @param {bigint|number|string} kidId
  * @param {string} filename - used only for the extension
  * @param {string} mimeType - validated MIME type
- * @param {{reuseKey?: string|null}} [options] - the key of the recording this
- *   one replaces. Overwriting it keeps `fileUrl` stable, which is what lets the
- *   app cache a frame and the toy hold a manifest across an edit. Honoured only
- *   when the extension matches: a WAV written over a `.mp3` key would hand the
- *   toy a file whose name lies about its contents, so a format change takes a
- *   fresh key and lets the orphan sweep retire the old one.
+ * @param {{reuseKey?: string|null, sealKey?: Buffer|null}} [options] - `reuseKey`
+ *   is the key of the recording this one replaces. Overwriting it keeps
+ *   `fileUrl` stable, which is what lets the app cache a frame and the toy hold
+ *   a manifest across an edit. Honoured only when the extension matches: a WAV
+ *   written over a `.mp3` key would hand the toy a file whose name lies about
+ *   its contents, so a format change takes a fresh key and lets the orphan
+ *   sweep retire the old one.
  */
-async function uploadCustomCardAudio(fileBuffer, kidId, filename, mimeType, { reuseKey = null } = {}) {
+async function uploadCustomCardAudio(fileBuffer, kidId, filename, mimeType, { reuseKey = null, sealKey = null } = {}) {
   const ext = (path.extname(filename || '') || '.mp3').toLowerCase();
   const reusable = reuseKey && path.extname(reuseKey).toLowerCase() === ext ? reuseKey : null;
   const s3Key = reusable || `${customCardFolder(kidId)}/${randomUUID()}${ext}`;
@@ -420,7 +427,7 @@ async function uploadCustomCardAudio(fileBuffer, kidId, filename, mimeType, { re
   await s3Client.send(new PutObjectCommand({
     Bucket: S3_BUCKET,
     Key: s3Key,
-    Body: fileBuffer,
+    Body: maybeSeal(fileBuffer, sealKey),
     ContentType: mimeType || 'audio/mpeg',
     CacheControl: CUSTOM_CARD_CACHE_CONTROL
   }));
@@ -450,17 +457,17 @@ async function uploadCustomCardAudio(fileBuffer, kidId, filename, mimeType, { re
  * unlike the audio there is no extension to disagree about.
  * @param {Buffer} binBuffer - LVGL RGB565 binary
  * @param {bigint|number|string} kidId - the child the picture belongs to
- * @param {{reuseKey?: string|null}} [options] - the key of the picture this one
- *   replaces, if any
+ * @param {{reuseKey?: string|null, sealKey?: Buffer|null}} [options] - `reuseKey`
+ *   is the key of the picture this one replaces, if any
  * @returns {Promise<{s3Key: string, url: string}>}
  */
-async function uploadCustomCardImage(binBuffer, kidId, { reuseKey = null } = {}) {
+async function uploadCustomCardImage(binBuffer, kidId, { reuseKey = null, sealKey = null } = {}) {
   const s3Key = reuseKey || `${customCardFolder(kidId)}/${randomUUID()}.bin`;
 
   await s3Client.send(new PutObjectCommand({
     Bucket: S3_BUCKET,
     Key: s3Key,
-    Body: binBuffer,
+    Body: maybeSeal(binBuffer, sealKey),
     ContentType: 'application/octet-stream',
     CacheControl: CUSTOM_CARD_CACHE_CONTROL
   }));
@@ -492,12 +499,13 @@ async function uploadCustomCardImage(binBuffer, kidId, { reuseKey = null } = {})
  * @param {string} sdFolder - the character's SD directory name
  * @param {number} version - art_version this upload belongs to
  * @param {string} state - one of connect | listen | think | talk
+ * @param {{sealKey?: Buffer|null}} [options]
  * @returns {Promise<{s3Key: string, url: string}>}
  */
 const { CHARACTER_ART_STATES } = require('../config/constants');
 const CHARACTER_ART_CACHE_CONTROL = 'public, max-age=31536000, immutable';
 
-async function uploadCharacterArt(binBuffer, sdFolder, version, state) {
+async function uploadCharacterArt(binBuffer, sdFolder, version, state, { sealKey = null } = {}) {
   // Both of these are path segments built from caller input. The DB check
   // constraint enforces the same shape on sd_folder, but this function is also
   // reachable from a script, and a `..` here would write outside the prefix.
@@ -516,7 +524,7 @@ async function uploadCharacterArt(binBuffer, sdFolder, version, state) {
   await s3Client.send(new PutObjectCommand({
     Bucket: S3_BUCKET,
     Key: s3Key,
-    Body: binBuffer,
+    Body: maybeSeal(binBuffer, sealKey),
     ContentType: 'application/octet-stream',
     CacheControl: CHARACTER_ART_CACHE_CONTROL
   }));
