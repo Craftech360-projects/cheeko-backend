@@ -352,6 +352,102 @@ class TestClient:
                     "sealed" if enc else "plaintext")
         return {"skill_id": skill_id, "files": written, "sealed": bool(enc)}
 
+    def skill_key(self, skill_id: str):
+        """Unwrap this skill's pack key with the NVS secret. None = plaintext pack.
+
+        Mimics ContentManager::GetSkillKey. The key exists only for the duration
+        of playback; nothing caches it and nothing writes it down.
+        """
+        manifest_path = os.path.join(self.store.skill_dir(skill_id), "manifest.jsn")
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as fh:
+                manifest = json.load(fh)
+        except (FileNotFoundError, ValueError):
+            logger.warning("[PLAY] skill '%s' has no readable manifest.jsn", skill_id)
+            return None
+
+        enc = manifest.get("enc")
+        if not enc:
+            return None
+        try:
+            return client_crypto.unwrap_pack_key(
+                self.store.secret(),
+                bytes.fromhex(enc["key"]),
+                bytes.fromhex(enc["nonce"]),
+            )
+        except (KeyError, ValueError) as exc:
+            logger.error("[PLAY] skill '%s': malformed enc block: %s", skill_id, exc)
+            return None
+
+    def read_skill_file(self, path: str, key) -> bytes:
+        """Read a pack file, decrypting in 2048-byte chunks like the firmware.
+
+        READ_BUF_SIZE on the toy is 2048 and those boundaries are not 16-byte
+        aligned, so this is the case worth exercising here rather than on device.
+        """
+        CHUNK = 2048
+        with open(path, "rb") as fh:
+            head = fh.read(client_crypto.HEADER_BYTES)
+            parsed = client_crypto.parse_header(head)
+            if parsed is None:
+                # Legacy plaintext file: rewind and read as-is.
+                fh.seek(0)
+                return fh.read()
+
+            version, nonce = parsed
+            if key is None:
+                raise RuntimeError(f"sealed file with no key: {path}")
+            if version != 2:
+                raise RuntimeError(f"unsupported seal version {version}: {path}")
+
+            dec = client_crypto.decrypt_stream(key, nonce)
+            out = bytearray()
+            while True:
+                chunk = fh.read(CHUNK)
+                if not chunk:
+                    break
+                out += dec.update(chunk)
+            return bytes(out)
+
+    def play_skill(self, skill_id: str, decode_check: bool = True) -> Dict:
+        """Read every file of a downloaded skill and check it decodes.
+
+        Stands in for the MP3 decoder and the LVGL image loader. A file that
+        fails is counted and logged, never handed onward as audio — playing
+        ciphertext is the one outcome the firmware must also refuse.
+        """
+        key = self.skill_key(skill_id)
+        skill_dir = self.store.skill_dir(skill_id)
+        played = failed = 0
+
+        for root, _dirs, files in os.walk(skill_dir):
+            for name in sorted(files):
+                if name == "manifest.jsn":
+                    continue
+                path = os.path.join(root, name)
+                try:
+                    data = self.read_skill_file(path, key)
+                except Exception as exc:
+                    logger.error("[PLAY] %s: %s", path, exc)
+                    failed += 1
+                    continue
+
+                if decode_check:
+                    ok = (data[:3] == b"ID3" or data[:2] == b"\xff\xfb") if name.endswith(".mp3") \
+                        else (data[:1] == b"\x19") if name.endswith(".bin") else True
+                    if not ok:
+                        logger.error("[PLAY] %s decrypted to garbage — wrong key. "
+                                     "Refusing to play. First bytes: %s", path, data[:8].hex())
+                        failed += 1
+                        continue
+
+                logger.info("[PLAY] %s OK (%d bytes)", path, len(data))
+                played += 1
+
+        logger.info("[PLAY] skill '%s': %d played, %d failed, key=%s",
+                    skill_id, played, failed, "unwrapped" if key else "none (plaintext)")
+        return {"played": played, "failed": failed}
+
     def publish_device_message(self, payload: Dict) -> None:
         """Publish a raw device message to the gateway."""
         if not self.mqtt_client:
@@ -1289,6 +1385,7 @@ class TestClient:
         download_current_version: Optional[str] = None,
         analytics_token: Optional[str] = None,
         download_pack: bool = False,
+        play_pack: bool = False,
     ):
         """Run a focused RFID tap/version test against local services."""
         self.auto_download_packs = download_pack
@@ -1307,6 +1404,20 @@ class TestClient:
             logger.error("[RFID-TEST] Timed out waiting for card lookup response")
         else:
             logger.info("[RFID-TEST] card_lookup response:\n%s", json.dumps(lookup_response, indent=2))
+
+        # download_pack already downloaded the pack synchronously inside
+        # on_mqtt_message (auto_download_packs), before this response was
+        # queued back to us, so play_pack only needs to read it back.
+        if play_pack and lookup_response and lookup_response.get("type") == "card_content":
+            skill_id = (lookup_response.get("skill_id") or "").lower()
+            if skill_id:
+                stats = self.play_skill(skill_id)
+                if stats["failed"]:
+                    logger.error("[RFID-TEST] %d file(s) failed to decrypt", stats["failed"])
+            else:
+                logger.warning("[RFID-TEST] card_content had no skill_id; nothing to play")
+        elif play_pack:
+            logger.warning("[RFID-TEST] lookup did not return card_content; nothing to play")
 
         if request_download:
             effective_version = download_current_version if download_current_version is not None else local_version
@@ -1463,6 +1574,11 @@ if __name__ == "__main__":
              "keeping any pack key wrapped on disk.",
     )
     parser.add_argument(
+        "--play-pack",
+        action="store_true",
+        help="rfid mode: decrypt and verify every downloaded file. Implies --download-pack.",
+    )
+    parser.add_argument(
         "--register-secret",
         action="store_true",
         help="Register this client's content secret with the server before the test. "
@@ -1506,7 +1622,8 @@ if __name__ == "__main__":
                 request_download=args.request_download,
                 download_current_version=args.download_current_version,
                 analytics_token=args.analytics_token,
-                download_pack=args.download_pack,
+                download_pack=args.download_pack or args.play_pack,
+                play_pack=args.play_pack,
             )
     except KeyboardInterrupt:
         logger.info("Manual interruption detected. Cleaning up...")
