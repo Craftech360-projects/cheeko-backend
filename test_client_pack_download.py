@@ -8,6 +8,7 @@ import json
 import os
 import shutil
 import tempfile
+import threading
 from unittest import mock
 
 import client_crypto
@@ -113,6 +114,66 @@ def test_manifest_is_written_last():
             except Exception:
                 pass
         assert not os.path.exists(os.path.join(c.store.skill_dir("fail01"), "manifest.jsn"))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_on_mqtt_message_queues_card_content_before_download_finishes():
+    """Regression test for the ordering bug: a caller doing send-then-wait on
+    mqtt_message_queue must see the card_content payload arrive immediately,
+    not only after the (possibly many-second) download completes. The
+    download's own completion must be observable separately, via
+    card_pack_download_done.
+    """
+    import client as client_mod
+
+    tmp = tempfile.mkdtemp()
+    try:
+        c = _client(tmp)
+        c.auto_download_packs = True
+
+        # Drain any stale state from other tests/runs sharing these module globals.
+        while not client_mod.mqtt_message_queue.empty():
+            client_mod.mqtt_message_queue.get_nowait()
+        client_mod.card_pack_download_done.set()  # start "done" so clear() below is observable
+
+        download_may_proceed = threading.Event()
+
+        def slow_get(url, timeout=60):
+            download_may_proceed.wait(timeout=5)  # simulate a slow multi-file download
+            resp = mock.Mock()
+            resp.content = MP3
+            resp.raise_for_status = mock.Mock()
+            return resp
+
+        payload = {
+            "type": "card_content", "rfid_uid": "AABBCCDD",
+            "skill_id": "slow01", "skill_name": "Slow", "version": 1,
+            "audio": [{"index": 1, "url": "https://cdn/a.mp3"}], "images": [],
+        }
+        msg = mock.Mock()
+        msg.payload = json.dumps(payload).encode()
+        msg.topic = "devices/p2p/test"
+
+        with mock.patch("client.requests.get", side_effect=slow_get):
+            t = threading.Thread(target=c.on_mqtt_message, args=(None, None, msg))
+            t.start()
+            try:
+                # The payload must reach the queue right away...
+                queued = client_mod.mqtt_message_queue.get(timeout=2)
+                assert queued["type"] == "card_content"
+                assert queued["skill_id"] == "slow01"
+                # ...well before the download (still blocked on our event) is done.
+                assert not client_mod.card_pack_download_done.is_set()
+            finally:
+                download_may_proceed.set()
+                t.join(timeout=5)
+                assert not t.is_alive()
+
+        # Once the callback thread returns, completion must be signalled.
+        assert client_mod.card_pack_download_done.is_set()
+        manifest_path = os.path.join(c.store.skill_dir("slow01"), "manifest.jsn")
+        assert os.path.exists(manifest_path)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

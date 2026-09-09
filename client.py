@@ -64,6 +64,11 @@ stop_recording_event = threading.Event()
 # Set by the recording thread while the mic is actually open, so the Talk key
 # knows whether a press means "start my turn" or "end my turn".
 recording_active = threading.Event()
+# Set by on_mqtt_message once a triggered card_content pack download finishes
+# (success or failure). The card_content payload itself is queued to
+# mqtt_message_queue before the download starts, so callers must wait on this
+# event separately if they need the downloaded files to be complete on disk.
+card_pack_download_done = threading.Event()
 
 
 def generate_mqtt_credentials(device_mac: str) -> Dict[str, str]:
@@ -278,11 +283,19 @@ class TestClient:
                     pass
 
             elif payload.get("type") == "card_content" and self.auto_download_packs:
+                # Queue the payload FIRST: the waiter's job is to confirm the
+                # card resolved, not to wait for the (potentially many-second)
+                # download below. Clear the completion event before starting
+                # so a caller that waits on it sees the state of THIS
+                # download, not a leftover from a previous one.
+                card_pack_download_done.clear()
+                mqtt_message_queue.put(payload)
                 try:
                     self.download_card_content(payload)
                 except Exception as exc:
                     logger.error("[PACK] download failed: %s", exc)
-                mqtt_message_queue.put(payload)
+                finally:
+                    card_pack_download_done.set()
 
             else:
                 mqtt_message_queue.put(payload)
@@ -1418,17 +1431,30 @@ class TestClient:
         else:
             logger.info("[RFID-TEST] card_lookup response:\n%s", json.dumps(lookup_response, indent=2))
 
-        # download_pack already downloaded the pack synchronously inside
-        # on_mqtt_message (auto_download_packs), before this response was
-        # queued back to us, so play_pack only needs to read it back.
-        if play_pack and lookup_response and lookup_response.get("type") == "card_content":
-            skill_id = (lookup_response.get("skill_id") or "").lower()
-            if skill_id:
-                stats = self.play_skill(skill_id)
-                if stats["failed"]:
-                    logger.error("[RFID-TEST] %d file(s) failed to decrypt", stats["failed"])
-            else:
-                logger.warning("[RFID-TEST] card_content had no skill_id; nothing to play")
+        # card_content was queued to us by on_mqtt_message before its pack
+        # download started (see on_mqtt_message), so the download may still
+        # be running on the MQTT callback thread here. Wait for it to finish
+        # before reading the files back or cleaning up out from under it.
+        # 120s is a generous bound: the 20-file pack that motivated this
+        # timeout took ~16s, so this leaves ~7x headroom for a much larger
+        # pack or a slow link while still failing loudly instead of hanging.
+        DOWNLOAD_WAIT_TIMEOUT = 120
+        if download_pack and lookup_response and lookup_response.get("type") == "card_content":
+            if not card_pack_download_done.wait(timeout=DOWNLOAD_WAIT_TIMEOUT):
+                logger.error(
+                    "[RFID-TEST] Pack download did not finish within %ds; not "
+                    "playing a partial pack, and cleanup may now race the "
+                    "still-running download thread",
+                    DOWNLOAD_WAIT_TIMEOUT,
+                )
+            elif play_pack:
+                skill_id = (lookup_response.get("skill_id") or "").lower()
+                if skill_id:
+                    stats = self.play_skill(skill_id)
+                    if stats["failed"]:
+                        logger.error("[RFID-TEST] %d file(s) failed to decrypt", stats["failed"])
+                else:
+                    logger.warning("[RFID-TEST] card_content had no skill_id; nothing to play")
         elif play_pack:
             logger.warning("[RFID-TEST] lookup did not return card_content; nothing to play")
 
