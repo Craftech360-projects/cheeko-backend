@@ -172,14 +172,32 @@ Offline does not work for a card that was never downloaded, exactly as today.
 ```js
 router.get('/content-pack/preview', requireAdmin, asyncHandler(async (req, res) => {
   const { url, packCode } = req.query;
-  if (!url.startsWith(`https://${CLOUDFRONT_DOMAIN}/`)) return badRequest(res, 'Bad url'); // not an open proxy
-  const upstream = await fetch(url);
-  const head = Buffer.from(await upstream.clone().arrayBuffer()).subarray(0, 16);
-  if (!head.subarray(0, 4).equals(MAGIC)) return res.redirect(url);       // legacy plaintext
-  const key = head[4] === 2 ? await getPackKey(packCode) : GLOBAL_KEY;
-  const iv = Buffer.concat([head.subarray(8, 16), Buffer.alloc(8, 0)]);
-  res.type(url.endsWith('.mp3') ? 'audio/mpeg' : 'application/octet-stream');
-  Readable.fromWeb(upstream.body).pipe(skipBytes(16)).pipe(crypto.createDecipheriv('aes-128-ctr', key, iv)).pipe(res);
+  // Origin is pinned by exact hostname, https only, no embedded credentials, no port,
+  // and the fetch uses redirect:'manual' so an off-domain redirect is never followed.
+  // A startsWith check is NOT sufficient: cloudfront.net.attacker.com passes it.
+  const parsed = new URL(url);
+  if (parsed.protocol !== 'https:' || parsed.hostname !== CLOUDFRONT_DOMAIN ||
+      parsed.port !== '' || parsed.username || parsed.password) return badRequest(res, 'Bad url');
+  const upstream = await fetch(parsed.href, { redirect: 'manual' });
+  // Reject on content-length before buffering: this route accepts any path on the
+  // distribution, so without a cap one preview can exhaust the process heap.
+  if (Number(upstream.headers.get('content-length')) > PREVIEW_MAX_BYTES) return badRequest(res, 'Too large');
+  const bytes = Buffer.from(await upstream.arrayBuffer());
+  const contentType = url.toLowerCase().endsWith('.mp3') ? 'audio/mpeg' : 'application/octet-stream';
+  res.type(contentType).set('Cache-Control', 'private, no-store').set('X-Content-Type-Options', 'nosniff');
+
+  const header = parseHeader(bytes);
+  // Legacy plaintext: SEND the bytes, do not redirect to the CDN. A browser cannot follow
+  // that redirect — CloudFront serves no Access-Control-Allow-Origin, so the cross-origin
+  // fetch fails and every legacy preview breaks. We already hold the bytes; just send them.
+  if (!header) return res.send(bytes);
+  if (header.version !== 2) return badRequest(res, 'Unsupported seal version');
+
+  const key = await getPackKey(packCode);
+  if (!key) return notFound(res, 'No content key for this pack');
+  stream.pipeline(Readable.from([bytes.subarray(HEADER_BYTES)]),
+                  createUnsealStream(key, header.nonce), res,
+                  (err) => { if (err) logger.error(...); });
 }));
 ```
 
@@ -191,7 +209,18 @@ const res = await fetch(`${Api.getServiceUrl()}/admin/rfid/content-pack/preview?
 this.currentAudio = new Audio(URL.createObjectURL(await res.blob()));
 ```
 
-Thumbnails are never sealed, so cover art is unchanged. Item images are LVGL `.bin` and were never previewable.
+Thumbnails are never sealed, so cover art is unchanged.
+
+Item images are LVGL `.bin`, which the dashboard *does* render — it decodes them client-side in
+`manager-web/src/utils/lvglBin.js`. Those must go through this same preview route when the pack
+is sealed, passing `packCode`, or the decoder sees `CKE1` instead of the LVGL magic and the
+artwork silently disappears. Callers with no pack code fall back to the plain content proxy, so
+plaintext artwork is unaffected.
+
+Character sprites are the same shape of problem and are NOT yet handled: they are keyed by
+`sd_folder` rather than `packCode`, so the preview route needs a second parameter before the
+template-management screen can render sealed character art. Close that before enabling
+`CONTENT_MASTER_KEY` anywhere real.
 
 ---
 
