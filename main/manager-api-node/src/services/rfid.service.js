@@ -943,7 +943,6 @@ const buildCharacterArt = async (agentName, mac) => {
         art_listen_url: true,
         art_think_url: true,
         art_talk_url: true,
-        art_content_key: true,
       },
     });
     if (!tpl || !tpl.sd_folder) return null;

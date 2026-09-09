@@ -1,7 +1,7 @@
 'use strict';
 const crypto = require('crypto');
 const cc = require('../../src/utils/contentCrypto');
-const { resealItem, mimeTypeFor } = require('../../scripts/backfill-seal-content');
+const { resealItem, mimeTypeFor, parseArgs, main } = require('../../scripts/backfill-seal-content');
 
 const K = crypto.randomBytes(16);
 const MP3 = crypto.randomBytes(300);
@@ -131,4 +131,36 @@ test('an image upload failure does not orphan an already-sealed audio upload', a
   expect(r.audio).toBe('sealed');
   expect(r.image).toBe('error');
   expect(d.updateItem).toHaveBeenCalledWith(5n, { audio_url: 'https://cdn/rfidcontent/audio/new-12345678.mp3' });
+});
+
+// ── the --yes confirmation gate on a live run ───────────────────────────────
+
+describe('parseArgs', () => {
+  test('reads --yes alongside --dry-run and --pack', () => {
+    expect(parseArgs(['--pack', 'STORY01', '--yes'])).toEqual({ dryRun: false, pack: 'STORY01', yes: true });
+  });
+
+  test('yes defaults to false when not given', () => {
+    expect(parseArgs(['--dry-run'])).toEqual({ dryRun: true, pack: null, yes: false });
+  });
+});
+
+describe('main() refuses a live run without --yes', () => {
+  const originalArgv = process.argv;
+  afterEach(() => { process.argv = originalArgv; });
+
+  // The user's binding rule is not to touch existing S3 content, and this is
+  // the one script whose purpose is exactly that — a live run must be an
+  // explicit choice, not the accidental default of forgetting --dry-run.
+  // The guard runs before dotenv/contentKeys/Prisma are even required, so
+  // this rejects without needing any real environment or DB.
+  test('rejects before touching dotenv/contentKeys/Prisma when neither --dry-run nor --yes is given', async () => {
+    process.argv = ['node', 'backfill-seal-content.js'];
+    await expect(main()).rejects.toThrow(/--yes/);
+  });
+
+  test('rejects a --pack-scoped run with the same guard', async () => {
+    process.argv = ['node', 'backfill-seal-content.js', '--pack', 'STORY01'];
+    await expect(main()).rejects.toThrow(/--yes/);
+  });
 });

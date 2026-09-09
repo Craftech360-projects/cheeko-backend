@@ -9,7 +9,10 @@
  * are left in place for a rollback window; delete them by hand later.
  *
  *   node scripts/backfill-seal-content.js --dry-run
- *   node scripts/backfill-seal-content.js --pack STORY01
+ *   node scripts/backfill-seal-content.js --pack STORY01 --yes
+ *
+ * A live run (no --dry-run) rewrites existing S3 content in place and needs
+ * an explicit --yes or it refuses to start.
  *
  * Nothing here requires Prisma, AWS or contentKeys at module load time — those
  * are all pulled in lazily inside main(), so `require`-ing this file (as the
@@ -143,12 +146,22 @@ async function resealItem(item, d) {
 
 function parseArgs(argv) {
   const dryRun = argv.includes('--dry-run');
+  const yes = argv.includes('--yes');
   const packIndex = argv.indexOf('--pack');
   const pack = packIndex !== -1 ? argv[packIndex + 1] || null : null;
-  return { dryRun, pack };
+  return { dryRun, pack, yes };
 }
 
 async function main() {
+  const { dryRun, pack, yes } = parseArgs(process.argv.slice(2));
+
+  // This is the one script whose purpose is rewriting existing S3 content
+  // in place — refuse a live run unless it is explicitly confirmed, before
+  // touching dotenv/Prisma/S3 at all.
+  if (!dryRun && !yes) {
+    throw new Error('Refusing a live run without --yes (this rewrites existing S3 content). Pass --dry-run to preview, or --yes to confirm.');
+  }
+
   require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
   const contentKeys = require('../src/services/contentKeys.service');
@@ -156,8 +169,6 @@ async function main() {
 
   const { prisma } = require('../src/config/database');
   const uploadService = require('../src/services/upload.service');
-
-  const { dryRun, pack } = parseArgs(process.argv.slice(2));
 
   // Prisma Client API, not raw SQL — `pack` never touches a query string, so
   // there is nothing here for a hand-typed --pack value to inject into.
@@ -214,5 +225,5 @@ async function main() {
   await prisma.$disconnect();
 }
 
-module.exports = { resealItem, resealOne, categoryFromUrl, stripUuidSuffix, mimeTypeFor, parseArgs };
+module.exports = { resealItem, resealOne, categoryFromUrl, stripUuidSuffix, mimeTypeFor, parseArgs, main };
 if (require.main === module) main().catch((e) => { console.error(e); process.exit(1); });
