@@ -74,7 +74,17 @@ async function resealOne(url, packCode, d) {
     // in the live table. getPackKey only reads, so a dry run can report
     // accurately without side effects.
     const key = await d.getPackKey(packCode);
-    return key ? 'would-seal' : 'nokey';
+    if (key) return 'would-seal';
+    // getPackKey returns null in two different situations that a real run
+    // treats very differently: (a) there is no pack row for this packCode at
+    // all — getOrCreatePackKey would also return null, so this item really is
+    // unsealable; or (b) the pack row exists but has no content_key yet —
+    // getOrCreatePackKey would mint one and seal the item. Collapsing both
+    // into 'nokey' made a dry run under-report: items in case (b) look like
+    // they'd be skipped when a real run would actually seal them. Tell them
+    // apart with one more read (no key is written): does the pack row exist.
+    if (packCode && (await d.packExists(packCode))) return 'would-seal-after-key-creation';
+    return 'nokey';
   }
 
   const key = await d.getOrCreatePackKey(packCode);
@@ -170,6 +180,10 @@ async function main() {
     fetchBytes: async (url) => Buffer.from(await (await fetch(url)).arrayBuffer()),
     getPackKey: contentKeys.getPackKey,
     getOrCreatePackKey: contentKeys.getOrCreatePackKey,
+    // Read-only existence check used only to disambiguate 'nokey' in dry-run
+    // (see the comment in resealOne) — a plain findFirst, no write.
+    packExists: async (packCode) =>
+      Boolean(await prisma.rfid_content_pack.findFirst({ where: { pack_code: packCode }, select: { id: true } })),
     // Intentionally 3 params, no sealKey slot — see the comment in resealOne.
     upload: (buf, name, category) =>
       uploadService.uploadContentFile(buf, name, 'rfidcontent', category, mimeTypeFor(name)),
