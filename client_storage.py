@@ -99,6 +99,12 @@ class DeviceStore:
         registration does not lose track of it."""
         return os.path.exists(self._pending_path())
 
+    def mark_registration_pending(self) -> None:
+        """Set when the server may hold a different secret than ours: a
+        rotation, or content whose key unwrapped but did not decode."""
+        with open(self._pending_path(), "w", encoding="utf-8") as fh:
+            fh.write(self.secret_fingerprint())
+
     def mark_registration_complete(self) -> None:
         """Call only after the server has confirmed the new secret. Clearing
         this on anything less (e.g. just attempting a download) would let a
@@ -135,8 +141,7 @@ class DeviceStore:
         # next download would come back wrapped under it -- undecryptable by
         # this device's new secret. Mark that pending until a registration
         # actually succeeds; see registration_pending()/mark_registration_complete().
-        with open(self._pending_path(), "w", encoding="utf-8") as fh:
-            fh.write(current)
+        self.mark_registration_pending()
         logger.warning(
             "[SECRET] device secret changed (fingerprint %s -> %s) -- NVS was "
             "likely erased. Wiped %s; every wrapped pack key on the card was "

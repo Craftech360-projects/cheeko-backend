@@ -67,8 +67,11 @@ def test_wrong_secret_fails_loudly_and_never_returns_ciphertext():
     tmp = tempfile.mkdtemp()
     try:
         c = _client_with_pack(tmp, wrong_secret=True)
+        assert not c.store.registration_pending()
         result = c.play_skill("story01")
         assert result["played"] == 0 and result["failed"] == 2
+        # Firmware guide section 8: a wrong key sets pending, so the next tap re-registers first.
+        assert c.store.registration_pending()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -127,6 +130,15 @@ def test_rotating_the_secret_wipes_the_pack_so_the_next_tap_redownloads():
         assert os.listdir(skill_dir) == []  # empty and ready for a re-download
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_lvgl_frame_decodes_to_rgb_and_rejects_truncated():
+    import struct
+    from client import lvgl_to_image
+    # 2x1 RGB565 frame: pure red, pure blue.
+    frame = b"\x19\x12\x00\x00" + struct.pack("<HHHH", 2, 1, 4, 0) + struct.pack("<HH", 0xF800, 0x001F)
+    assert list(lvgl_to_image(frame).getdata()) == [(255, 0, 0), (0, 0, 255)]
+    assert lvgl_to_image(LVGL) is None  # header says 296x240, only 500 bytes follow
 
 
 if __name__ == "__main__":

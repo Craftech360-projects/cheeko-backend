@@ -51,9 +51,10 @@ def unseal(sealed: bytes, key: bytes) -> bytes:
 def decrypt_stream(key: bytes, nonce: bytes):
     """Sequential decryptor for chunked reads.
 
-    The toy reads 2 KB at a time and those boundaries are not 16-byte aligned,
-    so the keystream position has to survive between calls. cryptography's
-    CipherContext already does that; this wrapper just names the intent.
+    The toy reads 2 KB at a time. 2048 is a whole number of AES blocks, but a
+    reader must not rely on that: the keystream position has to survive
+    between calls whatever the chunk size. cryptography's CipherContext
+    already does that; this wrapper just names the intent.
     """
     return _ctr(key, nonce).decryptor()
 

@@ -8,6 +8,7 @@ import struct
 import logging
 import argparse
 import os
+import sys
 import pyaudio
 import keyboard
 # hjvk
@@ -24,7 +25,8 @@ import opuslib
 
 # --- Configuration ---
 
-SERVER_IP = os.getenv("TEST_SERVER_IP", "192.168.0.10")
+SERVER_IP = os.getenv("TEST_SERVER_IP", "64.227.170.31")
+
 OTA_PORT = 8002
 MQTT_BROKER_HOST = os.getenv("TEST_MQTT_BROKER_HOST", SERVER_IP)
 
@@ -126,6 +128,30 @@ assert parse_expression_tag("[zzzz] hi") == ("neutral", "hi")
 assert parse_expression_tag("[OK!] hi") == (None, "[OK!] hi")
 
 
+def looks_decoded(name: str, data: bytes) -> Optional[bool]:
+    """Magic-byte check standing in for the MP3 decoder / LVGL loader.
+    None means an unrecognised file type."""
+    if name.endswith(".mp3"):
+        return data[:3] == b"ID3" or data[:2] == b"\xff\xfb"
+    if name.endswith(".bin"):
+        return data[:1] == b"\x19"
+    return None
+
+
+def lvgl_to_image(data: bytes):
+    """LVGL v9 .bin frame -> PIL image, or None if it isn't one we can read.
+    Header layout: main/manager-web/src/utils/lvglBin.js. RGB565A8's alpha
+    plane is ignored; pack artwork is plain RGB565."""
+    from PIL import Image
+    if len(data) < 12 or data[0] != 0x19 or data[1] not in (0x12, 0x14):
+        return None
+    w, h, stride = struct.unpack_from("<HHH", data, 4)
+    stride = stride or w * 2
+    if not w or not h or len(data) < 12 + stride * h:
+        return None
+    return Image.frombuffer("RGB", (w, h), data[12:12 + stride * h], "raw", "BGR;16", stride, 1)
+
+
 class TestClient:
     def __init__(self, device_mac: Optional[str] = None):
         self.mqtt_client = None
@@ -197,8 +223,6 @@ class TestClient:
             MQTT_BROKER_PORT,
             self.mqtt_credentials["client_id"],
         )
-        logger.info("[RFID-TEST] Local mode: no OTA call, so content_secret is NOT registered. "
-                    "Run once with --register-secret if the server has no secret for this MAC.")
 
     def on_mqtt_connect(self, client, userdata, flags, rc, properties=None):
         """Callback for MQTT connection."""
@@ -316,17 +340,48 @@ class TestClient:
         if not self.store.registration_pending():
             return True
         logger.warning(
-            "[SECRET] %s: secret was rotated and is not yet registered with "
-            "the server -- registering it now before proceeding.", context)
+            "[SECRET] %s: registration is PENDING (secret rotated, or the server "
+            "held a different one) -- registering now, before the lookup.", context)
         if self.register_content_secret():
             self.store.mark_registration_complete()
+            logger.info("[SECRET] %s: registered, pending cleared.", context)
             return True
         logger.error(
-            "[SECRET] %s: registration failed -- the server still holds the "
-            "OLD secret, so anything it wraps right now would be "
+            "[SECRET] %s: registration failed -- the server may still hold "
+            "another secret, so anything it wraps right now could be "
             "undecryptable by this device. Not downloading; retry once the "
             "server is reachable.", context)
         return False
+
+    def boot_register_secret(self) -> bool:
+        """Mimic the toy's boot OTA check, which carries content_secret EVERY
+        time (firmware guide Task 3). Local mode builds MQTT credentials
+        itself and skips the rest of OTA, but not this: re-sending on every
+        boot is what lets the server converge on this device's real secret.
+        """
+        self.store.reconcile_secret()
+        logger.info("[BOOT] OTA check with content_secret for %s (secret fingerprint %s)",
+                    self.device_mac_formatted, self.store.secret_fingerprint())
+        if self.register_content_secret():
+            self.store.mark_registration_complete()
+            logger.info("[BOOT] OTA answered 200: the server now wraps pack keys for this "
+                        "secret (if this MAC is a known device). Registration not pending.")
+            return True
+        logger.warning("[BOOT] OTA check failed; the server may hold another secret. A "
+                       "wrong-key playback will mark registration pending for the next tap.")
+        return False
+
+    def _on_wrong_key(self, context: str) -> None:
+        """Firmware guide section 8: a key that unwraps but content that does not
+        decode means the server wrapped it for a different secret (e.g. another
+        client registered one for this MAC). Mark registration pending so the
+        next tap re-registers BEFORE its lookup and gets a key wrapped for us."""
+        if self.store.registration_pending():
+            return
+        self.store.mark_registration_pending()
+        logger.warning("[SECRET] %s: key unwrapped but content does not decode -- the server "
+                       "holds a different secret for %s. Registration marked PENDING; the next "
+                       "tap re-registers before its lookup.", context, self.device_mac_formatted)
 
     def download_card_content(self, card_content: Dict) -> Dict:
         """Mimic ContentManager::HandleServerResponse for a card_content payload.
@@ -482,11 +537,8 @@ class TestClient:
                     continue
 
                 if decode_check:
-                    if name.endswith(".mp3"):
-                        ok = data[:3] == b"ID3" or data[:2] == b"\xff\xfb"
-                    elif name.endswith(".bin"):
-                        ok = data[:1] == b"\x19"
-                    else:
+                    ok = looks_decoded(name, data)
+                    if ok is None:
                         logger.error("[PLAY] %s: unrecognised file type, refusing to "
                                      "count as played. First bytes: %s", path, data[:8].hex())
                         failed += 1
@@ -494,6 +546,8 @@ class TestClient:
                     if not ok:
                         logger.error("[PLAY] %s decrypted to garbage — wrong key. "
                                      "Refusing to play. First bytes: %s", path, data[:8].hex())
+                        if key is not None:
+                            self._on_wrong_key("skill '%s'" % skill_id)
                         failed += 1
                         continue
 
@@ -508,8 +562,9 @@ class TestClient:
             key_status = (
                 "unwrapped but EVERY file failed to decode -- this usually means "
                 "the server wrapped this pack under a DIFFERENT secret than the "
-                "one this device now holds (a rotation whose new secret was never "
-                "registered with the server). Register the secret and re-download."
+                "one this device now holds (a rotation, or another client registered "
+                "a secret for this MAC). Registration is now pending, so the next tap "
+                "re-registers and re-downloads."
             )
         else:
             key_status = "unwrapped, %d of %d file(s) failed to decode" % (failed, played + failed)
@@ -1460,14 +1515,15 @@ class TestClient:
         """Run a focused RFID tap/version test against local services."""
         self.auto_download_packs = download_pack
         self.setup_local_test_config()
+        self.boot_register_secret()
 
         if download_pack:
             # The server wraps a pack's key under whatever secret it holds
             # for this MAC AT LOOKUP TIME -- that's baked into the
             # card_content response, before download_card_content() ever
-            # runs. So a pending registration (from a rotation this local
-            # mode never reported, since it skips OTA) must be resolved here,
-            # before the tap below, not merely before the download.
+            # runs. So a registration still pending (boot check failed, or a
+            # wrong-key playback) must be resolved here, before the tap
+            # below, not merely before the download.
             self.store.reconcile_secret()
             self._ensure_secret_registered("RFID tap for %s" % rfid_uid)
 
@@ -1625,16 +1681,233 @@ class TestClient:
         self.cleanup()
 
 
+def run_ui(client: TestClient, default_uid: str) -> None:
+    """Minimal toy window: tap a card, the pack downloads to the SD mimic
+    folder, then play it. Files stay sealed on disk; each track and its image
+    are decrypted in RAM right before use, same as play_skill / the firmware.
+    """
+    import glob
+    import io
+    import tkinter as tk
+    from tkinter import ttk
+    os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
+    import pygame
+    from PIL import ImageTk
+
+    pygame.mixer.init()
+    client.auto_download_packs = True
+    client.setup_local_test_config()
+    registered = client.boot_register_secret()
+    connected = client.connect_mqtt()
+
+    root = tk.Tk()
+    root.title(f"Cheeko mimic {client.device_mac_formatted}")
+    ui_jobs = Queue()  # worker threads hand tk calls to the main loop; tk is not thread-safe
+    state = {"skill": None, "key": None, "tracks": [], "playing": None}
+    uid_var = tk.StringVar(value=default_uid)
+    status = tk.StringVar(value=("MQTT connected" if connected else "MQTT connect FAILED (offline playback only)")
+                          + (" | secret registered" if registered else " | secret NOT registered"))
+
+    def say(msg, level=logging.INFO):
+        """Window status line, mirrored to the console log."""
+        logger.log(level, "[UI] %s", msg)
+        status.set(msg)
+
+    def background(fn):
+        threading.Thread(target=fn, daemon=True).start()
+
+    def load_skill(skill_id):
+        client.store.reconcile_secret()
+        d = client.store.skill_dir(skill_id)
+        state.update(skill=skill_id, key=client.skill_key(skill_id), playing=None,
+                     tracks=sorted(glob.glob(os.path.join(d, "**", "audio", "*.mp3"), recursive=True)))
+        track_list.delete(0, "end")
+        for p in state["tracks"]:
+            track_list.insert("end", os.path.relpath(p, d))
+        say(f"{skill_id}: {len(state['tracks'])} tracks, "
+            f"{'sealed' if state['key'] else 'plaintext'}  |  {os.path.abspath(d)}")
+
+    def stop():
+        pygame.mixer.music.stop()
+        state["playing"] = None
+
+    def play(i):
+        stop()
+        if not 0 <= i < len(state["tracks"]):
+            return
+        path = state["tracks"][i]
+        name = os.path.relpath(path, client.store.skill_dir(state["skill"]))
+        try:
+            data = client.read_skill_file(path, state["key"])
+        except Exception as exc:
+            say(f"{name}: {exc}", logging.ERROR)
+            return
+        if not looks_decoded(path, data):
+            if state["key"] is not None:
+                client._on_wrong_key(f"track {name}")
+            say(f"{name} decrypted to garbage (wrong key) - refusing to play. "
+                "Tap the card again: it re-registers the secret first.", logging.ERROR)
+            return
+        pygame.mixer.music.load(io.BytesIO(data), "mp3")
+        pygame.mixer.music.play()
+        state["playing"] = i
+        track_list.selection_clear(0, "end")
+        track_list.selection_set(i)
+        track_list.see(i)
+        say(f"Playing {name} ({'decrypted in RAM' if state['key'] else 'plaintext'})")
+
+        # images/NN.bin sits beside audio/NN.mp3
+        img_path = os.path.join(os.path.dirname(os.path.dirname(path)), "images",
+                                os.path.basename(path)[:-4] + ".bin")
+        photo = None
+        if os.path.exists(img_path):
+            try:
+                img = lvgl_to_image(client.read_skill_file(img_path, state["key"]))
+                photo = img and ImageTk.PhotoImage(img)
+            except Exception as exc:
+                logger.error("[UI] %s: %s", img_path, exc)
+        art.configure(image=photo or "")
+        art.image = photo  # keep a reference or tk drops the image
+
+    def tap():
+        uid = uid_var.get().strip()
+        if not uid:
+            return
+        stop()
+        tap_btn.state(["disabled"])
+        say(f"Tapped {uid}, looking up...")
+
+        def done(msg, skill_id=None):
+            def apply():
+                tap_btn.state(["!disabled"])
+                if skill_id:
+                    load_skill(skill_id)
+                    play(0)
+                else:
+                    say(msg, logging.WARNING)
+            ui_jobs.put(apply)
+
+        def work():
+            # Register BEFORE the lookup: the server bakes the key wrap into
+            # the card_content reply (see run_rfid_test).
+            client.store.reconcile_secret()
+            if not client._ensure_secret_registered(f"RFID tap for {uid}"):
+                return done("Secret registration is pending and failed (is the API on :8002 up?)")
+            resp = client.send_rfid_card_lookup(uid)
+            kind = (resp or {}).get("type")
+            if kind != "card_content":
+                return done(f"{uid}: {kind or 'no reply from gateway'}")
+            ui_jobs.put(lambda: say(f"Downloading {resp.get('skill_name') or resp.get('skill_id')}..."))
+            if not card_pack_download_done.wait(timeout=120):
+                return done("Download did not finish within 120s")
+            done(None, (resp.get("skill_id") or "").lower())
+
+        background(work)
+
+    def register():
+        say("Registering content secret...")
+
+        def work():
+            ok = client.register_content_secret()
+            if ok:
+                client.store.mark_registration_complete()
+            ui_jobs.put(lambda: say("Secret registered" if ok else "Secret registration FAILED",
+                                    logging.INFO if ok else logging.ERROR))
+
+        background(work)
+
+    def open_folder():
+        path = client.store.skill_dir(state["skill"]) if state["skill"] else client.store.sd_root()
+        os.startfile(os.path.abspath(path))  # ponytail: Windows-only, the only place this runs
+
+    def selected():
+        sel = track_list.curselection()
+        return sel[0] if sel else 0
+
+    top = ttk.Frame(root, padding=8)
+    top.pack(fill="x")
+    ttk.Label(top, text="Card UID").pack(side="left")
+    ttk.Entry(top, textvariable=uid_var, width=16).pack(side="left", padx=4)
+    tap_btn = ttk.Button(top, text="Tap card", command=tap)
+    tap_btn.pack(side="left")
+    ttk.Button(top, text="Register secret", command=register).pack(side="left", padx=4)
+    ttk.Button(top, text="Open folder", command=open_folder).pack(side="left")
+    ttk.Label(root, textvariable=status, padding=(8, 0)).pack(fill="x")
+
+    mid = ttk.Frame(root, padding=8)
+    mid.pack(fill="both", expand=True)
+    track_list = tk.Listbox(mid, width=24, height=16)
+    track_list.pack(side="left", fill="y")
+    track_list.bind("<Double-Button-1>", lambda _e: play(selected()))
+    art = ttk.Label(mid)
+    art.pack(side="left", padx=8)
+
+    bottom = ttk.Frame(root, padding=8)
+    bottom.pack(fill="x")
+    ttk.Button(bottom, text="Play", command=lambda: play(selected())).pack(side="left")
+    ttk.Button(bottom, text="Stop", command=stop).pack(side="left", padx=4)
+
+    def pump():
+        while True:
+            try:
+                ui_jobs.get_nowait()()
+            except Empty:
+                break
+        # Track finished: advance to the next one, like the toy playing a pack.
+        if state["playing"] is not None and not pygame.mixer.music.get_busy():
+            play(state["playing"] + 1)
+        root.after(200, pump)
+
+    def close():
+        pygame.mixer.quit()
+        client.cleanup()
+        root.destroy()
+
+    # Start on whatever was downloaded last, so the card plays offline too.
+    existing = glob.glob(os.path.join(client.store.sd_root(), "skills", "*", "manifest.jsn"))
+    if existing:
+        load_skill(os.path.basename(os.path.dirname(max(existing, key=os.path.getmtime))))
+
+    root.protocol("WM_DELETE_WINDOW", close)
+    pump()
+    root.mainloop()
+
+
+MODES = [
+    ("voice", "talk to Cheeko (push-to-talk, full OTA handshake)"),
+    ("ui", "window: tap a card, download its pack, play it decrypted"),
+    ("rfid", "console: tap one card, download, decrypt and verify the pack"),
+    ("imagine", "AI Imagine: speak a prompt, get a generated image"),
+]
+
+
+def choose_mode(args, ask=input) -> str:
+    """No --mode on the command line: pick one from a numbered menu."""
+    print(f"\nServer: {SERVER_IP}  (set TEST_SERVER_IP to change)")
+    for n, (mode, desc) in enumerate(MODES, 1):
+        print(f"  {n}) {mode:8s} {desc}")
+    choice = ask("Mode [1]: ").strip().lower() or "1"
+    names = [m for m, _ in MODES]
+    mode = names[int(choice) - 1] if choice.isdigit() and 0 < int(choice) <= len(names) else choice
+    if mode not in names:
+        raise SystemExit(f"Unknown mode {choice!r}; pick 1-{len(names)} or one of {names}")
+    if mode == "rfid":
+        args.rfid_uid = args.rfid_uid or ask("Card UID [ABCDEF090901]: ").strip() or "ABCDEF090901"
+        args.play_pack = True  # from the menu, a tap means download + decrypt + verify
+    return mode
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Cheeko test client. Defaults to voice mode; use --mode rfid with --rfid-uid for card tests."
     )
     parser.add_argument(
         "--mode",
-        choices=["voice", "rfid", "imagine"],
-        default="voice",
-        help="Test mode to run. RFID mode requires --rfid-uid. "
-             "imagine mode = AI Imagine (speak a prompt, get a generated image).",
+        choices=["voice", "rfid", "imagine", "ui"],
+        default=None,
+        help="Test mode to run; omit it to pick from a menu. RFID mode requires --rfid-uid. "
+             "imagine mode = AI Imagine (speak a prompt, get a generated image). "
+             "ui mode = window to tap a card, download its pack and play it decrypted.",
     )
     parser.add_argument(
         "--ota",
@@ -1675,10 +1948,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--register-secret",
         action="store_true",
-        help="Register this client's content secret with the server before the test. "
-             "Needed once per MAC in rfid mode, which does not call OTA.",
+        help="No longer needed: rfid and ui modes send the secret on startup, "
+             "like the toy's boot OTA check. Kept so old commands still parse.",
     )
     args = parser.parse_args()
+    if args.mode is None:
+        # ponytail: no terminal (scripts, pipes) keeps the old voice default
+        args.mode = choose_mode(args) if sys.stdin.isatty() else "voice"
 
     print(f"[SEQ] Sequence logging: {'ENABLED' if ENABLE_SEQUENCE_LOGGING else 'DISABLED'}")
     print(f"[STATS] Log frequency: Every {LOG_SEQUENCE_EVERY_N_PACKETS} packets")
@@ -1703,11 +1979,11 @@ if __name__ == "__main__":
             client.run_test()
         elif args.mode == "imagine":
             client.run_imagine_test(use_ota=args.ota)
+        elif args.mode == "ui":
+            run_ui(client, args.rfid_uid or "ABCDEF090901")
         else:
             if not args.rfid_uid:
                 raise SystemExit("--rfid-uid is required in --mode rfid")
-            if args.register_secret:
-                client.register_content_secret()
             client.run_rfid_test(
                 rfid_uid=args.rfid_uid,
                 local_version=args.local_version,
