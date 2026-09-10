@@ -33,6 +33,7 @@ const router = express.Router();
 const adminService = require('../services/admin.service');
 const deviceSettingsService = require('../services/deviceSettings.service');
 const deviceAnalyticsService = require('../services/deviceAnalytics.service');
+const warrantyService = require('../services/warranty.service');
 const mobileService = require('../services/mobile.service');
 const founderDashboardService = require('../services/founderDashboard.service');
 const { asyncHandler } = require('../middleware/errorHandler');
@@ -188,7 +189,7 @@ const { success, badRequest, notFound } = require('../utils/response');
  *         name: mobile
  *         schema:
  *           type: string
- *         description: Filter by mobile/username
+ *         description: Search by username, email, Firebase uid or parent name
  *     responses:
  *       200:
  *         description: Paginated user list
@@ -214,6 +215,15 @@ const { success, badRequest, notFound } = require('../utils/response');
  *                             type: integer
  *                           mobile:
  *                             type: string
+ *                           email:
+ *                             type: string
+ *                             nullable: true
+ *                           parentName:
+ *                             type: string
+ *                             nullable: true
+ *                           firebaseUid:
+ *                             type: string
+ *                             nullable: true
  *                           deviceCount:
  *                             type: string
  *                           status:
@@ -1592,6 +1602,39 @@ router.get('/device/:mac/settings',
       lastAckReason: settings.last_ack_reason,
       lastAppliedVersion: settings.last_applied_version,
     });
+  })
+);
+
+/**
+ * Admin: Device warranty by MAC. The record is written once, on the toy's first
+ * 6-digit activation; these let an admin view it, correct or add it, or delete
+ * it so the next activation starts a fresh warranty.
+ */
+router.get('/device/:mac/warranty',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    success(res, await warrantyService.getWarrantyByMac(req.params.mac));
+  })
+);
+
+router.put('/device/:mac/warranty',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const { warrantyStart, warrantyEnd, note } = req.body || {};
+    const warranty = await warrantyService.upsertWarranty(
+      req.params.mac, { warrantyStart, warrantyEnd, note }, req.user.id
+    );
+    success(res, warranty, 'Warranty saved');
+  })
+);
+
+router.delete('/device/:mac/warranty',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    success(res, await warrantyService.deleteWarranty(req.params.mac), 'Warranty record deleted');
   })
 );
 

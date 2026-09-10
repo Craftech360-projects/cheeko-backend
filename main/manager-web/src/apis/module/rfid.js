@@ -492,6 +492,8 @@ export default {
             page: params.page || 1,
             limit: params.limit || 10,
             packCode: params.packCode || '',
+            // The search box: matched against the name OR the code, server-side.
+            keyword: params.keyword || '',
             contentType: params.contentType || '',
             language: params.language || '',
             active: params.active !== undefined ? params.active : '',

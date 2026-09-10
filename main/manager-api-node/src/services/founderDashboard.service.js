@@ -2,6 +2,7 @@
 
 const { prisma } = require('../config/database');
 const { normalizeMacAddress } = require('../utils/helpers');
+const { kidAvatarOrNull } = require('../utils/kidAvatar');
 const systemService = require('./system.service');
 
 const IST_TIMEZONE = 'Asia/Kolkata';
@@ -948,7 +949,7 @@ async function getFamilyProfile(macOrKidId) {
       id: String(kid.id),
       name: kid.name,
       nickname: kid.nickname,
-      avatarUrl: kid.avatar_url,
+      avatarUrl: kidAvatarOrNull(kid.avatar_url),
       gender: kid.gender,
       grade: kid.grade,
       school: kid.school,

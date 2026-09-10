@@ -329,6 +329,18 @@ describe('founderDashboard.service', () => {
     expect(result.contentLove.cards[0].name).toBe('Space Pack');
   });
 
+  // A stock-photo URL on the profile showed up as the child's photo.
+  it('shows only a photo uploaded through the avatar route', async () => {
+    const maya = await prisma.kid_profile.findFirst();
+
+    prisma.kid_profile.findFirst.mockResolvedValue({ ...maya, avatar_url: 'https://t4.ftcdn.net/jpg/stock.jpg' });
+    expect((await founderDashboardService.getFamilyProfile('AA:AA:AA:AA:AA:01')).kid.avatarUrl).toBeNull();
+
+    const own = 'https://dsmzc13oafp54.cloudfront.net/kids/avatars/21-abc.jpg';
+    prisma.kid_profile.findFirst.mockResolvedValue({ ...maya, avatar_url: own });
+    expect((await founderDashboardService.getFamilyProfile('AA:AA:AA:AA:AA:01')).kid.avatarUrl).toBe(own);
+  });
+
   it('reads progress from columns that exist on analytics_user_progress', async () => {
     const result = await founderDashboardService.getFamilyProfile('AA:AA:AA:AA:AA:01');
 

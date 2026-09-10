@@ -173,10 +173,13 @@ const SOURCES = [
     icon: 'el-icon-user-solid',
     admin: true,
     fetch: (vm, q, done) => Api.admin.getUserList({ page: 1, limit: 500, mobile: '' }, done),
-    fields: ['username', 'mobile'],
-    name: u => u.username || u.mobile,
-    meta: u => u.mobile || '',
-    route: u => (u.mobile ? listRoute('/user-management', u.mobile) : { path: '/user-management' })
+    fields: ['parentName', 'email', 'mobile', 'firebaseUid'],
+    name: u => u.parentName || u.email || u.mobile,
+    meta: u => (u.parentName ? u.email || '' : ''),
+    route: u => {
+      const term = u.email || u.mobile
+      return term ? listRoute('/user-management', term) : { path: '/user-management' }
+    }
   },
   {
     key: 'templates',

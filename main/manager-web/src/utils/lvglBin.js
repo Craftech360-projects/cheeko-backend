@@ -28,21 +28,23 @@ export const LVGL_RGB565 = 0x12;
 export const LVGL_RGB565A8 = 0x14;
 export const LVGL_HEADER_BYTES = 12;
 
+// The panel, and a frame packed for it with no header at all — the pixels and
+// nothing else, which is what the parent app uploads (RAW_FRAME_BYTES in
+// manager-api-node/src/utils/lvglImage.js). Older artwork can be one of these.
+export const PANEL_WIDTH = 296;
+export const PANEL_HEIGHT = 240;
+export const RAW_FRAME_BYTES = PANEL_WIDTH * PANEL_HEIGHT * 2;
+
 /** True for a URL that points at a device frame rather than a web image. */
 export function isBinUrl(url) {
   return typeof url === 'string' && /\.bin(\?|#|$)/i.test(url);
 }
 
 /**
- * Decode an LVGL v9 RGB565 buffer to ImageData.
- * Throws when the header is not one we can read, so callers can fall back.
+ * Where the pixels sit, read off the 12-byte header.
+ * Throws when there is no header we can read.
  */
-export function decodeLvglBin(arrayBuffer) {
-  if (!arrayBuffer || arrayBuffer.byteLength < LVGL_HEADER_BYTES) {
-    throw new Error('Buffer is too short to be an LVGL frame');
-  }
-
-  const view = new DataView(arrayBuffer);
+function headerLayout(view) {
   const magic = view.getUint8(0);
   const colorFormat = view.getUint8(1);
   const width = view.getUint16(4, true);
@@ -60,16 +62,41 @@ export function decodeLvglBin(arrayBuffer) {
   const hasAlpha = colorFormat === LVGL_RGB565A8;
   const alphaOffset = LVGL_HEADER_BYTES + stride * height;
   const needed = alphaOffset + (hasAlpha ? width * height : 0);
-  if (arrayBuffer.byteLength < needed) {
-    throw new Error(`LVGL frame is truncated: ${arrayBuffer.byteLength} of ${needed} bytes`);
+  if (view.byteLength < needed) {
+    throw new Error(`LVGL frame is truncated: ${view.byteLength} of ${needed} bytes`);
   }
 
+  return { offset: LVGL_HEADER_BYTES, width, height, stride, alphaOffset: hasAlpha ? alphaOffset : -1 };
+}
+
+/**
+ * Decode an LVGL v9 RGB565 / RGB565A8 buffer — or a headerless panel frame —
+ * to ImageData.
+ * Throws when it is neither, so callers can fall back.
+ */
+export function decodeLvglBin(arrayBuffer) {
+  if (!arrayBuffer || arrayBuffer.byteLength < LVGL_HEADER_BYTES) {
+    throw new Error('Buffer is too short to be an LVGL frame');
+  }
+
+  const view = new DataView(arrayBuffer);
+  let layout;
+  try {
+    layout = headerLayout(view);
+  } catch (error) {
+    // A bare frame has nothing to recognise it by except its length.
+    if (arrayBuffer.byteLength !== RAW_FRAME_BYTES) throw error;
+    layout = { offset: 0, width: PANEL_WIDTH, height: PANEL_HEIGHT, stride: PANEL_WIDTH * 2, alphaOffset: -1 };
+  }
+
+  const { offset, width, height, stride, alphaOffset } = layout;
+  const hasAlpha = alphaOffset >= 0;
   const imageData = new ImageData(width, height);
   const pixels = imageData.data;
 
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
-      const src = LVGL_HEADER_BYTES + (y * stride) + (x * 2);
+      const src = offset + (y * stride) + (x * 2);
       const pixel = (y * width) + x;
       const dst = pixel * 4;
       const rgb565 = view.getUint16(src, true);

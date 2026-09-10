@@ -2,6 +2,7 @@ const { prisma } = require('../config/database');
 const logger = require('../utils/logger');
 const { ApiError } = require('../middleware/errorHandler');
 const { normalizeMacAddress, packCodeForKid } = require('../utils/helpers');
+const { isKidAvatarUrl, kidAvatarOrNull } = require('../utils/kidAvatar');
 const { normalizeCharacterName } = require('./character-resolver');
 const {
     isValidTimezone,
@@ -1927,7 +1928,7 @@ async function getKids(firebaseUid, options = {}) {
         parent_id: user.firebase_uid,
         name: k.name,
         nickname: k.nickname,
-        avatar_url: k.avatar_url,
+        avatar_url: kidAvatarOrNull(k.avatar_url),
         date_of_birth: k.birth_date,
         birth_date: k.birth_date,
         age: ageFromBirthDate(k.birth_date),
@@ -2027,7 +2028,13 @@ async function updateKid(firebaseUid, kidId, data) {
     if (data.gender) updates.gender = data.gender;
     if (data.interests) updates.interests = data.interests;
     if (data.language) updates.language = data.language;
-    if (data.avatar_url) updates.avatar_url = data.avatar_url;
+    // Only a photo from POST /kids/:id/avatar. Anything else (a stock image, a
+    // link elsewhere) is dropped rather than failing the rest of the edit.
+    if (isKidAvatarUrl(data.avatar_url)) {
+        updates.avatar_url = data.avatar_url;
+    } else if (data.avatar_url) {
+        logger.warn(`[mobile] updateKid ignored non-upload avatar_url for kid ${kidId}`);
+    }
     if (data.parent_rule !== undefined) updates.parent_rule = data.parent_rule || null;
 
     // updateMany so a row belonging to someone else simply matches nothing,

@@ -12,6 +12,7 @@ const { generateDeviceCode, normalizeMacAddress, ownerKeyForDevice } = require('
 // and the app both mis-reported them and retried the whole create-then-bind flow,
 // leaving an orphan agent per attempt (see chat-history-attribution/005).
 const { ApiError } = require('../middleware/errorHandler');
+const { startWarrantyIfNew } = require('./warranty.service');
 
 /**
  * In-memory activation code cache
@@ -402,6 +403,8 @@ const bindDevice = async (userId, agentId, deviceCode, kidId = null) => {
         },
       });
       if (pairedKidId) await pairDeviceToKid(tx, macAddress, pairedKidId);
+      // Warranty starts on the first 6-digit activation only; a rebind is a no-op.
+      if (activationData) await startWarrantyIfNew(tx, { macAddress, userId });
       return row;
     });
 
@@ -434,6 +437,7 @@ const bindDevice = async (userId, agentId, deviceCode, kidId = null) => {
         },
       });
       if (pairedKidId) await pairDeviceToKid(tx, macAddress, pairedKidId, now);
+      await startWarrantyIfNew(tx, { macAddress, userId, at: now });
       return row;
     });
     activationCodeCache.delete(deviceCode);
@@ -1864,5 +1868,7 @@ module.exports = {
   getSessionTokenUsage,
   getDailyUsageSummary,
   getPerDeviceDailyUsage,
-  getUsageTotals
+  getUsageTotals,
+  // Tests seed an activation code without going through OTA
+  _activationCodeCache: activationCodeCache
 };

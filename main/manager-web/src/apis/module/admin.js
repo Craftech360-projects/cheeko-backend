@@ -236,6 +236,49 @@ export default {
                 callback({ data: { code: -1, msg: 'Network error', data: null } })
             }).send()
     },
+    // Get device warranty by MAC (Admin dashboard)
+    getDeviceWarranty(macAddress, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/device/${encodeURIComponent(macAddress)}/warranty`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to get device warranty:', err)
+                callback({ data: { code: -1, msg: 'Network error', data: null } })
+            }).send()
+    },
+    // Save (edit or add) device warranty by MAC (Admin dashboard)
+    updateDeviceWarranty(macAddress, payload, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/device/${encodeURIComponent(macAddress)}/warranty`)
+            .method('PUT')
+            .data(payload)
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to save device warranty:', err)
+                callback({ data: { code: -1, msg: 'Network error', data: null } })
+            }).send()
+    },
+    // Delete device warranty by MAC; the next activation starts a fresh one (Admin dashboard)
+    deleteDeviceWarranty(macAddress, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/device/${encodeURIComponent(macAddress)}/warranty`)
+            .method('DELETE')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to delete device warranty:', err)
+                callback({ data: { code: -1, msg: 'Network error', data: null } })
+            }).send()
+    },
     // Patch device settings by MAC (Admin dashboard)
     updateDeviceSettingsByMac(macAddress, payload, callback) {
         RequestService.sendRequest()

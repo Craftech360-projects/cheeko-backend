@@ -8,6 +8,7 @@ const { prisma } = require('../config/database');
 const logger = require('../utils/logger');
 const { ApiError } = require('../middleware/errorHandler');
 const { isValidTimezone } = require('../utils/timezone');
+const { isKidAvatarUrl, kidAvatarOrNull } = require('../utils/kidAvatar');
 
 /**
  * Get all kid profiles for user
@@ -21,7 +22,7 @@ const getKidProfiles = async (userId) => {
       orderBy: { created_at: 'asc' }
     });
 
-    return profiles;
+    return profiles.map((kid) => ({ ...kid, avatar_url: kidAvatarOrNull(kid.avatar_url) }));
   } catch (err) {
     logger.error('Failed to fetch kid profiles:', err);
     throw new Error('Failed to fetch kid profiles');
@@ -45,7 +46,7 @@ const getKidById = async (userId, kidId) => {
 
     if (!profile) return null;
 
-    return profile;
+    return { ...profile, avatar_url: kidAvatarOrNull(profile.avatar_url) };
   } catch (err) {
     return null;
   }
@@ -77,7 +78,7 @@ const createKid = async (userId, data) => {
         user_id: BigInt(userId),
         name: data.name,
         nickname: data.nickname || null,
-        avatar_url: data.avatarUrl || null,
+        avatar_url: kidAvatarOrNull(data.avatarUrl),
         birth_date: data.birthDate ? new Date(data.birthDate) : null,
         gender: data.gender || null,
         grade: data.grade || null,
@@ -113,7 +114,10 @@ const updateKid = async (userId, kidId, data) => {
 
   if (data.name !== undefined) updateData.name = data.name;
   if (data.nickname !== undefined) updateData.nickname = data.nickname;
-  if (data.avatarUrl !== undefined) updateData.avatar_url = data.avatarUrl;
+  // Clearing is allowed; setting is limited to photos we uploaded.
+  if (data.avatarUrl !== undefined && (!data.avatarUrl || isKidAvatarUrl(data.avatarUrl))) {
+    updateData.avatar_url = data.avatarUrl || null;
+  }
   if (data.birthDate !== undefined) updateData.birth_date = data.birthDate ? new Date(data.birthDate) : null;
   if (data.gender !== undefined) updateData.gender = data.gender;
   if (data.grade !== undefined) updateData.grade = data.grade;

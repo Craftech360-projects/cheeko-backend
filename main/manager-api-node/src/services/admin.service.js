@@ -10,6 +10,7 @@
 const { prisma } = require('../config/database');
 const bcrypt = require('bcryptjs');
 const logger = require('../utils/logger');
+const { isKidAvatarUrl, kidAvatarOrNull } = require('../utils/kidAvatar');
 const { sanitizeParentRule } = require('./profile.service');
 const { pairDeviceToKid } = require('./device.service');
 
@@ -79,7 +80,7 @@ const listUsers = async ({ page = 1, limit = 20, status, superAdmin, search } = 
 /**
  * Get users for admin page (paginated) - Spring Boot compatible format
  * Returns data in the format expected by manager-web frontend:
- * { userid, mobile, deviceCount, status, createDate }
+ * { userid, mobile, email, parentName, firebaseUid, deviceCount, status, createDate }
  * @param {Object} options - Pagination and filter options
  * @returns {Promise<Object>} Paginated user list in Spring Boot format
  */
@@ -88,9 +89,16 @@ const listUsersForAdmin = async ({ page = 1, limit = 20, mobile } = {}) => {
 
   const where = {};
 
-  // Apply mobile filter (searches username since we use username as mobile)
+  // `mobile` is the legacy search param name; it matches username, email,
+  // Firebase uid or the parent's display name.
   if (mobile) {
-    where.username = { contains: mobile, mode: 'insensitive' };
+    const match = { contains: mobile, mode: 'insensitive' };
+    where.OR = [
+      { username: match },
+      { email: match },
+      { firebase_uid: match },
+      { parent_profile: { is: { display_name: match } } }
+    ];
   }
 
   try {
@@ -101,8 +109,11 @@ const listUsersForAdmin = async ({ page = 1, limit = 20, mobile } = {}) => {
         select: {
           id: true,
           username: true,
+          email: true,
+          firebase_uid: true,
           status: true,
-          created_at: true
+          created_at: true,
+          parent_profile: { select: { display_name: true, email: true } }
         },
         orderBy: { created_at: 'desc' },
         skip: offset,
@@ -137,6 +148,9 @@ const listUsersForAdmin = async ({ page = 1, limit = 20, mobile } = {}) => {
     const list = users.map(user => ({
       userid: user.id,
       mobile: user.username, // Spring Boot uses mobile, we use username
+      email: user.email || user.parent_profile?.email || null,
+      parentName: user.parent_profile?.display_name || null,
+      firebaseUid: user.firebase_uid || null,
       deviceCount: String((devicesByUser[user.id] || []).length),
       devices: devicesByUser[user.id] || [], // Include device list with MAC addresses
       status: user.status,
@@ -818,7 +832,8 @@ const getAllDevices = async ({ page = 1, limit = 10, keywords = '' } = {}) => {
           alias: true,
           kid_id: true,
           device_mode: true,
-          mode: true
+          mode: true,
+          create_date: true
         },
         orderBy: { create_date: 'desc' },
         skip: offset,
@@ -833,11 +848,12 @@ const getAllDevices = async ({ page = 1, limit = 10, keywords = '' } = {}) => {
     if (userIds.length > 0) {
       const users = await prisma.sys_user.findMany({
         where: { id: { in: userIds } },
-        select: { id: true, username: true }
+        select: { id: true, username: true, email: true, parent_profile: { select: { display_name: true } } }
       });
 
+      // Same name the Users page shows: the parent's name, then email, then username
       userMap = users.reduce((acc, u) => {
-        acc[u.id] = u.username;
+        acc[u.id] = u.parent_profile?.display_name || u.email || u.username;
         return acc;
       }, {});
     }
@@ -859,6 +875,7 @@ const getAllDevices = async ({ page = 1, limit = 10, keywords = '' } = {}) => {
       autoUpdate: device.auto_update, // Also include as autoUpdate for frontend
       otaUpgrade: device.auto_update,
       lastConnectedAt: device.last_connected_at, // Also include for frontend
+      createDate: device.create_date,
       recentChatTime: device.last_connected_at
         ? new Date(device.last_connected_at).toISOString().replace('T', ' ').slice(0, 19)
         : null
@@ -978,6 +995,7 @@ const listAllKidProfiles = async ({ page = 1, limit = 50 } = {}) => {
       const household = kid.user_id ? householdByParent.get(kid.user_id.toString()) || [] : [];
       return {
         ...rest,
+        avatar_url: kidAvatarOrNull(kid.avatar_url),
         // Display name only. Parent email/phone are intentionally not exposed.
         parent_name: sys_user?.parent_profile?.display_name || sys_user?.nickname || null,
         devices: paired.length ? paired : household,
@@ -997,7 +1015,7 @@ const getKidProfilesByUserId = async (userId) => {
     });
 
     console.log('[admin.service] Found kid profiles:', profiles.length);
-    return profiles;
+    return profiles.map((kid) => ({ ...kid, avatar_url: kidAvatarOrNull(kid.avatar_url) }));
   } catch (err) {
     console.error('[admin.service] Error fetching kid profiles:', err);
     throw new Error(`Failed to get kid profiles: ${err.message}`);
@@ -1017,7 +1035,7 @@ const createKidProfileForUser = async (userId, data) => {
         user_id: BigInt(userId),
         name: data.name,
         nickname: data.nickname || null,
-        avatar_url: data.avatarUrl || null,
+        avatar_url: kidAvatarOrNull(data.avatarUrl),
         birth_date: data.birthDate ? new Date(data.birthDate) : null,
         gender: data.gender || null,
         grade: data.grade || null,
@@ -1048,7 +1066,10 @@ const updateKidProfile = async (kidId, data) => {
 
   if (data.name !== undefined) updateData.name = data.name;
   if (data.nickname !== undefined) updateData.nickname = data.nickname;
-  if (data.avatarUrl !== undefined) updateData.avatar_url = data.avatarUrl;
+  // Clearing is allowed; setting is limited to photos we uploaded.
+  if (data.avatarUrl !== undefined && (!data.avatarUrl || isKidAvatarUrl(data.avatarUrl))) {
+    updateData.avatar_url = data.avatarUrl || null;
+  }
   if (data.birthDate !== undefined) updateData.birth_date = data.birthDate ? new Date(data.birthDate) : null;
   if (data.gender !== undefined) updateData.gender = data.gender;
   if (data.grade !== undefined) updateData.grade = data.grade;

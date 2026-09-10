@@ -29,6 +29,13 @@
           <div class="quota-num">{{ profile.quota.remaining }}</div>
           <div class="quota-label">questions left<br />{{ profile.quota.questionsUsed }} used</div>
         </div>
+        <img
+          v-if="profile.kid.avatarUrl && !photoFailed"
+          :src="profile.kid.avatarUrl"
+          :alt="profile.kid.name"
+          class="kid-photo"
+          @error="photoFailed = true"
+        />
       </div>
 
       <!-- Week KPIs -->
@@ -116,7 +123,8 @@ export default {
   data() {
     return {
       loading: false,
-      profile: null
+      profile: null,
+      photoFailed: false
     };
   },
   computed: {
@@ -168,6 +176,7 @@ export default {
     },
     loadProfile() {
       this.loading = true;
+      this.photoFailed = false;
       const id = this.$route.params.id;
       Api.admin.getFamilyProfile(id, ({ data }) => {
         this.loading = false;
@@ -225,6 +234,21 @@ export default {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+}
+
+// Takes the free width so the quota and photo sit on the extreme right.
+.identity-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.kid-photo {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  background: $surface-sunk;
 }
 
 .kid-name {

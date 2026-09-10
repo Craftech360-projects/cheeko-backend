@@ -123,6 +123,59 @@ describe('getContentPackPage', () => {
 });
 
 /**
+ * The grid's search box.
+ *
+ * It asks for "pack name or code". The grid used to filter only the page it
+ * had loaded, so a pack on any other page could not be found; `packCode` and
+ * `name` cannot stand in because the service ANDs them. `keyword` is the OR.
+ */
+describe('getContentPackPage keyword search', () => {
+  it('matches the keyword against the name OR the pack code', async () => {
+    await rfidService.getContentPackPage({ page: 1, limit: 10, keyword: 'bed' });
+
+    const [count, page] = capturedQueries();
+    expect(count.sql).toContain('(name ILIKE ? OR pack_code ILIKE ?)');
+    expect(count.values).toEqual(['%bed%', '%bed%', CUSTOM_PATTERN]);
+    expect(page.values).toEqual(['%bed%', '%bed%', CUSTOM_PATTERN, 10, 0]);
+  });
+
+  it('trims the keyword and ignores a blank one', async () => {
+    await rfidService.getContentPackPage({ page: 1, limit: 10, keyword: '  bed  ' });
+    expect(capturedQueries()[0].values[0]).toBe('%bed%');
+
+    mockPrisma.$queryRaw.mockReset();
+    mockPrisma.$queryRaw.mockResolvedValueOnce([{ count: 0 }]).mockResolvedValueOnce([]);
+    await rfidService.getContentPackPage({ page: 1, limit: 10, keyword: '   ' });
+    const [count] = capturedQueries();
+    expect(count.sql).not.toContain('ILIKE');
+    expect(count.values).toEqual([CUSTOM_PATTERN]);
+  });
+
+  it('matches a typed %, _ or backslash literally, not as a wildcard', async () => {
+    await rfidService.getContentPackPage({ page: 1, limit: 10, keyword: '50%_off\\' });
+
+    expect(capturedQueries()[0].values[0]).toBe('%50\\%\\_off\\\\%');
+  });
+
+  it('keeps the category filter and the custom-pack exclusion alongside it', async () => {
+    await rfidService.getContentPackPage({ page: 1, limit: 10, keyword: 'bed', contentType: 'story_pack' });
+
+    const [count] = capturedQueries();
+    expect(count.sql).toContain('content_type =');
+    expect(count.sql).toContain('pack_code !~');
+    expect(count.values).toEqual(['%bed%', '%bed%', 'story_pack', CUSTOM_PATTERN]);
+  });
+
+  it('searches the custom packs too when that scope is asked for', async () => {
+    await rfidService.getContentPackPage({ page: 1, limit: 10, keyword: 'CK0001', scope: 'custom' });
+
+    const [count] = capturedQueries();
+    expect(count.sql).toContain('pack_code ~');
+    expect(count.values).toEqual(['%CK0001%', '%CK0001%', CUSTOM_PATTERN]);
+  });
+});
+
+/**
  * Ordering.
  *
  * It has to be part of the paged query, because it decides which rows are on

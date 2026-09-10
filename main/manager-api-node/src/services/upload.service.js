@@ -8,6 +8,7 @@ const { randomUUID } = require('crypto');
 const logger = require('../utils/logger');
 const { prisma } = require('../config/database');
 const { normalizeMacAddress, ownerKeyForDevice } = require('../utils/helpers');
+const { isKidAvatarUrl } = require('../utils/kidAvatar');
 const path = require('path');
 
 // S3 Configuration
@@ -311,12 +312,10 @@ async function uploadKidAvatar(fileBuffer, kidId, mimeType) {
  * failing the request that already succeeded.
  */
 async function deleteKidAvatarByUrl(url) {
-  const prefix = `https://${CLOUDFRONT_DOMAIN}/`;
-  if (!url || !url.startsWith(prefix)) return;
-  const s3Key = url.slice(prefix.length);
   // avatar_url is client-writable via PUT /kids/:id, so treat it as untrusted:
   // confine deletes to the avatar prefix and reject any traversal segment.
-  if (!s3Key.startsWith('kids/avatars/') || s3Key.includes('..')) return;
+  if (!isKidAvatarUrl(url)) return;
+  const s3Key = url.slice(`https://${CLOUDFRONT_DOMAIN}/`.length);
 
   try {
     await s3Client.send(new DeleteObjectCommand({ Bucket: S3_BUCKET, Key: s3Key }));

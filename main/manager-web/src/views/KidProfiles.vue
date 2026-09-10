@@ -62,12 +62,12 @@
               <span class="mini-name">{{ row.name }}</span>
               <div class="mini-sub">{{ row.nickname || 'No nickname' }} · {{ row.language || '—' }}</div>
             </div>
-            <span v-if="globalMode" class="chip" :class="deviceLabel(row) === 'No toy' ? '' : 'ok'">{{ deviceLabel(row) }}</span>
-          <span v-else class="chip" :class="isAssigned(row.id) ? 'ok' : ''">{{ isAssigned(row.id) ? 'Assigned' : 'Unassigned' }}</span>
+            <img v-if="avatarOf(row)" :src="avatarOf(row)" :alt="row.name" class="mini-photo" loading="lazy" @error="onAvatarError(row)" />
+            <span v-else class="mini-photo mini-photo-empty">{{ initials(row.name) }}</span>
           </div>
-          <div class="mini-interests">
-            <span v-for="interest in (row.interests || [])" :key="interest" class="chip">{{ interest }}</span>
-            <span v-if="!(row.interests || []).length" class="muted">No interests recorded</span>
+          <div class="mini-toy">
+            <span v-if="globalMode" class="chip" :class="deviceLabel(row) === 'No toy' ? '' : 'ok'">{{ deviceLabel(row) }}</span>
+            <span v-else class="chip" :class="isAssigned(row.id) ? 'ok' : ''">{{ isAssigned(row.id) ? 'Assigned' : 'Unassigned' }}</span>
           </div>
           <div class="mini-stats">
             <div>Age<b>{{ calculateAge(row.birth_date || row.birthDate) }}</b></div>
@@ -292,6 +292,8 @@ export default {
       total: 0,
       submitting: false,
       kidProfiles: [],
+      // Kid ids whose photo failed to load; their card falls back to initials.
+      failedAvatars: {},
       dialogVisible: false,
       editMode: false,
       editingId: null,
@@ -420,6 +422,16 @@ export default {
       if (!value) return '—'
       const parts = value.split(/\s+/).filter(Boolean)
       return (parts.length > 1 ? parts[0][0] + parts[1][0] : value.slice(0, 2)).toUpperCase()
+    },
+
+    /** The photo the parent uploaded from the app, unless it failed to load. */
+    avatarOf(row) {
+      const url = row.avatar_url || row.avatarUrl
+      return url && !this.failedAvatars[row.id] ? url : ''
+    },
+
+    onAvatarError(row) {
+      this.$set(this.failedAvatars, row.id, true)
     },
 
     /** Numeric age for sorting; `calculateAge` stays the display formatter. */
@@ -740,7 +752,26 @@ export default {
   margin-top: 4px;
 }
 
-.mini-interests {
+.mini-photo {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  background: $surface-sunk;
+}
+
+.mini-photo-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: $text-gray;
+  font-family: $font-mono;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.mini-toy {
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
