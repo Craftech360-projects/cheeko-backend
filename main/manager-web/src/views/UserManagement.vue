@@ -147,33 +147,55 @@
     <view-password-dialog :visible.sync="showViewPassword" :password="currentPassword" />
 
     <!-- Kid Profiles Dialog -->
-    <el-dialog :title="`Kid Profiles - ${selectedUserName}`" :visible.sync="showKidProfiles" width="700px">
-      <el-table :data="kidProfilesList" v-loading="loadingKidProfiles" style="width: 100%">
-        <el-table-column prop="name" label="Name" min-width="120" />
-        <el-table-column prop="nickname" label="Nickname" min-width="100" />
-        <el-table-column label="Age" min-width="60">
+    <el-dialog :title="`Kid Profiles - ${selectedUserName}`" :visible.sync="showKidProfiles" width="880px">
+      <el-table
+        :data="kidProfilesList"
+        v-loading="loadingKidProfiles"
+        row-class-name="tappable-row"
+        style="width: 100%"
+        @row-click="openKidProfile"
+      >
+        <el-table-column label="Name" min-width="180">
+          <template slot-scope="scope">
+            <div class="rowid">
+              <span class="rowid-mark accent">{{ kidInitials(scope.row) }}</span>
+              <span class="cell-key">{{ scope.row.name }}</span>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="Nickname" min-width="110">
+          <template slot-scope="scope">{{ scope.row.nickname || '—' }}</template>
+        </el-table-column>
+        <el-table-column label="Age" width="70" align="right">
           <template slot-scope="scope">
             {{ calculateAge(scope.row.date_of_birth || scope.row.birth_date || scope.row.birthDate) }}
           </template>
         </el-table-column>
-        <el-table-column prop="gender" label="Gender" min-width="70" />
-        <el-table-column label="Interests" min-width="180">
+        <el-table-column label="Gender" width="90">
+          <template slot-scope="scope">{{ scope.row.gender || '—' }}</template>
+        </el-table-column>
+        <el-table-column label="Language" width="100">
+          <template slot-scope="scope">{{ scope.row.primary_language || scope.row.language || '—' }}</template>
+        </el-table-column>
+        <!-- First two interests, the rest behind +N, so every row stays one line tall -->
+        <el-table-column label="Interests" min-width="220">
           <template slot-scope="scope">
-            <el-tag v-for="interest in (scope.row.interests || [])" :key="interest" size="mini" style="margin-right: 3px;">
-              {{ interest }}
-            </el-tag>
+            <div class="kid-interests">
+              <span v-for="interest in (scope.row.interests || []).slice(0, 2)" :key="interest" class="chip">{{ interest }}</span>
+              <span
+                v-if="(scope.row.interests || []).length > 2"
+                class="chip"
+                :title="scope.row.interests.slice(2).join(', ')"
+              >+{{ scope.row.interests.length - 2 }}</span>
+              <span v-if="!(scope.row.interests || []).length" class="muted">—</span>
+            </div>
           </template>
         </el-table-column>
-        <el-table-column label="Language" min-width="80">
-          <template slot-scope="scope">
-            {{ scope.row.primary_language || scope.row.language || '-' }}
-          </template>
+        <el-table-column width="40" align="right">
+          <i slot-scope="scope" class="el-icon-arrow-right kid-open"></i>
         </el-table-column>
+        <template slot="empty">No kid profiles found for this user</template>
       </el-table>
-      <div v-if="kidProfilesList.length === 0 && !loadingKidProfiles" style="text-align: center; padding: 30px; color: #A8A199;">
-        <i class="el-icon-user" style="font-size: 32px; margin-bottom: 10px; display: block;"></i>
-        No kid profiles found for this user
-      </div>
       <span slot="footer" class="dialog-footer">
         <el-button @click="showKidProfiles = false">Close</el-button>
       </span>
@@ -511,6 +533,14 @@ export default {
         }
       });
     },
+    kidInitials(kid) {
+      return this.initials({ parentName: kid.name });
+    },
+    // Same drill-down as the Kid Profiles roster: a child opens in Family 360.
+    openKidProfile(kid) {
+      this.showKidProfiles = false;
+      this.$router.push(`/families/${encodeURIComponent(kid.id)}`);
+    },
     calculateAge(birthDate) {
       if (!birthDate) return '-';
       const birth = new Date(birthDate);
@@ -570,4 +600,16 @@ export default {
 }
 
 .table_bottom { border-top: 1px solid $border-color; }
+
+// Kid Profiles dialog: one line per child so every row is the same height.
+.kid-interests {
+  white-space: nowrap;
+  overflow: hidden;
+
+  .chip { margin-right: 4px; }
+}
+
+.kid-open { color: $text-light; }
+
+::v-deep .tappable-row { cursor: pointer; }
 </style>

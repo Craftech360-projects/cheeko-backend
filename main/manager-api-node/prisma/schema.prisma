@@ -1789,3 +1789,19 @@ model device_kid_assignment {
   @@index([mac_address, assigned_at(sort: Desc)], map: "idx_device_kid_assignment_mac")
   @@index([kid_id, assigned_at(sort: Desc)], map: "idx_device_kid_assignment_kid")
 }
+
+/// A toy's warranty, written once on its first 6-digit activation. Keyed on the
+/// MAC with no link to ai_device, because that row does not survive a hard
+/// unbind or account deletion and a rebind must not restart the warranty.
+/// activated_at is NULL for a record an admin added by hand.
+model device_warranty {
+  id             BigInt    @id @default(autoincrement())
+  mac_address    String    @unique(map: "uq_device_warranty_mac") @db.VarChar(20)
+  activated_at   DateTime? @db.Timestamptz(6)
+  warranty_start DateTime  @db.Timestamptz(6)
+  warranty_end   DateTime  @db.Timestamptz(6)
+  first_user_id  BigInt?
+  note           String?
+  updated_by     BigInt?
+  update_date    DateTime? @db.Timestamptz(6)
+}

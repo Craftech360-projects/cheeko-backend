@@ -832,7 +832,8 @@ const getAllDevices = async ({ page = 1, limit = 10, keywords = '' } = {}) => {
           alias: true,
           kid_id: true,
           device_mode: true,
-          mode: true
+          mode: true,
+          create_date: true
         },
         orderBy: { create_date: 'desc' },
         skip: offset,
@@ -847,11 +848,12 @@ const getAllDevices = async ({ page = 1, limit = 10, keywords = '' } = {}) => {
     if (userIds.length > 0) {
       const users = await prisma.sys_user.findMany({
         where: { id: { in: userIds } },
-        select: { id: true, username: true }
+        select: { id: true, username: true, email: true, parent_profile: { select: { display_name: true } } }
       });
 
+      // Same name the Users page shows: the parent's name, then email, then username
       userMap = users.reduce((acc, u) => {
-        acc[u.id] = u.username;
+        acc[u.id] = u.parent_profile?.display_name || u.email || u.username;
         return acc;
       }, {});
     }
@@ -873,6 +875,7 @@ const getAllDevices = async ({ page = 1, limit = 10, keywords = '' } = {}) => {
       autoUpdate: device.auto_update, // Also include as autoUpdate for frontend
       otaUpgrade: device.auto_update,
       lastConnectedAt: device.last_connected_at, // Also include for frontend
+      createDate: device.create_date,
       recentChatTime: device.last_connected_at
         ? new Date(device.last_connected_at).toISOString().replace('T', ' ').slice(0, 19)
         : null
