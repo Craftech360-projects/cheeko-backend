@@ -146,7 +146,7 @@ The lookup stays public. The wrapped key is useless without S, so it is safe to 
 
 **Gateway.** `fetchRfidContentFromManagerApi` in `mqtt-gateway.js` returns an explicit field whitelist. Add `encryption` to it and to the `card_content` payload it publishes. `virtual-connection.js` spreads `...cardData` and carries the field automatically, so the two senders differ until the whitelist is updated. Test both paths. This exact trap hid character artwork for weeks.
 
-**Firmware, on top of version 1.**
+**Firmware, on top of version 1.** The step-by-step implementation guide, with current firmware anchors and pinned test vectors, is [sd-content-encryption-firmware.md](sd-content-encryption-firmware.md). It refines two points below. The secret is generated only after Wi-Fi is up, because the RNG is not truly random before the RF starts. On rotation, only the manifests of sealed packs are invalidated rather than wiping `skills/`: the files are sealed under K, not S, so the existing files are reused and only a fresh wrapped key is fetched.
 
 - First boot: if `dev_secret` is absent, generate with `esp_random`, store, mark for registration. Include S in the next OTA check.
 - `HandleServerResponse`: parse `encryption` from `card_content` and `card_ai`, write `wrapped` and `nonce_w` into `manifest.jsn`. Never write plain K to SD.
