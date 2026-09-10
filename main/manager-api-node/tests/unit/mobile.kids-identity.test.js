@@ -84,6 +84,20 @@ describe('mobile kid identity', () => {
         .rejects.toMatchObject({ statusCode: 404 });
       expect(prisma.kid_profile.findUnique).not.toHaveBeenCalled();
     });
+
+    // A stock-photo URL sent here showed up as a child's photo on the dashboard.
+    test('ignores an avatar_url that is not one of our uploads', async () => {
+      await mobileService.updateKid('uid-6', '15', { name: 'Kishore', avatar_url: 'https://t4.ftcdn.net/jpg/stock.jpg' });
+
+      expect(prisma.kid_profile.updateMany.mock.calls[0][0].data).toEqual({ name: 'Kishore' });
+    });
+
+    test('keeps a photo uploaded through the avatar route', async () => {
+      const url = 'https://dsmzc13oafp54.cloudfront.net/kids/avatars/15-abc.jpg';
+      await mobileService.updateKid('uid-6', '15', { avatar_url: url });
+
+      expect(prisma.kid_profile.updateMany.mock.calls[0][0].data).toEqual({ avatar_url: url });
+    });
   });
 
   describe('getKids', () => {
@@ -108,6 +122,22 @@ describe('mobile kid identity', () => {
       const rahul = kids.find(k => k.id === '8');
       expect(rahul.device_mac).toBeNull();
       expect(rahul.is_paired).toBe(false);
+    });
+
+    test('hides a stored avatar that is not one of our uploads', async () => {
+      const own = 'https://dsmzc13oafp54.cloudfront.net/kids/avatars/15-abc.jpg';
+      prisma.sys_user.findUnique.mockResolvedValue({
+        ...USER,
+        kid_profile: [
+          { id: 8n, name: 'Rahul', avatar_url: 'https://t4.ftcdn.net/jpg/stock.jpg', interests: [] },
+          { id: 15n, name: 'Kishore', avatar_url: own, interests: [] },
+        ],
+      });
+
+      const kids = await mobileService.getKids('uid-6');
+
+      expect(kids.find(k => k.id === '8').avatar_url).toBeNull();
+      expect(kids.find(k => k.id === '15').avatar_url).toBe(own);
     });
 
     test('asks the database for a stable order rather than accepting any', async () => {

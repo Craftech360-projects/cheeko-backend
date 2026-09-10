@@ -1210,14 +1210,16 @@ function imageKind(url) {
 const CUSTOM_PACK_SCOPE = 'custom';
 
 // Tabs searched by re-querying the server, so the search spans every page.
-// Only the card tabs qualify: their endpoint filters on rfid_uid, which is
-// exactly what their search box asks for. The pack tabs' endpoints AND their
-// packCode and name filters together, so a keyword sent there would match
-// neither a name nor a code that is not also the other — those tabs are
-// filtered in `sortRows` over the page already loaded instead. What matters is
-// that a tab picks one or the other: doing both changed the result the moment
-// you turned a page.
-const SERVER_SEARCH_TABS = ['cards', 'aiCards'];
+// The card tabs' endpoint filters on rfid_uid, which is exactly what their
+// search box asks for. The content pack endpoint takes a `keyword` matched
+// against the name OR the code, which is what its box asks for; before that it
+// was filtered over the one page loaded, so a pack on any other page could not
+// be found. The SKU endpoint still ANDs its packCode and name filters, so a
+// keyword sent there would match neither a name nor a code that is not also
+// the other — it and the remaining tabs are filtered in `sortRows` over the
+// rows already loaded. What matters is that a tab picks one or the other:
+// doing both changed the result the moment you turned a page.
+const SERVER_SEARCH_TABS = ['cards', 'aiCards', 'contentPacks'];
 
 export default {
   name: 'RfidManagement',
@@ -1525,12 +1527,12 @@ export default {
       return this.tabRows;
     },
     // The pack grid is not an el-table, so it needs the list handed to it
-    // explicitly. Searched only, not sorted: this tab is paged by the server,
-    // which now orders the whole table before slicing the page, and reordering
-    // that slice again here would rearrange it under a second, different
-    // comparator for no gain.
+    // explicitly. Neither searched nor sorted here: this tab is paged by the
+    // server, which filters by the search box and orders the whole table before
+    // slicing the page. Doing either again here would narrow or rearrange that
+    // slice under a second, different set of rules.
     visibleContentPacks() {
-      return this.searchRows(this.contentPacksList);
+      return this.contentPacksList;
     },
     selectedCount() {
       return this.tabRows.filter(row => row.selected).length;
@@ -1711,7 +1713,8 @@ export default {
     applySearch() {
       if (SERVER_SEARCH_TABS.indexOf(this.activeTab) === -1) return;
       if (this.activeTab === 'cards') this.cardsCurrentPage = 1;
-      else this.aiCardsCurrentPage = 1;
+      else if (this.activeTab === 'aiCards') this.aiCardsCurrentPage = 1;
+      else this.contentPacksCurrentPage = 1;
       this.fetchActiveTabList();
     },
 
@@ -2553,14 +2556,21 @@ export default {
         fetchContentPacks() {
             this.contentPacksLoading = true;
             const showingCustom = this.showingCustomPacks;
+            // Typing sends a request per pause and the answers can arrive out of
+            // order, so only the newest may fill the grid — otherwise a slow
+            // answer to "be" lands on top of the answer to "bedtime".
+            const request = (this._contentPacksRequest || 0) + 1;
+            this._contentPacksRequest = request;
             Api.rfid.getContentPackPage({
                 page: this.contentPacksCurrentPage,
                 limit: this.contentPacksPageSize,
+                keyword: (this.searchKeyword || '').trim(),
                 contentType: showingCustom ? '' : this.contentPacksTypeFilter,
                 scope: showingCustom ? CUSTOM_PACK_SCOPE : '',
                 sortBy: this.sortBy,
                 sortDir: this.sortDir
             }, ({ data }) => {
+                if (request !== this._contentPacksRequest) return;
                 this.contentPacksLoading = false;
                 if (data.code === 0) {
                     this.contentPacksList = (data.data.list || []).map(item => ({ ...item, selected: false }));

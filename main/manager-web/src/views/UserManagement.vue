@@ -19,7 +19,7 @@
       :selected-count="selectedCount"
       :all-selected="isAllSelected"
       :search.sync="searchPhone"
-      search-placeholder="Enter phone number to search"
+      search-placeholder="Search name, email or Firebase UID"
       @select-all-matching="selectAllRows"
       @clear-selection="clearSelection"
     >
@@ -53,13 +53,19 @@
               <el-table-column label="User ID" prop="userid" sortable="custom" min-width="120">
                 <template slot-scope="scope"><span class="mono">{{ scope.row.userid }}</span></template>
               </el-table-column>
-              <el-table-column label="User Name" prop="mobile" sortable="custom" min-width="160">
+              <el-table-column label="User Name" prop="displayName" sortable="custom" min-width="160">
                 <template slot-scope="scope">
                   <div class="rowid">
-                    <span class="rowid-mark accent">{{ initials(scope.row.mobile) }}</span>
-                    <span class="cell-key">{{ scope.row.mobile }}</span>
+                    <span class="rowid-mark accent">{{ initials(scope.row) }}</span>
+                    <span class="cell-key">{{ scope.row.displayName }}</span>
                   </div>
                 </template>
+              </el-table-column>
+              <el-table-column label="Email" prop="email" sortable="custom" min-width="200" show-overflow-tooltip>
+                <template slot-scope="scope">{{ scope.row.email || '—' }}</template>
+              </el-table-column>
+              <el-table-column label="Firebase UID" prop="firebaseUid" sortable="custom" min-width="180" show-overflow-tooltip>
+                <template slot-scope="scope"><span class="mono muted">{{ scope.row.firebaseUid || '—' }}</span></template>
               </el-table-column>
               <el-table-column label="Device Count" prop="deviceCount" sortable="custom" align="right" min-width="120">
                 <template slot-scope="scope">
@@ -197,7 +203,9 @@ export default {
       sortDir: 'desc',
       sortOptions: [
         { label: 'Registration time', value: 'createDate' },
-        { label: 'User name', value: 'mobile' },
+        { label: 'User name', value: 'displayName' },
+        { label: 'Email', value: 'email' },
+        { label: 'Firebase UID', value: 'firebaseUid' },
         { label: 'User ID', value: 'userid' },
         { label: 'Device count', value: 'deviceCount' },
         { label: 'Status', value: 'status' }
@@ -281,6 +289,9 @@ export default {
           if (data.code === 0) {
             this.userList = data.data.list.map(item => ({
               ...item,
+              // App sign-ins store the Firebase uid as username, so prefer
+              // the parent's name, then their email.
+              displayName: item.parentName || item.email || item.mobile || '',
               selected: false
             }));
             this.total = data.data.total;
@@ -292,10 +303,16 @@ export default {
       this.currentPage = 1;
       this.fetchUsers();
     },
-    initials(name) {
-      const value = String(name || '').trim();
-      if (!value) return '—';
-      return value.replace(/\D/g, '').slice(-2) || value.slice(0, 2).toUpperCase();
+    // Letters from the parent's name, else the email's local part. Never the
+    // username: for app sign-ins that is a random Firebase uid.
+    initials(row) {
+      const source = row.parentName || String(row.email || '').split('@')[0];
+      const words = String(source || '').split(/[\s._\-+'\d]+/).filter(Boolean);
+      if (!words.length) return '—';
+      const chars = words.length > 1
+        ? [Array.from(words[0])[0], Array.from(words[1])[0]]
+        : Array.from(words[0]).slice(0, 2);
+      return chars.join('').toUpperCase();
     },
     userRowClass({ row }) {
       return row.selected ? 'selected-row' : '';
@@ -480,7 +497,7 @@ export default {
       });
     },
     viewKidProfiles(row) {
-      this.selectedUserName = row.mobile || `User #${row.userid}`;
+      this.selectedUserName = row.displayName || `User #${row.userid}`;
       this.showKidProfiles = true;
       this.loadingKidProfiles = true;
       this.kidProfilesList = [];

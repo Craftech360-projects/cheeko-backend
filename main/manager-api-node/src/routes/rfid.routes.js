@@ -3551,6 +3551,11 @@ router.get('/card/lookup-legacy/:rfidUid',
  *         schema:
  *           type: string
  *       - in: query
+ *         name: keyword
+ *         description: Matches the pack name OR the pack code (case-insensitive, partial)
+ *         schema:
+ *           type: string
+ *       - in: query
  *         name: contentType
  *         schema:
  *           type: string
@@ -3575,12 +3580,13 @@ router.get('/card/lookup-legacy/:rfidUid',
 router.get('/content-pack/page',
   requireAdmin,
   asyncHandler(async (req, res) => {
-    const { page, limit, packCode, name, contentType, language, active, scope, sortBy, sortDir } = req.query;
+    const { page, limit, packCode, name, keyword, contentType, language, active, scope, sortBy, sortDir } = req.query;
     const result = await rfidService.getContentPackPage({
       page: parseInt(page) || 1,
       limit: parseInt(limit) || 10,
       packCode,
       name,
+      keyword,
       contentType,
       language,
       active,

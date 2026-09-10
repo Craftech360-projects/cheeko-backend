@@ -14,6 +14,7 @@
     "dotenv": "^16.5.0",
     "echarts": "^5.6.0",
     "element-ui": "^2.15.14",
+    "fflate": "^0.8.3",
     "flyio": "^0.6.14",
     "normalize.css": "^8.0.1",
     "opus-decoder": "^0.7.7",

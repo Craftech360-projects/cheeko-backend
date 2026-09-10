@@ -46,11 +46,11 @@
               </template>
             </el-input>
             <div v-if="form.thumbnailUrl" class="thumbnail-preview-box">
-              <img v-if="!thumbnailPreviewError"
-                   :src="form.thumbnailUrl"
+              <img v-if="previewSrc(form.thumbnailUrl)"
+                   :src="previewSrc(form.thumbnailUrl)"
                    alt="Thumbnail preview"
-                   @error="thumbnailPreviewError = true"/>
-              <div v-else class="thumbnail-preview-error">
+                   @error="markPreviewFailed(form.thumbnailUrl)"/>
+              <div v-else-if="!previewLoading(form.thumbnailUrl)" class="thumbnail-preview-error">
                 <i class="el-icon-picture-outline"></i>
               </div>
             </div>
@@ -126,17 +126,41 @@
         <!-- ========== FLAT MODE (existing) ========== -->
         <div class="items-section" v-if="!storyMode">
            <div class="items-header">
-              <span class="items-title">Pack Items (Max 10)</span>
+              <span class="items-title">Pack Items (Max {{ MAX_TRACKS }})</span>
               <div class="items-header-actions">
                 <el-button
                   size="mini"
                   icon="el-icon-folder-opened"
                   :loading="importing"
-                  :disabled="importing || form.items.length >= 10"
+                  :disabled="importing || form.items.length >= MAX_TRACKS"
                   @click="pickFolder">
                   {{ importing ? `Uploading ${importDone}/${importTotal}` : 'Import Folder' }}
                 </el-button>
-                <el-button size="mini" type="primary" icon="el-icon-plus" @click="addItem()" :disabled="form.items.length >= 10">Add Item</el-button>
+                <el-button
+                  size="mini"
+                  class="replace-btn"
+                  title="Replace all items with a folder"
+                  aria-label="Replace all items with a folder"
+                  :disabled="importing || form.items.length === 0"
+                  @click="pickFolder('replace')">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                  </svg>
+                </el-button>
+                <el-button
+                  size="mini"
+                  class="download-btn"
+                  title="Download all items as a folder (.zip)"
+                  aria-label="Download all items as a folder"
+                  :loading="downloading"
+                  :disabled="downloading || form.items.length === 0"
+                  @click="downloadFolder">
+                  <svg v-if="!downloading" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+                  </svg>
+                </el-button>
+                <el-button size="mini" type="primary" icon="el-icon-plus" @click="addItem()" :disabled="importing || form.items.length >= MAX_TRACKS">Add Item</el-button>
               </div>
            </div>
 
@@ -146,7 +170,7 @@
                 <button
                   type="button"
                   class="insert-here"
-                  :disabled="form.items.length >= 10"
+                  :disabled="importing || form.items.length >= MAX_TRACKS"
                   @click="addItem(index)">
                   + Add item here
                 </button>
@@ -204,18 +228,13 @@
                           </el-input>
                       </div>
                       <div v-if="item.imageUrl" class="img-preview-box">
-                           <canvas v-if="isBinFile(item.imageUrl)"
-                                   :ref="'canvas-' + item._rowKey"
-                                   class="bin-preview-canvas"
-                                   @load="loadBinPreview(item.imageUrl, item._rowKey)">
-                           </canvas>
-                           <img v-else :src="item.imageUrl" alt="Preview" @error="handleImageError($event)"/>
-                           <div v-if="isBinFile(item.imageUrl) && binLoading[item._rowKey]" class="bin-loading">
+                           <img v-if="previewSrc(item.imageUrl)" :src="previewSrc(item.imageUrl)" alt="Preview" @error="markPreviewFailed(item.imageUrl)"/>
+                           <div v-else-if="previewLoading(item.imageUrl)" class="bin-loading">
                              <i class="el-icon-loading"></i>
                            </div>
-                           <div v-if="isBinFile(item.imageUrl) && binError[item._rowKey]" class="bin-error">
+                           <div v-else class="bin-error">
                              <i class="el-icon-picture-outline"></i>
-                             <span>.bin</span>
+                             <span>No preview</span>
                            </div>
                       </div>
                   </div>
@@ -233,22 +252,104 @@
         <!-- ========== STORY MODE (grouped) ========== -->
         <div class="items-section" v-if="storyMode">
            <div class="items-header">
-              <span class="items-title">Stories</span>
-              <el-button size="mini" type="primary" icon="el-icon-plus" @click="addStory">Add Story</el-button>
+              <span class="items-title">Stories (Max {{ MAX_TRACKS }} tracks each)</span>
+              <div class="items-header-actions">
+                <el-button
+                  size="mini"
+                  icon="el-icon-folder-opened"
+                  :loading="importing"
+                  :disabled="importing || !stories[selectedStory] || stories[selectedStory].items.length >= MAX_TRACKS"
+                  @click="pickFolder">
+                  {{ importing ? `Uploading ${importDone}/${importTotal}` : 'Import Folder' }}
+                </el-button>
+                <el-button
+                  size="mini"
+                  class="replace-btn"
+                  title="Replace the selected story's tracks with a folder"
+                  aria-label="Replace the selected story's tracks with a folder"
+                  :disabled="importing || !(stories[selectedStory] && stories[selectedStory].items.length)"
+                  @click="pickFolder('replace')">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                  </svg>
+                </el-button>
+                <el-button
+                  size="mini"
+                  class="download-btn"
+                  title="Download the selected story as a folder (.zip)"
+                  aria-label="Download the selected story as a folder"
+                  :loading="downloading"
+                  :disabled="downloading || !(stories[selectedStory] && stories[selectedStory].items.length)"
+                  @click="downloadFolder">
+                  <svg v-if="!downloading" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+                  </svg>
+                </el-button>
+                <el-button size="mini" type="primary" icon="el-icon-plus" @click="addStory">Add Story</el-button>
+              </div>
            </div>
 
            <div v-if="stories.length === 0" class="empty-items">
               No stories added. Click "Add Story" to start.
            </div>
 
-           <div v-for="(story, sIndex) in stories" :key="'story-' + sIndex" class="story-block">
+           <div v-for="(story, sIndex) in stories" :key="'story-' + sIndex" class="story-block"
+                :class="{ 'is-selected': selectedStory === sIndex }"
+                @mousedown="selectStory(sIndex)">
               <div class="story-header">
                 <div class="story-header-left">
                   <span class="story-badge">Story {{ sIndex + 1 }}</span>
                   <el-input v-model="story.title" placeholder="Story title (e.g., The Lion King)" size="small" class="story-title-input"></el-input>
                 </div>
                 <div class="story-header-right">
-                  <el-button size="mini" type="primary" icon="el-icon-plus" @click="addStoryItem(sIndex)" plain>Add Track</el-button>
+                  <!-- Folder actions for this story. Each selects its story first,
+                       so it acts on this one whichever story was selected before.
+                       The span lets the tooltip show on a disabled button. -->
+                  <el-tooltip content="Upload folder" placement="top" :open-delay="200">
+                    <span class="story-action">
+                      <el-button
+                        size="mini"
+                        class="icon-btn"
+                        aria-label="Upload a folder into this story"
+                        :disabled="importing || story.items.length >= MAX_TRACKS"
+                        @click="selectStory(sIndex); pickFolder()">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                        </svg>
+                      </el-button>
+                    </span>
+                  </el-tooltip>
+                  <el-tooltip content="Replace tracks" placement="top" :open-delay="200">
+                    <span class="story-action">
+                      <el-button
+                        size="mini"
+                        class="icon-btn"
+                        aria-label="Replace this story's tracks with a folder"
+                        :disabled="importing || story.items.length === 0"
+                        @click="selectStory(sIndex); pickFolder('replace')">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                          <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+                          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                        </svg>
+                      </el-button>
+                    </span>
+                  </el-tooltip>
+                  <el-tooltip content="Download tracks" placement="top" :open-delay="200">
+                    <span class="story-action">
+                      <el-button
+                        size="mini"
+                        class="icon-btn"
+                        aria-label="Download this story as a folder"
+                        :disabled="downloading || story.items.length === 0"
+                        @click="selectStory(sIndex); downloadFolder()">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+                        </svg>
+                      </el-button>
+                    </span>
+                  </el-tooltip>
+                  <el-button size="mini" type="primary" icon="el-icon-plus" @click="addStoryItem(sIndex)" :disabled="importing || story.items.length >= MAX_TRACKS" plain>Add Track</el-button>
                   <el-button size="mini" type="danger" icon="el-icon-delete" @click="removeStory(sIndex)" plain circle></el-button>
                 </div>
               </div>
@@ -256,7 +357,7 @@
               <div class="story-items" :class="{ 'is-dragging': dragFrom !== null }">
                 <template v-for="(item, iIndex) in story.items">
                 <div :key="'insert-' + item._rowKey" class="insert-divider">
-                  <button type="button" class="insert-here" @click="addStoryItem(sIndex, iIndex)">
+                  <button type="button" class="insert-here" :disabled="importing || story.items.length >= MAX_TRACKS" @click="addStoryItem(sIndex, iIndex)">
                     + Add track here
                   </button>
                 </div>
@@ -312,11 +413,14 @@
                       <el-input type="textarea" v-model="item.text" placeholder="Voice script / Text content" size="small" :rows="2" class="text-input"></el-input>
                     </div>
                     <div v-if="item.imageUrl" class="img-preview-box">
-                      <canvas v-if="isBinFile(item.imageUrl)"
-                              :ref="'canvas-s' + item._rowKey"
-                              class="bin-preview-canvas">
-                      </canvas>
-                      <img v-else :src="item.imageUrl" alt="Preview" @error="handleImageError($event)"/>
+                      <img v-if="previewSrc(item.imageUrl)" :src="previewSrc(item.imageUrl)" alt="Preview" @error="markPreviewFailed(item.imageUrl)"/>
+                      <div v-else-if="previewLoading(item.imageUrl)" class="bin-loading">
+                        <i class="el-icon-loading"></i>
+                      </div>
+                      <div v-else class="bin-error">
+                        <i class="el-icon-picture-outline"></i>
+                        <span>No preview</span>
+                      </div>
                     </div>
                   </div>
                   <div class="item-col action-col">
@@ -375,6 +479,8 @@
 import dialogDismiss from '@/mixins/dialogDismiss';
 import Api from "@/apis/api";
 import { pairMediaFiles, fileName } from "@/utils/pairMediaFiles.mjs";
+import { MAX_TRACKS, roomFor } from "@/utils/trackLimit.mjs";
+import { isBinUrl, lvglBinToDataUrl, loadLvglBinAsDataUrl } from "@/utils/lvglBin";
 import {
   DEFAULT_CONTENT_TYPES,
   contentTypeLabel,
@@ -395,8 +501,8 @@ const AUTO_SCROLL_EDGE = 72;
 const AUTO_SCROLL_MAX_STEP = 17;
 
 // A row identity that survives reordering. The array index cannot be it — moving
-// a row would hand its inputs, its canvas and its .bin loading state to whoever
-// took its place — and the database id cannot either, because a row added in
+// a row would hand its inputs to whoever took its place — and the database id
+// cannot either, because a row added in
 // this dialog has none until it is saved. Stripped from the payload on submit.
 let rowKeySeed = 0;
 const nextRowKey = () => `row-${++rowKeySeed}`;
@@ -437,10 +543,12 @@ export default {
       playingUrl: null,
       storyMode: false,
       stories: [],  // [{title: '', items: [{title, audioUrl, imageUrl, text}]}]
+      selectedStory: null, // index of the story a grouped-mode folder import goes into
       pendingUpload: null, // { mode: 'flat'|'story'|'packThumbnail', storyIndex, itemIndex, field: 'audioUrl'|'imageUrl'|'thumbnailUrl' }
-      thumbnailPreviewError: false,
       uploadingMedia: false,
       importing: false,
+      folderAction: 'import', // 'import' adds the folder's tracks, 'replace' swaps them in
+      downloading: false,
       importDone: 0,
       importTotal: 0,
       knownContentTypes: [],
@@ -449,9 +557,13 @@ export default {
       creatingType: false,
       newPlaylistName: "",
       lastContentType: "",
-      binLoading: {},
-      binError: {},
-      binCache: {},
+      // Artwork previews, keyed by URL rather than by row. Every upload gets a
+      // URL of its own, so a replaced or edited picture is a new key and a new
+      // preview — never the previous one left on screen. `binPreviews` holds a
+      // decoded `.bin` as a PNG data URL (null while it loads); `failedPreviews`
+      // marks any URL, web image or `.bin`, that could not be shown.
+      binPreviews: {},
+      failedPreviews: {},
       // Reordering by drag. `armedRow` is the row whose handle is under the
       // mouse: rows are only draggable while it names them, so the title and
       // URL fields stay selectable everywhere else. `dragFrom`/`dragOver` are
@@ -480,6 +592,8 @@ export default {
   },
   computed: {
     CREATE_SENTINEL: () => CREATE_SENTINEL,
+    // The flat list, and each story in grouped mode, holds at most this many.
+    MAX_TRACKS: () => MAX_TRACKS,
 
     // Shipped types + every type already used by a saved pack + playlists
     // created from this dialog + whatever the form currently holds, so a
@@ -602,7 +716,7 @@ export default {
     },
     // `index` is the position to insert at; omitted, the item goes on the end.
     addItem(index = null) {
-        if (this.form.items.length >= 10) return;
+        if (this.form.items.length >= MAX_TRACKS) return;
         const item = {
             _rowKey: nextRowKey(),
             sequence: 0,
@@ -633,6 +747,7 @@ export default {
     },
     // ---- Story Mode Methods ----
     onStoryModeChange(val) {
+      this.selectedStory = null;
       if (val) {
         // Switching to story mode — convert flat items to a single story if any exist
         if (this.form.items.length > 0 && this.stories.length === 0) {
@@ -651,13 +766,20 @@ export default {
     },
     removeStory(sIndex) {
       this.stories.splice(sIndex, 1);
+      // Keep the selection on the same story, or clear it if that one went.
+      if (this.selectedStory === sIndex) this.selectedStory = null;
+      else if (this.selectedStory > sIndex) this.selectedStory -= 1;
+    },
+    selectStory(sIndex) {
+      this.selectedStory = sIndex;
     },
     // `iIndex` is the position to insert at; omitted, the track goes on the end.
     addStoryItem(sIndex, iIndex = null) {
+      const items = this.stories[sIndex].items;
+      if (items.length >= MAX_TRACKS) return;
       const track = {
         _rowKey: nextRowKey(), title: '', audioUrl: '', imageUrl: '', text: ''
       };
-      const items = this.stories[sIndex].items;
       if (iIndex === null || iIndex >= items.length) {
         items.push(track);
       } else {
@@ -904,33 +1026,58 @@ export default {
         this.uploadingMedia = false;
       }
     },
-    // ---- Folder import (flat mode) ----
-    pickFolder() {
+    // ---- Folder import (flat mode, or into the selected story when grouped) ----
+    // Set on every pick, so a cancelled picker cannot leave 'replace' behind.
+    // `@click="pickFolder"` passes the click event, which reads as 'import'.
+    pickFolder(action) {
+      this.folderAction = action === 'replace' ? 'replace' : 'import';
       if (this.$refs.folderPicker) {
         this.$refs.folderPicker.click();
       }
     },
     async handleFolderSelected(event) {
+      const replacing = this.folderAction === 'replace';
       const files = Array.from(event?.target?.files || []);
       event.target.value = '';
       if (!files.length) return;
 
       const fileByPath = new Map(files.map(f => [f.webkitRelativePath || f.name, f]));
-      let pairs = pairMediaFiles([...fileByPath.keys()]);
+      const pairs = pairMediaFiles([...fileByPath.keys()]);
       if (pairs.length === 0) {
         this.$message.warning('No audio files found in that folder.');
         return;
       }
 
-      const room = 10 - this.form.items.length;
-      if (room <= 0) {
-        this.$message.warning('This pack already has 10 items.');
+      // Captured now, so changing the selection mid-upload cannot redirect it.
+      const targetStory = this.storyMode ? this.stories[this.selectedStory] : null;
+      if (this.storyMode && !targetStory) {
+        this.$message.warning('Select a story first, then import the folder into it.');
         return;
       }
-      const skipped = Math.max(0, pairs.length - room);
-      pairs = pairs.slice(0, room);
+      const target = targetStory ? targetStory.items : this.form.items;
 
-      if (!(await this.confirmPairs(pairs, skipped, fileByPath))) return;
+      // The flat list, and in grouped mode each story, holds at most
+      // MAX_TRACKS. A folder that does not fit is refused whole, before
+      // anything uploads, rather than cut short. A replace clears the list first.
+      const room = roomFor(target.length, { replacing });
+      if (pairs.length > room) {
+        const holder = targetStory ? 'a story' : 'a content pack';
+        const listName = targetStory ? `Story ${this.stories.indexOf(targetStory) + 1}` : 'This pack';
+        this.$alert(
+          room > 0
+            ? `This folder has ${pairs.length} tracks, but ${holder} holds at most ${MAX_TRACKS} tracks and ${replacing ? `the replace leaves room for ${room}` : `only ${room} more can fit`}. Nothing was uploaded. Choose a folder with ${room} track(s) or fewer.`
+            : `${listName} already has ${target.length} tracks, and ${holder} holds at most ${MAX_TRACKS}. Nothing was uploaded.`,
+          'Track limit exceeded',
+          { type: 'error', confirmButtonText: 'OK' }
+        ).catch(() => {});
+        return;
+      }
+
+      // The rows the parent agreed to replace. Only these are removed, so a
+      // track added by hand while the upload runs survives it.
+      const replaced = replacing ? target.slice() : [];
+      if (replacing && !(await this.confirmReplace(replaced.length, pairs.length, targetStory))) return;
+      if (!(await this.confirmPairs(pairs, fileByPath))) return;
 
       // One item per pair; each file uploads into its own field.
       const newItems = pairs.map(p => ({ _rowKey: nextRowKey(), sequence: 0, title: p.title, audioUrl: '', imageUrl: '', text: '' }));
@@ -963,17 +1110,33 @@ export default {
 
       // An item without audio is unusable, so drop it rather than adding a blank row.
       const imported = newItems.filter(item => item.audioUrl);
-      imported.forEach(item => this.form.items.push(item));
-      this.resequence(this.form.items);
+      if (targetStory && !this.stories.includes(targetStory)) {
+        this.$message.warning('That story was deleted during the upload, so its imported tracks were not added.');
+        return;
+      }
+      // Old rows go only once something new uploaded, so a replace whose
+      // uploads all failed leaves the list as it was.
+      if (replacing && imported.length) {
+        const kept = target.filter(item => !replaced.includes(item));
+        target.splice(0, target.length, ...kept);
+      }
+      imported.forEach(item => target.push(item));
+      this.resequence(target);
 
+      const where = targetStory ? ` in Story ${this.stories.indexOf(targetStory) + 1}` : '';
       if (imported.length) {
-        this.$message.success(`Imported ${imported.length} item(s).`);
+        if (replacing) {
+          this.$message.success(`Replaced with ${imported.length} track(s)${where}.`);
+        } else {
+          this.$message.success(targetStory
+            ? `Imported ${imported.length} track(s) into Story ${this.stories.indexOf(targetStory) + 1}.`
+            : `Imported ${imported.length} item(s).`);
+        }
+      } else if (replacing) {
+        this.$message.warning(`Nothing uploaded, so the current tracks${where} were kept.`);
       }
       if (failures.length) {
         this.$message.warning(`${failures.length} file(s) failed to upload: ${failures.join('; ')}`);
-      }
-      if (skipped) {
-        this.$message.warning(`${skipped} pair(s) skipped — a pack holds at most 10 items.`);
       }
     },
     // Renders a locally picked image file to a data URL, decoding .bin through
@@ -981,13 +1144,8 @@ export default {
     async localImagePreview(file) {
       if (!file) return null;
       try {
-        if (this.isBinFile(file.name)) {
-          const { imageData, width, height } = this.decodeLvglBin(await file.arrayBuffer());
-          const canvas = document.createElement('canvas');
-          canvas.width = width;
-          canvas.height = height;
-          canvas.getContext('2d').putImageData(imageData, 0, 0);
-          return canvas.toDataURL();
+        if (isBinUrl(file.name)) {
+          return lvglBinToDataUrl(await file.arrayBuffer());
         }
         return URL.createObjectURL(file);
       } catch (error) {
@@ -995,7 +1153,107 @@ export default {
         return null;
       }
     },
-    async confirmPairs(pairs, skipped, fileByPath) {
+    // ---- Folder download (flat: the whole pack, grouped: the selected story) ----
+    // One .zip holding one folder. Files are named "01-Title.mp3" and
+    // "01-Title.bin", so the unzipped folder goes straight back through Import
+    // Folder or Replace, paired and in the same order. Fetched through the
+    // content proxy because the CDN does not answer the browser directly.
+    async downloadFolder() {
+      const story = this.storyMode ? this.stories[this.selectedStory] : null;
+      if (this.storyMode && !story) {
+        this.$message.warning('Select a story first, then download it.');
+        return;
+      }
+      const items = story ? story.items : this.form.items;
+      const packName = this.form.name || this.form.packCode || 'content-pack';
+      const folder = this.safeFileName(story
+        ? `${packName} - Story ${this.stories.indexOf(story) + 1}${story.title ? ` - ${story.title}` : ''}`
+        : packName) || 'content-pack';
+
+      const pad = Math.max(2, String(items.length).length);
+      const jobs = [];
+      items.forEach((item, i) => {
+        const base = `${String(i + 1).padStart(pad, '0')}-${this.safeFileName(item.title) || 'track'}`;
+        // A URL without an extension still needs one, or the audio and image
+        // of a track would collide on the same name.
+        if (item.audioUrl) jobs.push({ url: item.audioUrl, name: base + (this.urlExtension(item.audioUrl) || '.mp3') });
+        if (item.imageUrl) jobs.push({ url: item.imageUrl, name: base + (this.urlExtension(item.imageUrl) || '.png') });
+      });
+      if (!jobs.length) {
+        this.$message.warning('These tracks have no files to download.');
+        return;
+      }
+
+      const token = this.getAuthToken();
+      const files = {};
+      const failures = [];
+      this.downloading = true;
+      try {
+        await this.runPool(jobs, 4, async (job) => {
+          try {
+            const response = await fetch(`${Api.getServiceUrl()}/content/proxy?url=${encodeURIComponent(job.url)}`, {
+              headers: token ? { Authorization: `Bearer ${token}` } : {}
+            });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            files[`${folder}/${job.name}`] = new Uint8Array(await response.arrayBuffer());
+          } catch (error) {
+            failures.push(`${job.name}: ${error.message}`);
+          }
+        });
+
+        const saved = Object.keys(files).length;
+        if (!saved) {
+          this.$message.error(`Download failed: ${failures.join('; ')}`);
+          return;
+        }
+
+        // Loaded on first use so the zip code stays out of the main bundle.
+        // Level 0 stores: audio and images are compressed already.
+        const { zipSync } = await import('fflate');
+        const blobUrl = URL.createObjectURL(new Blob([zipSync(files, { level: 0 })], { type: 'application/zip' }));
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = `${folder}.zip`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+
+        if (failures.length) {
+          this.$message.warning(`Downloaded ${saved} file(s); ${failures.length} failed: ${failures.join('; ')}`);
+        } else {
+          this.$message.success(`Downloaded ${saved} file(s).`);
+        }
+      } finally {
+        this.downloading = false;
+      }
+    },
+    // ".mp3" from a CDN URL (query string and encoding ignored), or '' if none.
+    urlExtension(url) {
+      try {
+        const match = /\.([a-z0-9]{1,5})$/i.exec(decodeURIComponent(new URL(url).pathname));
+        return match ? `.${match[1].toLowerCase()}` : '';
+      } catch (e) {
+        return '';
+      }
+    },
+    // Drops characters no file system accepts in a name.
+    safeFileName(name) {
+      return String(name || '')
+        .replace(/[\\/:*?"<>|\u0000-\u001f]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 80);
+    },
+    confirmReplace(currentCount, newCount, story) {
+      const where = story ? `Story ${this.stories.indexOf(story) + 1}` : 'this pack';
+      return this.$confirm(
+        `All ${currentCount} current track(s) in ${where} will be deleted and replaced with ${newCount} track(s) from this folder. This can't be undone once the pack is saved.`,
+        'Replace all tracks?',
+        { confirmButtonText: 'Replace', cancelButtonText: 'Cancel', type: 'warning' }
+      ).then(() => true).catch(() => false);
+    },
+    async confirmPairs(pairs, fileByPath) {
       const h = this.$createElement;
       const objectUrls = [];
 
@@ -1019,11 +1277,6 @@ export default {
       rows.unshift(h('div', { class: 'import-preview-hint' }, [
         'Nothing has been uploaded yet. These previews are read from your local files — check each image matches its audio, then press Upload.'
       ]));
-      if (skipped) {
-        rows.push(h('div', { class: 'import-preview-note' }, [
-          `${skipped} more pair(s) will be skipped — a pack holds at most 10 items.`
-        ]));
-      }
 
       try {
         return await this.$confirm(h('div', { class: 'import-preview' }, rows), `Import ${pairs.length} item(s)?`, {
@@ -1076,129 +1329,30 @@ export default {
         }
         this.playingUrl = null;
     },
-    // .bin file handling methods
-    isBinFile(url) {
-      return url && url.toLowerCase().endsWith('.bin');
+    // What a preview box shows for a URL, or null while there is nothing to
+    // show. A web image goes straight to the <img>. A device `.bin` cannot, so
+    // it is fetched and decoded the first time the render asks for it — which
+    // is what makes flat items, story tracks, the thumbnail, a fresh upload and
+    // a hand-edited URL all preview without anything having to remember to load
+    // them.
+    previewSrc(url) {
+      if (!url || this.failedPreviews[url]) return null;
+      if (!isBinUrl(url)) return url;
+      if (!(url in this.binPreviews)) this.loadBinPreview(url);
+      return this.binPreviews[url] || null;
     },
-    handleImageError(event) {
-      // Hide broken image
-      event.target.style.display = 'none';
+    previewLoading(url) {
+      return isBinUrl(url) && !this.failedPreviews[url] && !this.binPreviews[url];
     },
-    // Decodes an LVGL v9 RGB565 .bin into ImageData. Works on any ArrayBuffer,
-    // so the same parser serves both uploaded URLs and locally picked files.
-    decodeLvglBin(arrayBuffer) {
-      const dataView = new DataView(arrayBuffer);
-
-      // Parse LVGL v9 header (12 bytes)
-      const magic = dataView.getUint8(0);
-      const colorFormat = dataView.getUint8(1);
-      const width = dataView.getUint16(4, true);  // Little endian
-      const height = dataView.getUint16(6, true);
-      const stride = dataView.getUint16(8, true);
-
-      // Validate header
-      if (magic !== 0x19) {
-        console.warn('Invalid LVGL magic number:', magic);
-        throw new Error('Invalid LVGL format');
-      }
-
-      // Only support RGB565 (0x12) for now
-      if (colorFormat !== 0x12) {
-        console.warn('Unsupported color format:', colorFormat);
-        throw new Error('Unsupported color format');
-      }
-
-      // Create ImageData
-      const imageData = new ImageData(width, height);
-      const pixels = imageData.data;
-
-      // Skip 12-byte header, read pixel data
-      const pixelOffset = 12;
-
-      for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-          const srcIdx = pixelOffset + (y * stride) + (x * 2);
-          const dstIdx = (y * width + x) * 4;
-
-          // Read RGB565 (little endian)
-          const rgb565 = dataView.getUint16(srcIdx, true);
-
-          // Convert RGB565 to RGBA8888
-          const r = ((rgb565 >> 11) & 0x1F) << 3;
-          const g = ((rgb565 >> 5) & 0x3F) << 2;
-          const b = (rgb565 & 0x1F) << 3;
-
-          pixels[dstIdx] = r | (r >> 5);     // R
-          pixels[dstIdx + 1] = g | (g >> 6); // G
-          pixels[dstIdx + 2] = b | (b >> 5); // B
-          pixels[dstIdx + 3] = 255;          // A
-        }
-      }
-
-      return { imageData, width, height };
+    markPreviewFailed(url) {
+      this.$set(this.failedPreviews, url, true);
     },
-    // Keyed by the row's own key, never its index: after a move, index-keyed
-    // loading flags and canvas refs would describe the row that took its place.
-    async loadBinPreview(url, rowKey) {
-      if (!url || !this.isBinFile(url)) return;
-
-      // Check cache first
-      if (this.binCache[url]) {
-        this.renderCachedBin(url, rowKey);
-        return;
-      }
-
-      this.$set(this.binLoading, rowKey, true);
-      this.$set(this.binError, rowKey, false);
-
-      try {
-        // Fetch the .bin file via proxy to avoid CORS issues
-        const proxyUrl = `/toy/content/proxy?url=${encodeURIComponent(url)}`;
-
-        // Get auth token from localStorage
-        const storedToken = localStorage.getItem('token');
-        const headers = {};
-        if (storedToken) {
-          try {
-            const tokenData = JSON.parse(storedToken);
-            headers['Authorization'] = `Bearer ${tokenData.token}`;
-          } catch (e) {
-            console.warn('Could not parse auth token');
-          }
-        }
-
-        const response = await fetch(proxyUrl, { headers });
-        if (!response.ok) throw new Error('Failed to fetch .bin file');
-
-        const arrayBuffer = await response.arrayBuffer();
-
-        // Cache the decoded image data
-        this.binCache[url] = this.decodeLvglBin(arrayBuffer);
-
-        // Render to canvas
-        this.renderCachedBin(url, rowKey);
-
-      } catch (error) {
-        console.error('Error loading .bin preview:', error);
-        this.$set(this.binError, rowKey, true);
-      } finally {
-        this.$set(this.binLoading, rowKey, false);
-      }
-    },
-    renderCachedBin(url, rowKey) {
-      const cached = this.binCache[url];
-      if (!cached) return;
-
-      this.$nextTick(() => {
-        const canvasRef = this.$refs['canvas-' + rowKey];
-        const canvas = Array.isArray(canvasRef) ? canvasRef[0] : canvasRef;
-
-        if (canvas) {
-          canvas.width = cached.width;
-          canvas.height = cached.height;
-          const ctx = canvas.getContext('2d');
-          ctx.putImageData(cached.imageData, 0, 0);
-        }
+    loadBinPreview(url) {
+      // Marked in flight first, so the re-renders meanwhile do not queue it again.
+      this.$set(this.binPreviews, url, null);
+      loadLvglBinAsDataUrl(url).then(dataUrl => {
+        if (dataUrl) this.$set(this.binPreviews, url, dataUrl);
+        else this.markPreviewFailed(url);
       });
     },
     submit() {
@@ -1278,10 +1432,6 @@ export default {
     this.stopAutoScroll();
   },
   watch: {
-    'form.thumbnailUrl'() {
-      // A new URL deserves a fresh load attempt, not the previous one's error state
-      this.thumbnailPreviewError = false;
-    },
     visible(newVal) {
       if (newVal) {
         this.dialogKey = Date.now();
@@ -1322,21 +1472,11 @@ export default {
 
         this.ensureRowKeys(this.form.items);
         this.stories.forEach(story => this.ensureRowKeys(story.items));
-
-        // Load bin previews for existing items
-        this.$nextTick(() => {
-          this.form.items.forEach(item => {
-            if (this.isBinFile(item.imageUrl)) {
-              this.loadBinPreview(item.imageUrl, item._rowKey);
-            }
-          });
-        });
       } else {
         this.stopAudio();
-        this.binLoading = {};
-        this.binError = {};
         this.stories = [];
         this.storyMode = false;
+        this.selectedStory = null;
         this.pendingUpload = null;
         this.uploadingMedia = false;
         this.importing = false;
@@ -1344,17 +1484,6 @@ export default {
         this.importTotal = 0;
         this.endRowDrag();
       }
-    },
-    'form.items': {
-      handler(items) {
-        // Watch for imageUrl changes to load bin previews
-        items.forEach(item => {
-          if (this.isBinFile(item.imageUrl) && !this.binLoading[item._rowKey] && !this.binCache[item.imageUrl]) {
-            this.loadBinPreview(item.imageUrl, item._rowKey);
-          }
-        });
-      },
-      deep: true
     }
   }
 };
@@ -1443,11 +1572,6 @@ export default {
   font-family: var(--font-mono);
   font-size: 10.5px;
   word-break: break-all;
-}
-.import-preview-note {
-  margin-top: 8px;
-  color: var(--warning);
-  font-weight: 550;
 }
 </style>
 
@@ -1730,13 +1854,6 @@ export default {
         object-fit: contain;
       }
 
-      .bin-preview-canvas {
-        max-width: 100%;
-        max-height: 100%;
-        object-fit: contain;
-        image-rendering: pixelated; // Keep pixel art crisp
-      }
-
       .bin-loading {
         position: absolute;
         inset: 0;
@@ -1866,6 +1983,25 @@ export default {
       margin: 14px;
       background: $surface;
       overflow: hidden;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+
+      // The story a grouped-mode folder import or replace goes into. A clear
+      // blue (the "Grouped" switch's colour), thickened by a ring and a soft
+      // glow that do not shift the layout.
+      &.is-selected {
+        border-color: #409EFF;
+        box-shadow: 0 0 0 1px #409EFF, 0 0 0 4px rgba(64, 158, 255, 0.18);
+      }
+    }
+
+    .replace-btn svg,
+    .download-btn svg,
+    .icon-btn svg {
+      display: block;
+    }
+
+    .story-action {
+      display: inline-flex;
     }
 
     .story-header {

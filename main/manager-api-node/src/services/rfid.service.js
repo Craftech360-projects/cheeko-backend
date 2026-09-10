@@ -4011,7 +4011,7 @@ const CONTENT_PACK_SORT_COLUMNS = {
 };
 
 const getContentPackPage = async ({
-  page = 1, limit = 10, packCode, name, contentType, language, active, scope,
+  page = 1, limit = 10, packCode, name, keyword, contentType, language, active, scope,
   sortBy, sortDir
 } = {}) => {
   const offset = (page - 1) * limit;
@@ -4020,6 +4020,14 @@ const getContentPackPage = async ({
 
   if (packCode) filters.push(Prisma.sql`pack_code ILIKE ${'%' + packCode + '%'}`);
   if (name) filters.push(Prisma.sql`name ILIKE ${'%' + name + '%'}`);
+  // The grid's one search box, which asks for a name or a code. `packCode` and
+  // `name` above are ANDed, so they cannot serve it. LIKE's own wildcards are
+  // escaped so a typed "%" or "_" matches itself.
+  const term = String(keyword || '').trim();
+  if (term) {
+    const pattern = `%${term.replace(/[\\%_]/g, '\\$&')}%`;
+    filters.push(Prisma.sql`(name ILIKE ${pattern} OR pack_code ILIKE ${pattern})`);
+  }
   if (contentType) filters.push(Prisma.sql`content_type = ${contentType}`);
   if (language) filters.push(Prisma.sql`language = ${language}`);
   if (active !== undefined && active !== null && active !== '') {

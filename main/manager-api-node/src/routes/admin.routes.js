@@ -188,7 +188,7 @@ const { success, badRequest, notFound } = require('../utils/response');
  *         name: mobile
  *         schema:
  *           type: string
- *         description: Filter by mobile/username
+ *         description: Search by username, email, Firebase uid or parent name
  *     responses:
  *       200:
  *         description: Paginated user list
@@ -214,6 +214,15 @@ const { success, badRequest, notFound } = require('../utils/response');
  *                             type: integer
  *                           mobile:
  *                             type: string
+ *                           email:
+ *                             type: string
+ *                             nullable: true
+ *                           parentName:
+ *                             type: string
+ *                             nullable: true
+ *                           firebaseUid:
+ *                             type: string
+ *                             nullable: true
  *                           deviceCount:
  *                             type: string
  *                           status:
