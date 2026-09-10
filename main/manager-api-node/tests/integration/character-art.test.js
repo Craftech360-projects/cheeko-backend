@@ -240,4 +240,20 @@ describe('sd_folder validation', () => {
       expect.objectContaining({ data: expect.objectContaining({ sd_folder: null }) })
     );
   });
+
+  it('accepts the Add Template form as sent, with an empty agentCode', async () => {
+    // The dashboard form has no code field and always sends agentCode ''.
+    const res = await request(app)
+      .post('/toy/agent/template')
+      .send({
+        agentName: 'test', agentCode: '', language: 'English', langCode: 'en',
+        systemPrompt: 'test', summaryMemory: 'test', chatHistoryConf: 1, sort: 0,
+        sdFolder: '', isVisible: 1
+      });
+
+    expect(res.status).toBe(200);
+    expect(prisma.ai_agent_template.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ agent_code: null }) })
+    );
+  });
 });
