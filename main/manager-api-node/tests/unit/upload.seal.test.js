@@ -34,10 +34,15 @@ describe('upload sealing', () => {
     expect(r.url).toMatch(/^https:\/\/.+\/rfidcontent\/audio\/tiger-[0-9a-f]{8}\.mp3$/);
   });
 
-  test('custom card audio and image and character art seal too', async () => {
+  test('custom card audio and image seal too', async () => {
     await upload.uploadCustomCardAudio(MP3, 42, 'rec.mp3', 'audio/mpeg', { sealKey: K });
     await upload.uploadCustomCardImage(Buffer.alloc(12, 1), 42, { sealKey: K });
-    await upload.uploadCharacterArt(Buffer.alloc(12, 2), 'tara', 1, 'talk', { sealKey: K });
     for (const put of sent) expect(cc.parseHeader(put.Body)).not.toBeNull();
+  });
+
+  test('character art is never sealed, even if a sealKey is passed', async () => {
+    const bin = Buffer.alloc(12, 2);
+    await upload.uploadCharacterArt(bin, 'tara', 1, 'talk', { sealKey: K });
+    expect(sent[0].Body).toEqual(bin);
   });
 });

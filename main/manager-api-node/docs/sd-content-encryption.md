@@ -6,7 +6,7 @@ Downloaded content on the toy's SD card is stored in the clear today. Pull the c
 
 The diagram shows version 2. Version 1 is the same picture with the per-pack key replaced by one global key compiled into firmware, and without section 2.
 
-**Scope.** Downloaded content only: pack audio, pack item images, custom-card recordings, character sprites. Built-in UI art, themes, `cardmap.jsn` and logs stay plaintext. Pack thumbnails stay plaintext because the dashboard shows them in an `<img>`.
+**Scope.** Downloaded content only: pack audio, pack item images, custom-card recordings. Built-in UI art, themes, character sprites, `cardmap.jsn` and logs stay plaintext. Character sprites were in scope until 2026-09-10, when they were ruled out. Pack thumbnails stay plaintext because the dashboard shows them in an `<img>`.
 
 **Out of scope.** Secure Boot and RFID card authenticity. Note that a cloned card UID gets a clean download from CloudFront in either version, so per-device keys buy little until card authenticity is addressed.
 
@@ -92,7 +92,7 @@ const result = await uploadService.uploadContentFile(body, artwork.filename, 'rf
 ```
 
 - Sealing happens in memory on the server. Multer never touches disk. Only sealed bytes reach S3.
-- Apply the same `seal` at the other S3 writers whose output lands on an SD card: custom-card audio and image, character art. Everything else stays plaintext.
+- Apply the same `seal` at the other S3 writers whose output lands on an SD card: custom-card audio and image. Everything else stays plaintext, including character art (ruled out 2026-09-10).
 - Gate on `CONTENT_ENC_KEY` (version 1) or `CONTENT_MASTER_KEY` (version 2) being set, so local and test environments keep working and production rollout is an env flip.
 - S3 keys, CloudFront URLs, `Cache-Control`, and the `content_item` row are unchanged. Nothing downstream knows encryption happened.
 - The MCP's `upload_pack_file` posts through the same route and gets sealed automatically. No MCP change.
@@ -109,7 +109,7 @@ const result = await uploadService.uploadContentFile(body, artwork.filename, 'rf
 
 - `main/boards/common/content_crypto.{h,cc}`: `IsEncrypted(head16)` plus a thin wrapper over `mbedtls_aes_setkey_enc` and `mbedtls_aes_crypt_ctr` holding key, nonce counter, `nc_off` and `stream_block`. These are the same calls `mqtt_protocol.cc` already uses for UDP audio, so no new dependency and the hardware AES block is used automatically. mbedtls carries the partial keystream block across calls, so unaligned chunk boundaries need no extra code.
 - `mp3_player.cc`: after `fopen`, read 16 bytes. If magic, keep the nonce and decrypt every `fread` chunk in place before the decoder. If not, `fseek(0)` and proceed as today. No new allocation.
-- `cheeko_sd_image_loader.cc` and `LoadBinFile` in character art: after the whole-file read into PSRAM, decrypt in place before the existing LVGL header check. The 12 KB internal-heap guard is untouched.
+- `cheeko_sd_image_loader.cc`: after the whole-file read into PSRAM, decrypt in place before the existing LVGL header check. The 12 KB internal-heap guard is untouched.
 - Failure is loud: bad magic version or a decrypt that yields a non-MP3 or non-LVGL header refuses playback, logs a telemetry marker with the pack id, and shows an on-screen message. Never fall through to the decoder with ciphertext.
 
 **Rule.** K must never change across firmware releases, or every pack on every SD card in the field stops playing after the OTA.
@@ -133,7 +133,7 @@ ALTER TABLE ai_device          ADD COLUMN content_secret BYTEA;   -- S, encrypte
 
 Both columns are encrypted under one server master key, `CONTENT_MASTER_KEY`, from the environment or KMS, never a literal in the repo. Decide where it lives before the first K is written, because retrofitting means re-wrapping every stored key. Normalise the MAC on write and on read; the codebase already has two RFID UID normalisations that disagree.
 
-**Key delivery at lookup.** In `lookupCardByUid`, content-pack branch, and in `buildCharacterArt` for sprites:
+**Key delivery at lookup.** In `lookupCardByUid`, content-pack branch:
 
 ```
 wrap_key = HMAC-SHA256(S, "cheeko-wrap-v1")[0:16]
@@ -218,10 +218,8 @@ is sealed, passing `packCode`, or the decoder sees `CKE1` instead of the LVGL ma
 artwork silently disappears. Callers with no pack code fall back to the plain content proxy, so
 plaintext artwork is unaffected.
 
-Character sprites are the same shape of problem and are NOT yet handled: they are keyed by
-`sd_folder` rather than `packCode`, so the preview route needs a second parameter before the
-template-management screen can render sealed character art. Close that before enabling
-`CONTENT_MASTER_KEY` anywhere real.
+Character sprites are never sealed (ruled out 2026-09-10), so the template-management screen
+keeps using the plain content proxy and needs no key.
 
 ---
 
@@ -230,7 +228,7 @@ template-management screen can render sealed character art. Close that before en
 1. Ship firmware that understands `CKE1` but tolerates plaintext. Old firmware given a sealed file would feed ciphertext to the decoder, so this order is not optional.
 2. Wait for fleet adoption. `rfid_card_tap_log.client_version` already records firmware versions per device.
 3. Set the env key in production. New uploads are sealed from that moment.
-4. Backfill: for each `content_item` audio or image URL and each character art URL on CloudFront, download, seal, upload under a new UUID-suffixed key with the existing helper, update the row. New keys sidestep the one-year edge cache. In-field SD cards keep their plaintext and keep playing. Those files already left the building. What the backfill closes is the public URLs.
+4. Backfill: for each `content_item` audio or image URL on CloudFront, download, seal, upload under a new UUID-suffixed key with the existing helper, update the row. New keys sidestep the one-year edge cache. In-field SD cards keep their plaintext and keep playing. Those files already left the building. What the backfill closes is the public URLs.
 
 **Known bug, independent of this work.** `ContentFileAlreadyDownloaded` in `content_manager.cc` skips any existing non-empty file, so a version bump rewrites the manifest and leaves old bytes. It does not block this rollout, because in-field cards are not asked to re-download. Fix it when a version bump next needs to refresh bytes, by writing a target-version marker at download start and skipping existing files only when the marker matches.
 

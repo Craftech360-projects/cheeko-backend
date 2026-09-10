@@ -499,13 +499,12 @@ async function uploadCustomCardImage(binBuffer, kidId, { reuseKey = null, sealKe
  * @param {string} sdFolder - the character's SD directory name
  * @param {number} version - art_version this upload belongs to
  * @param {string} state - one of connect | listen | think | talk
- * @param {{sealKey?: Buffer|null}} [options]
  * @returns {Promise<{s3Key: string, url: string}>}
  */
 const { CHARACTER_ART_STATES } = require('../config/constants');
 const CHARACTER_ART_CACHE_CONTROL = 'public, max-age=31536000, immutable';
 
-async function uploadCharacterArt(binBuffer, sdFolder, version, state, { sealKey = null } = {}) {
+async function uploadCharacterArt(binBuffer, sdFolder, version, state) {
   // Both of these are path segments built from caller input. The DB check
   // constraint enforces the same shape on sd_folder, but this function is also
   // reachable from a script, and a `..` here would write outside the prefix.
@@ -524,7 +523,7 @@ async function uploadCharacterArt(binBuffer, sdFolder, version, state, { sealKey
   await s3Client.send(new PutObjectCommand({
     Bucket: S3_BUCKET,
     Key: s3Key,
-    Body: maybeSeal(binBuffer, sealKey),
+    Body: binBuffer,   // never sealed: character art stays plaintext (ruled out 2026-09-10)
     ContentType: 'application/octet-stream',
     CacheControl: CHARACTER_ART_CACHE_CONTROL
   }));

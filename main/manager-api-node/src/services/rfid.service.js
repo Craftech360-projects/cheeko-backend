@@ -788,22 +788,6 @@ const encryptionFieldFor = async (packCode, mac) => {
   }
 };
 
-/** Same as encryptionFieldFor, but for a character's SD-card artwork key. */
-const encryptionFieldForCharacter = async (sdFolder, mac) => {
-  if (!mac || !contentKeys.isEnabled()) return undefined;
-  try {
-    const [charKey, secret] = await Promise.all([
-      contentKeys.getCharacterKey(sdFolder),
-      contentKeys.getDeviceSecret(mac),
-    ]);
-    if (!charKey || !secret) return undefined;
-    return { v: 2, ...wrapKeyForDevice(secret, charKey) };
-  } catch (err) {
-    logger.warn(`[RFID-LOOKUP] key wrap failed for character sdFolder=${sdFolder} mac=${mac}: ${err.message}`);
-    return undefined;
-  }
-};
-
 /**
  * Shape a content pack + its items into the device-facing lookup response.
  * Shared by every card that resolves to a content pack — a catalogue card via
@@ -928,7 +912,7 @@ const buildContentPackResponse = async (pack, normalizedUid, mac) => {
  * child talking to the character. Returns null and the conversation runs with
  * the drawn face.
  */
-const buildCharacterArt = async (agentName, mac) => {
+const buildCharacterArt = async (agentName) => {
   if (!agentName) return null;
   try {
     const tpl = await prisma.ai_agent_template.findFirst({
@@ -960,7 +944,6 @@ const buildCharacterArt = async (agentName, mac) => {
         { state: 'think', url: tpl.art_think_url },
         { state: 'talk', url: tpl.art_talk_url },
       ],
-      encryption: await encryptionFieldForCharacter(tpl.sd_folder, mac),
     };
   } catch (err) {
     logger.warn(`[RFID-LOOKUP] Character art lookup failed for '${agentName}': ${err.message}`);
@@ -1008,7 +991,7 @@ const lookupCardByUid = async (rfidUid, mac) => {
         const actionData = series.action_data || {};
         const agentName = actionData.agent_name || null;
         logger.info(`[RFID-LOOKUP] Series AI card: series_id=${series.id}, agent=${agentName || 'default'}`);
-        const seriesCharacter = await buildCharacterArt(agentName, mac);
+        const seriesCharacter = await buildCharacterArt(agentName);
         return {
           rfid_uid: normalizedUid,
           source: 'bulk_range',
@@ -1117,7 +1100,7 @@ const lookupCardByUid = async (rfidUid, mac) => {
     // workers exist. Upgrade path: plumb device user_id in and resolve the ai_agent row by name.
     const runtimeAgentName = resolveRuntimeAgentName({ runtime_agent_name: actionData.runtime_agent_name || null });
     logger.info(`[RFID-LOOKUP] AI card detected (no content_pack_id): uid=${normalizedUid}, agent=${agentName || 'default'}, runtimeAgentName=${runtimeAgentName}, language=${languageCode || 'default'}`);
-    const character = await buildCharacterArt(agentName, mac);
+    const character = await buildCharacterArt(agentName);
     return {
       rfid_uid: normalizedUid,
       contentType: 'prompt',

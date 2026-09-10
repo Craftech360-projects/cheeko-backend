@@ -19,14 +19,14 @@ So a copied SD card, or one opened on a PC through USB Drive Mode, holds only ci
 The firmware work is:
 
 1. Generate a 32-byte device secret once, keep it in NVS, and send it to the server on the OTA check.
-2. Read an `encryption` block from `card_content` (and `character.encryption` from `card_ai`), and store the wrapped key next to the pack on the SD card.
+2. Read an `encryption` block from `card_content`, and store the wrapped key next to the pack on the SD card.
 3. At playback, unwrap the pack key using the NVS secret, then decrypt MP3 and LVGL `.bin` files as they are read.
 4. Recover cleanly when the secret changes (an NVS erase), and fail loudly and safely when a key is wrong or missing.
 
 **Do not change:**
 
 - the backend, gateway or wire contracts in section 4;
-- anything that reads non-pack SD files: UI art, themes, game sounds, game PNGs, the SD-root playlist, app manifests.
+- anything that reads non-pack SD files: UI art, character sprites, themes, game sounds, game PNGs, the SD-root playlist, app manifests.
 
 **Out of scope:**
 
@@ -137,15 +137,7 @@ fingerprint = lowercase hex of SHA-256(S)[0:4]          -> 8 characters
 - `encryption` is **absent** when the pack is plaintext, the feature is off, or the server has no S for this MAC. Treat absent and `null` the same way.
 - A block that is present but malformed must be treated as absent, with a warning. "Malformed" means `v` is not 2, `key` is not 32 hex characters, or `nonce` is not 16 hex characters.
 
-**`card_ai`.** The existing `character` object may gain the same block:
-
-```json
-{ "type": "card_ai", "character": { "folder": "tara", "version": 1,
-    "assets": [ { "state": "connect", "url": "..." } ],
-    "encryption": { "v": 2, "key": "<32 hex>", "nonce": "<16 hex>" } } }
-```
-
-The key is the **character's** key, wrapped under S. It is not a pack key.
+**`card_ai`.** Character art is never sealed (ruled out 2026-09-10), so the `character` object carries no `encryption` block. Leave the character-art path unchanged.
 
 ### 4.4 On-device storage
 
@@ -162,7 +154,6 @@ The key is the **character's** key, wrapped under S. It is not a pack key.
 |---|---|
 | `secret.fp` | 8 lowercase hex characters, no newline: the fingerprint of the S that the card's wrapped keys were made for |
 | `skills/<skill_id>/manifest.jsn` | existing fields, plus `"enc": {"v": 2, "key": "<32 hex>", "nonce": "<16 hex>"}` for sealed packs only |
-| `chars/<folder>/enc.jsn` | `{"v":2,"key":"<32 hex>","nonce":"<16 hex>"}`, present only for sealed character art. It is a separate file so that `char.jsn`, which is read with small fixed buffers, is left alone. |
 
 ### 4.5 Test vectors
 
@@ -609,11 +600,6 @@ void SetRegistrationPending(bool pending);  // uses SetBool; never EraseKey
 
    The `card_up_to_date` branch (`:619-627`) must **not** touch them.
 
-7. **`card_ai` character art** (`:511-550`, then `EnsureCharacterArt` `:319-439`):
-   - Parse `character.encryption` the same way, and apply the pending gate. While pending, skip the art download: the drawn face is the existing fallback.
-   - Write `chars/<folder>/enc.jsn` **before** `char.jsn`, because `char.jsn` is the completion marker checked by `HasCharacterArt` (`:301-311`).
-   - If a character arrives without `encryption`, delete any stale `enc.jsn`.
-
 **Done when:**
 
 - after a tap on a sealed pack, `manifest.jsn` on the SD card contains an `enc` block with a 32-hex-character key;
@@ -639,7 +625,6 @@ It handles five cases. S comes from `DeviceSecret::Peek` (never create it here),
 "Invalidate sealed content" means:
 
 - **Packs:** for every skill whose metadata has `wrapped_key_hex` non-empty, call the existing `InvalidateSkill(skill_id)` (`:214-221`). Plaintext packs are left alone, because they do not depend on S.
-- **Characters:** for every `chars/<folder>/enc.jsn`, delete `enc.jsn` and `char.jsn`. `HasCharacterArt` then goes false and the four sprites download again. `EnsureCharacterArt` has no resume-skip, but the sprites are small.
 - Log once, with the old and new fingerprints and the number of skills invalidated.
 
 **Why targeted rather than wiping `skills/`:**
@@ -667,7 +652,7 @@ The card map is left alone. An invalidated skill makes `OnCardTapped` take the "
 
    It reads the metadata `enc`, converts it with `HexToBytes`, calls `DeviceSecret::Peek`, then `UnwrapPackKey`, and wipes S. `kPlaintext` means the pack needs no key. It unwraps on every call and caches nothing.
 
-2. **A character key helper**, `GetCharacterKeyForFile(const std::string& bin_path, uint8_t key_out[16])`. It reads `enc.jsn` from `dirname(bin_path)`. That sidesteps the catalog-id versus folder mapping (`lcd_display.cc:2329` passes the catalog id, not the folder).
+2. **No character key helper.** Character art is never sealed (ruled out 2026-09-10), so sprites need no key.
 
 3. **The router** (`cheeko_content_router.cc`) holds the current key for the skill that is playing:
    - Set it in `PlaySkill` (`:86-132`) before `SetPlaylist`.
@@ -776,25 +761,9 @@ The card map is left alone. An invalidated skill makes `OnCardTapped` take the "
 
 ---
 
-### Task 9: Decrypting character sprites
+### Task 9: Decrypting character sprites (removed)
 
-**File:** `main/display/cheeko_character_art.cc`, `LoadBinFile` (`:201-320`).
-
-Today it reads the 12-byte LVGL header (`:253`), seeks to the end to get the size (`:274-278`), checks payload bounds (`:284`), allocates the payload in PSRAM (`:293`), then seeks to `kHeaderSize` and reads the payload (`:300-301`).
-
-For a sealed file:
-
-1. Read the first 16 bytes. If `ParseHeader` fails, `fseek(f, 0, SEEK_SET)` and run the existing code unchanged.
-2. If sealed, get the key with `GetCharacterKeyForFile(path)`. With no key, return `nullptr` without setting the "deferred" flag, since retrying will not help.
-3. `Init` one decryptor. Read the 12 bytes at offset 16 and `Update` them, then validate them as today's LVGL header.
-4. The payload size is `file_size - 16 - 12`. Apply the existing min and max bounds to it.
-5. `fseek(f, 16 + 12, SEEK_SET)`, read the payload, then `Update` it with the **same** decryptor, which continues the keystream correctly.
-6. Clear and delete the decryptor.
-7. The 12 KB internal-heap guard (`:215-232`) stays in front of all of this.
-
-The UI-art callers (`CheekoHeroArt::Get` `:415`, `GetThemePreview` `:468`) read plaintext files and are unaffected.
-
-**Done when:** a character card whose sprites were uploaded sealed shows all four faces (connect, listen, think, talk).
+**Removed.** Character art is never sealed (ruled out 2026-09-10), so `LoadBinFile` in `main/display/cheeko_character_art.cc` stays unchanged. The task number is kept so later references still line up.
 
 ---
 
@@ -854,7 +823,7 @@ This is Task 1. It is also the only automated guard on the byte format, so keep 
 | 9 | Tap while the server is unreachable | "Can't reach Cheeko" message, no download, pending stays set |
 | 10 | Server reachable, tap | Registration first, then a fresh wrapped key, then it plays. Files are not re-downloaded. |
 | 11 | Flip one hex digit of `enc.key` in `manifest.jsn` on a PC, then tap | One message, no noise, the skill is invalidated, and the next connected tap repairs it |
-| 12 | Character card with sealed sprites | All four faces render |
+| 12 | Character card | All four faces render, unchanged (character art is plaintext) |
 | 13 | Regression: game sounds, radio, TTS and AI speech, the boot SD-root playlist, app cards | All unchanged |
 | 14 | Stack headroom | `uxTaskGetStackHighWaterMark` on `mp3_decode`, `card_dl` and `card_worker` during the steps above stays above 1 KB |
 
@@ -870,7 +839,7 @@ This is Task 1. It is also the only automated guard on the byte format, so keep 
 - [ ] Sealed packs store their files as served, plus `enc` in `manifest.jsn`. The plain key is never written.
 - [ ] MP3 and LVGL decryption are in place, with no new internal-RAM allocations, and the decryptor never sits on the 4 KB decode stack.
 - [ ] A sealed file never reaches the decoder or the image decoder undecrypted. A wrong key produces one message, no autoplay cascade, no leaked audio ownership, and an invalidated skill.
-- [ ] Boot reconcile covers the five cases in Task 5, with targeted invalidation only. Nothing is deleted except manifests, `enc.jsn` and `char.jsn`.
+- [ ] Boot reconcile covers the five cases in Task 5, with targeted invalidation only. Nothing is deleted except manifests.
 - [ ] All plaintext paths behave exactly as before.
 - [ ] Every new file name is 8.3.
 - [ ] The device checklist in §7.3 passes.
@@ -929,7 +898,7 @@ The `key` shown is a *wrapped* key, which is useless without that toy's S. It is
 |---|---|
 | Sealed | A file carrying the 16-byte `CKE1` header followed by AES-128-CTR ciphertext |
 | S | The per-device 32-byte secret, kept in NVS |
-| K | The per-pack (or per-character) 16-byte content key, which lives on the server |
+| K | The per-pack 16-byte content key, which lives on the server |
 | Wrapped key | K encrypted under a key derived from S. It is safe to store on SD and to send over the network. |
 | Fingerprint | The first 4 bytes of SHA-256(S) as 8 hex characters. It identifies which S a card was written for, without revealing S. |
 | Registration pending | The toy has an S the server may not have yet. No downloads are allowed until it is re-registered. |

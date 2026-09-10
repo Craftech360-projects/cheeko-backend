@@ -4,7 +4,6 @@ const crypto = require('crypto');
 const mockPrisma = {
   rfid_content_pack: { findFirst: jest.fn(), updateMany: jest.fn() },
   ai_device: { findFirst: jest.fn(), updateMany: jest.fn() },
-  ai_agent_template: { findFirst: jest.fn(), updateMany: jest.fn() },
 };
 jest.mock('../../src/config/database', () => ({ prisma: mockPrisma }));
 
@@ -25,15 +24,11 @@ describe('contentKeys.service', () => {
     expect(await svc.getOrCreatePackKey('STORY01')).toBeNull();
     expect(await svc.getPackKey('STORY01')).toBeNull();
     expect(await svc.getDeviceSecret('AA:BB:CC:DD:EE:FF')).toBeNull();
-    expect(await svc.getCharacterKey('cheeko')).toBeNull();
-    expect(await svc.getOrCreateCharacterKey('cheeko')).toBeNull();
     await svc.registerDeviceSecret('AA:BB:CC:DD:EE:FF', crypto.randomBytes(32).toString('hex'));
     expect(mockPrisma.rfid_content_pack.findFirst).not.toHaveBeenCalled();
     expect(mockPrisma.rfid_content_pack.updateMany).not.toHaveBeenCalled();
     expect(mockPrisma.ai_device.findFirst).not.toHaveBeenCalled();
     expect(mockPrisma.ai_device.updateMany).not.toHaveBeenCalled();
-    expect(mockPrisma.ai_agent_template.findFirst).not.toHaveBeenCalled();
-    expect(mockPrisma.ai_agent_template.updateMany).not.toHaveBeenCalled();
   });
 
   test('getOrCreatePackKey creates a 16-byte key once and returns the same key after', async () => {
@@ -89,61 +84,6 @@ describe('contentKeys.service', () => {
     const svc = require('../../src/services/contentKeys.service');
     mockPrisma.rfid_content_pack.findFirst.mockResolvedValue(null);
     expect(await svc.getOrCreatePackKey('NOPE')).toBeNull();
-  });
-
-  test('getOrCreateCharacterKey creates a 16-byte key once and returns the same key after', async () => {
-    const svc = require('../../src/services/contentKeys.service');
-    const cc = require('../../src/utils/contentCrypto');
-    let stored = null;
-    let capturedArgs = null;
-    mockPrisma.ai_agent_template.findFirst.mockImplementation(async () => ({ id: 3n, art_content_key: stored }));
-    mockPrisma.ai_agent_template.updateMany.mockImplementation(async (args) => {
-      capturedArgs = args;
-      stored = args.data.art_content_key;
-      return { count: 1 };
-    });
-
-    const k1 = await svc.getOrCreateCharacterKey('cheeko');
-    expect(k1.length).toBe(16);
-    expect(mockPrisma.ai_agent_template.updateMany).toHaveBeenCalledTimes(1);
-    expect(cc.decryptAtRest(stored, Buffer.from(MASTER, 'hex'))).toEqual(k1);
-    // Compare-and-swap guard: the update must only apply while the row is still keyless.
-    expect(capturedArgs.where).toMatchObject({ id: 3n, art_content_key: null });
-
-    const k2 = await svc.getOrCreateCharacterKey('cheeko');
-    expect(k2).toEqual(k1);
-    expect(mockPrisma.ai_agent_template.updateMany).toHaveBeenCalledTimes(1);
-  });
-
-  test('getOrCreateCharacterKey returns the winner\'s key when it loses the CAS race', async () => {
-    const svc = require('../../src/services/contentKeys.service');
-    const cc = require('../../src/utils/contentCrypto');
-    const mk = Buffer.from(MASTER, 'hex');
-    const winnerKey = crypto.randomBytes(16);
-    const winnerEncrypted = cc.encryptAtRest(winnerKey, mk);
-
-    // First read: no key yet, so we'll try to create one. Second read (after
-    // losing the CAS): another caller's key is already in place.
-    mockPrisma.ai_agent_template.findFirst
-      .mockResolvedValueOnce({ id: 5n, art_content_key: null })
-      .mockResolvedValueOnce({ art_content_key: winnerEncrypted });
-    // Postgres reports 0 rows matched when the `art_content_key: null` guard
-    // fails because someone else's write landed first.
-    let capturedWhere = null;
-    mockPrisma.ai_agent_template.updateMany.mockImplementation(async (args) => {
-      capturedWhere = args.where;
-      return { count: 0 };
-    });
-
-    const result = await svc.getOrCreateCharacterKey('cheeko');
-    expect(capturedWhere).toMatchObject({ id: 5n, art_content_key: null });
-    expect(result).toEqual(winnerKey);
-  });
-
-  test('getOrCreateCharacterKey returns null for an unknown sd_folder', async () => {
-    const svc = require('../../src/services/contentKeys.service');
-    mockPrisma.ai_agent_template.findFirst.mockResolvedValue(null);
-    expect(await svc.getOrCreateCharacterKey('nope')).toBeNull();
   });
 
   test('registerDeviceSecret stores encrypted, normalises the mac, and rejects bad input', async () => {

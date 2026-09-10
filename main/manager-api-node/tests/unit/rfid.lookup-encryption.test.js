@@ -18,7 +18,6 @@ const mockKeys = {
   isEnabled: jest.fn(() => true),
   getPackKey: jest.fn(async () => K),
   getDeviceSecret: jest.fn(async () => S),
-  getCharacterKey: jest.fn(async () => null),
 };
 jest.mock('../../src/services/contentKeys.service', () => mockKeys);
 
