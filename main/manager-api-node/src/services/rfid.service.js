@@ -4269,6 +4269,32 @@ const getContentPacksByLanguage = async (language) => {
 /**
  * Create content pack with packCode uniqueness check
  */
+/**
+ * Regenerate and upload manifest.jsn for a sound-quiz pack. Runs at the end of
+ * every pack save; a non-game pack returns null without touching S3. Throws
+ * on upload failure — by then the rows are committed, so the admin must know
+ * the device would download a stale manifest and save again.
+ * @param {bigint|number|string} packId
+ * @returns {Promise<{url: string, rounds: number}|null>}
+ */
+const publishSoundQuizManifest = async (packId) => {
+  const pack = await prisma.rfid_content_pack.findFirst({ where: { id: BigInt(packId) } });
+  if (!pack || pack.content_type !== 'sound_quiz') return null;
+  if (!isValidAppId(pack.pack_code)) {
+    throw new ApiError(`Pack code "${pack.pack_code}" must be 1-8 chars of a-z 0-9 _ - to be a game pack`, 400);
+  }
+  const items = await listContentItemsCompat(pack.id);
+  const built = buildSoundQuizPack(pack, items, manifestUrlFor(pack.pack_code));
+  for (const w of built.warnings) logger.warn(`[SOUND-QUIZ] ${pack.pack_code}: ${w}`);
+  try {
+    const { url } = await uploadService.uploadGamePackManifest(pack.pack_code, built.manifest);
+    return { url, rounds: built.manifest.rounds.length };
+  } catch (err) {
+    logger.error(`[SOUND-QUIZ] manifest upload failed for ${pack.pack_code}: ${err.message}`);
+    throw new ApiError('Pack saved, but the game manifest could not be uploaded. Save again to retry.', 500);
+  }
+};
+
 const createContentPack = async (data, userId) => {
   // Check for duplicate packCode
   const existing = await getContentPackByCode(data.packCode);
@@ -4352,6 +4378,7 @@ const createContentPack = async (data, userId) => {
     logger.info('[createContentPack] No items to insert');
   }
 
+  await publishSoundQuizManifest(newPack.id);
   return null;
 };
 
@@ -4526,6 +4553,7 @@ const updateContentPack = async (data, userId) => {
     });
   }
 
+  await publishSoundQuizManifest(data.id);
   return null;
 };
 
@@ -5198,6 +5226,7 @@ module.exports = {
   getContentPacksByLanguage,
   createContentPack,
   updateContentPack,
+  publishSoundQuizManifest,
   deleteContentPacks,
   transformContentPackToCamelCase,
 
