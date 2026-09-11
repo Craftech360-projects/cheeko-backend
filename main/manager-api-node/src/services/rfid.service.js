@@ -2831,12 +2831,30 @@ const determineTapCardType = (mapping) => {
   if (cardType === 'ai' || actionType === 'ai' || actionType === 'agent') {
     return 'ai';
   }
+  // A game card is a content-pack mapping whose pack is a sound quiz. The
+  // explicit card_type is what the dashboard writes; the pack check catches a
+  // mapping made before the type existed.
+  if (cardType === 'game' || mapping.rfid_content_pack?.content_type === 'sound_quiz') {
+    return 'game';
+  }
   if (mapping.content_pack_id) return 'content';
   if (mapping.question_pack_id) return 'qna';
   if (mapping.question_id || (Array.isArray(mapping.question_ids) && mapping.question_ids.length > 0)) {
     return 'prompt';
   }
   return cardType || 'unknown';
+};
+
+/** Card type when there is no mapping row and only the lookup result to go on. */
+const classifyLookupCardType = (lookupResolved) => {
+  if (!lookupResolved) return 'unknown';
+  if (lookupResolved.agentName || lookupResolved.actionType === 'agent' || lookupResolved.actionType === 'ai') {
+    return 'ai';
+  }
+  if (lookupResolved.contentType === 'sound_quiz') return 'game';
+  if (lookupResolved.contentType === 'prompt_pack') return 'qna';
+  if (lookupResolved.contentType && lookupResolved.contentType !== 'prompt') return 'content';
+  return 'prompt';
 };
 
 /**
@@ -2874,7 +2892,7 @@ const recordCardTap = async (payload = {}) => {
       where: { rfid_uid: normalizedUid, active: true },
       include: {
         rfid_content_pack: {
-          select: { id: true, pack_code: true, name: true, version: true, content_hash: true }
+          select: { id: true, pack_code: true, name: true, version: true, content_hash: true, content_type: true }
         }
       }
     })
@@ -2891,19 +2909,7 @@ const recordCardTap = async (payload = {}) => {
     }
   }
 
-  const resolvedCardTypeFromLookup = (() => {
-    if (!lookupResolved) return 'unknown';
-    if (lookupResolved.agentName || lookupResolved.actionType === 'agent' || lookupResolved.actionType === 'ai') {
-      return 'ai';
-    }
-    if (lookupResolved.contentType === 'prompt_pack') {
-      return 'qna';
-    }
-    if (lookupResolved.contentType && lookupResolved.contentType !== 'prompt') {
-      return 'content';
-    }
-    return 'prompt';
-  })();
+  const resolvedCardTypeFromLookup = classifyLookupCardType(lookupResolved);
 
   const cardType = mapping ? determineTapCardType(mapping) : resolvedCardTypeFromLookup;
   const recognized = Boolean(mapping || lookupResolved);
@@ -5156,6 +5162,8 @@ module.exports = {
   processScan,
   getScanLogs,
   recordCardTap,
+  determineTapCardType,
+  classifyLookupCardType,
   getCardTapLogs,
   getCardTapAnalyticsSummary,
   registerDeviceTags,
