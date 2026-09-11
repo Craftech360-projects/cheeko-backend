@@ -297,7 +297,7 @@ describe('an audio-only edit', () => {
 
   it('runs the same validator the legacy replace route does', async () => {
     await expect(patch({ audioFile: { buffer: Buffer.from('not audio at all'), originalname: 'a.mp3' } }))
-      .rejects.toThrow('That file does not look like a valid MP3 or WAV recording.');
+      .rejects.toThrow('That file does not look like a valid MP3, WAV or M4A recording.');
     await expect(patch({ audioFile: { buffer: Buffer.alloc(11 * 1024 * 1024), originalname: 'a.mp3' } }))
       .rejects.toThrow('That recording is larger than 10 MB. Please choose a shorter one.');
   });

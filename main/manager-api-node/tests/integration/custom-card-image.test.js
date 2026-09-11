@@ -64,6 +64,10 @@ const rfidService = require('../../src/services/rfid.service');
 const BASE = '/toy/api/mobile';
 const MP3 = Buffer.concat([Buffer.from('ID3'), Buffer.alloc(64)]);
 const PNG = Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), Buffer.alloc(64)]);
+// A real AAC-in-MP4 recording, and the part the app sends it as.
+const M4A = require('fs').readFileSync(require('path').join(__dirname, '../fixtures/recording.m4a'));
+const RECORDED = { filename: 'Recording 2026-09-11 10.00.m4a', contentType: 'audio/x-m4a' };
+const { toDeviceMp3 } = require('../../src/utils/audioTranscode');
 
 beforeEach(() => {
   // mockUpload's jest.fn()s live outside the spies restoreAllMocks resets, so
@@ -129,7 +133,7 @@ describe('POST /kids/:kidId/custom-card/content with pictures', () => {
       .attach('file', MP3, { filename: 'a.mp3', contentType: 'application/pdf' });
 
     expect(res.status).toBe(400);
-    expect(res.body.msg).toBe('Only MP3 or WAV recordings and PNG or JPEG pictures can be uploaded.');
+    expect(res.body.msg).toBe('Only MP3, WAV or M4A recordings and PNG or JPEG pictures can be uploaded.');
   });
 
   it('refuses a file that is not a picture', async () => {
@@ -140,6 +144,64 @@ describe('POST /kids/:kidId/custom-card/content with pictures', () => {
 
     expect(res.status).toBe(400);
     expect(res.body.msg).toBe('Only PNG and JPEG pictures are supported.');
+  });
+});
+
+describe('POST /kids/:kidId/custom-card/content with a recording made in the app', () => {
+  const post = () => request(app).post(`${BASE}/kids/${KID_ID}/custom-card/content`);
+
+  it('accepts repeated M4A parts, as audio/x-m4a or audio/mp4, each with its picture', async () => {
+    const res = await post()
+      .attach('files', M4A, RECORDED)
+      .attach('files', M4A, { ...RECORDED, contentType: 'audio/mp4' })
+      .attach('image_1', PNG, 'drawing.png');
+
+    expect(res.status).toBe(201);
+    expect(toDeviceMp3).toHaveBeenCalledTimes(2);
+    expect(toDeviceMp3.mock.calls[0][0].equals(M4A)).toBe(true);
+    expect(mockUpload.uploadCustomCardAudio.mock.calls.map((call) => call.slice(2)))
+      .toEqual([['recording.mp3', 'audio/mpeg'], ['recording.mp3', 'audio/mpeg']]);
+    expect(res.body.data.contentPack.items).toEqual([
+      expect.objectContaining({
+        itemNumber: 1,
+        title: 'Recording 2026-09-11 10.00.m4a',
+        imageUrl: 'https://cdn.test/customcard_kid42/i.bin',
+      }),
+      expect.objectContaining({ itemNumber: 2, title: 'Recording 2026-09-11 10.00.m4a', imageUrl: null }),
+    ]);
+  });
+
+  it('still rejects a mislabelled file by its bytes', async () => {
+    const res = await post().attach('files', MP3, RECORDED);
+
+    expect(res.status).toBe(400);
+    expect(res.body.msg).toBe('The file contents do not match its .m4a extension.');
+    expect(toDeviceMp3).not.toHaveBeenCalled();
+  });
+
+  it('answers an oversized recording with the size message, not the format one', async () => {
+    const res = await post().attach('files', Buffer.concat([M4A, Buffer.alloc(10 * 1024 * 1024)]), RECORDED);
+
+    expect(res.status).toBe(400);
+    expect(res.body.msg).toBe('That recording is larger than 10 MB. Please choose a shorter one.');
+  });
+
+  it('rejects the whole batch when it would take the card past ten', async () => {
+    rows = Array.from({ length: 9 }, (_, index) => ({
+      id: BigInt(index + 1),
+      item_number: index + 1,
+      title: `r${index + 1}`,
+      audio_url: `https://cdn.test/customcard_kid42/r${index + 1}.mp3`,
+      audio_size_bytes: 1,
+      image_url: null,
+    }));
+
+    const res = await post().attach('files', M4A, RECORDED).attach('files', M4A, RECORDED);
+
+    expect(res.status).toBe(400);
+    expect(res.body.msg).toMatch(/^This card holds up to 10 recordings/);
+    expect(mockUpload.uploadCustomCardAudio).not.toHaveBeenCalled();
+    expect(rfidService.updateContentPack).not.toHaveBeenCalled();
   });
 });
 

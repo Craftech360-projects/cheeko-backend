@@ -28,6 +28,9 @@
 'use strict';
 
 const { spawn } = require('child_process');
+const fs = require('fs/promises');
+const os = require('os');
+const path = require('path');
 
 const FFMPEG_BIN = process.env.FFMPEG_PATH || 'ffmpeg';
 
@@ -94,12 +97,15 @@ const durationMsOf = (buffer) =>
  * `-vn` and `-map_metadata -1` are not tidiness: an MP3 carrying embedded cover
  * art is a two-stream input, and without `-vn` the mp3 muxer would try to carry
  * that picture through into the output the toy downloads.
+ *
+ * The input is a file, not stdin: a phone's M4A recording puts its index (the
+ * `moov` box) after the audio, and ffmpeg cannot seek back to it on a pipe.
  */
-const encodeToMp3 = (buffer) => new Promise((resolve, reject) => {
+const encodeToMp3 = (inputPath) => new Promise((resolve, reject) => {
   const child = spawn(FFMPEG_BIN, [
     '-v', 'error',
     '-nostdin',
-    '-i', 'pipe:0',
+    '-i', inputPath,
     '-vn',
     '-map_metadata', '-1',
     '-ac', String(TARGET_CHANNELS),
@@ -109,7 +115,7 @@ const encodeToMp3 = (buffer) => new Promise((resolve, reject) => {
     '-id3v2_version', '0',
     '-f', 'mp3',
     'pipe:1'
-  ]);
+  ], { stdio: ['ignore', 'pipe', 'pipe'] });
 
   const stdout = [];
   const stderr = [];
@@ -124,12 +130,6 @@ const encodeToMp3 = (buffer) => new Promise((resolve, reject) => {
 
   child.stdout.on('data', (chunk) => stdout.push(chunk));
   child.stderr.on('data', (chunk) => stderr.push(chunk));
-
-  // ffmpeg closes stdin as soon as it has rejected a malformed file, so writing
-  // the body races the exit. That EPIPE is not the error worth reporting — the
-  // exit code below is.
-  child.stdin.on('error', () => {});
-  child.stdin.end(buffer);
 
   child.on('error', (err) => {
     clearTimeout(timer);
@@ -154,7 +154,7 @@ const encodeToMp3 = (buffer) => new Promise((resolve, reject) => {
 });
 
 /**
- * Convert an uploaded MP3 or WAV into the recording the toy stores and plays.
+ * Convert an uploaded MP3, WAV or M4A into the recording the toy stores and plays.
  *
  * @param {Buffer} buffer - the validated upload bytes
  * @returns {Promise<{buffer: Buffer, durationMs: number}>} the bytes to store,
@@ -169,10 +169,16 @@ const toDeviceMp3 = async (buffer) => {
 
   await acquireSlot();
   let encoded;
+  let dir = null;
   try {
-    encoded = await encodeToMp3(buffer);
+    dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cc-audio-'));
+    const input = path.join(dir, 'upload');
+    await fs.writeFile(input, buffer);
+    encoded = await encodeToMp3(input);
   } finally {
     releaseSlot();
+    // A leftover temp file must not fail an upload that has already converted.
+    if (dir) await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
   }
 
   return { buffer: encoded, durationMs: durationMsOf(encoded) };

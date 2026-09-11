@@ -25,8 +25,7 @@ import opuslib
 
 # --- Configuration ---
 
-SERVER_IP = os.getenv("TEST_SERVER_IP", "64.227.170.31")
-
+SERVER_IP = os.getenv("TEST_SERVER_IP", "139.59.7.72")
 OTA_PORT = 8002
 MQTT_BROKER_HOST = os.getenv("TEST_MQTT_BROKER_HOST", SERVER_IP)
 
@@ -156,7 +155,7 @@ class TestClient:
     def __init__(self, device_mac: Optional[str] = None):
         self.mqtt_client = None
         # Generate a unique MAC address for this client instance
-        self.device_mac_formatted = device_mac or "02:ab:cd:12:34:56"
+        self.device_mac_formatted = device_mac or "02:ab:cd:56:78:9a"
         print(f"Generated unique MAC address: {self.device_mac_formatted}")
 
         # Stand-ins for the toy's NVS and SD card. The content secret is
@@ -1914,7 +1913,7 @@ if __name__ == "__main__":
         action="store_true",
         help="imagine mode: use the OTA handshake instead of the local-gateway config.",
     )
-    parser.add_argument("--device-mac", default=os.getenv("TEST_DEVICE_MAC", "02:ab:cd:12:34:56"))
+    parser.add_argument("--device-mac", default=os.getenv("TEST_DEVICE_MAC", "02:ab:cd:56:78:9a"))
     parser.add_argument(
         "--character-id",
         default=os.getenv("TEST_CHARACTER_ID"),

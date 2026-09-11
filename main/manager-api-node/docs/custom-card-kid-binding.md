@@ -394,7 +394,7 @@ A pack whose last recording was just deleted returns `contentPack` non-null with
 
 | Field | Notes |
 |---|---|
-| `files` | up to 10 parts, MP3 or WAV |
+| `files` | up to 10 parts, MP3, WAV or M4A |
 | `image_1` … `image_10` | optional, pairs with the Nth `files` part |
 | `file` | single-recording alternative to `files` |
 | `image` | optional, pairs with `file` |
@@ -413,7 +413,7 @@ image endpoint — that route's meaning is "replace the recording".
 |---|---|---|
 | Recordings per child | 10 | `MAX_ITEMS`, `customCard.service.js:41` |
 | Recording size | 10 MB | multer + service |
-| Audio formats | `.mp3`, `.wav` | extension **and** magic bytes must agree |
+| Audio formats | `.mp3`, `.wav`, `.m4a` | extension **and** magic bytes must agree; M4A is `ftyp` at offset 4 with brand `M4A `, `isom`, `mp42`, `mp41` or `iso2` |
 | Picture size | 5 MB | `MAX_IMAGE_BYTES` |
 | Picture pixels | 40 MP | `MAX_IMAGE_PIXELS`, before decode |
 | Picture formats | `.png`, `.jpg`, `.jpeg` | converted server-side to LVGL RGB565 `.bin` |
@@ -426,7 +426,9 @@ it for byte-built parts; the magic-byte sniff in the service is the real control
 | Status | `msg` | When |
 |---|---|---|
 | 400 | `That recording is larger than 10 MB. Please choose a shorter one.` | multer limit |
-| 400 | `Only MP3 or WAV recordings and PNG or JPEG pictures can be uploaded.` | mime filter |
+| 400 | `Only MP3, WAV or M4A recordings and PNG or JPEG pictures can be uploaded.` | mime filter |
+| 400 | `Only MP3, WAV and M4A recordings are supported.` | extension not allowed |
+| 400 | `That file does not look like a valid MP3, WAV or M4A recording.` | magic bytes match no format |
 | 400 | `Please choose a recording to upload.` | no file part |
 | 400 | `Each picture must go with a recording.` | orphan image part |
 | 400 | `This card holds up to 10 recordings…` | over `MAX_ITEMS` |

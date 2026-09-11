@@ -50,15 +50,20 @@ const MAX_ITEMS = 10;
 const MAX_TITLE_CHARS = 80;
 
 // Extension -> the MIME type of the *upload*. The client sends audio/mpeg for
-// .mp3 and audio/wav for .wav, but the header is attacker-controlled so
-// extension and sniffed magic bytes both have to agree before we accept the
-// file. What gets stored is neither of these: both formats are re-encoded to
-// AUDIO_MIME, so this map bounds what we are willing to decode, not what the
-// toy downloads.
+// .mp3, audio/wav for .wav and audio/x-m4a for a recording made in the app, but
+// the header is attacker-controlled so extension and sniffed magic bytes both
+// have to agree before we accept the file. What gets stored is none of these:
+// every format is re-encoded to AUDIO_MIME, so this map bounds what we are
+// willing to decode, not what the toy downloads.
 const ALLOWED_AUDIO = {
   '.mp3': 'audio/mpeg',
-  '.wav': 'audio/wav'
+  '.wav': 'audio/wav',
+  '.m4a': 'audio/mp4'
 };
+
+// The `ftyp` major brands an AAC recording arrives under: M4A from iOS, the
+// ISO/MP4 family from Android's muxer.
+const M4A_BRANDS = new Set(['M4A ', 'isom', 'mp42', 'mp41', 'iso2']);
 
 // The formats a parent's phone actually produces. Whatever arrives is converted
 // to an LVGL binary before it reaches storage, so this list bounds what we are
@@ -73,13 +78,17 @@ const ALLOWED_IMAGE = {
  * Identify audio format from magic bytes.
  * MP3: an ID3v2 tag ("ID3") or a raw MPEG frame sync (11 bits set).
  * WAV: RIFF....WAVE container.
- * @returns {'.mp3'|'.wav'|null}
+ * M4A: an MPEG-4 `ftyp` box at offset 4, with one of M4A_BRANDS at offset 8.
+ * @returns {'.mp3'|'.wav'|'.m4a'|null}
  */
 const sniffAudioExtension = (buffer) => {
   if (!buffer || buffer.length < 12) return null;
 
   if (buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WAVE') {
     return '.wav';
+  }
+  if (buffer.toString('ascii', 4, 8) === 'ftyp' && M4A_BRANDS.has(buffer.toString('ascii', 8, 12))) {
+    return '.m4a';
   }
   if (buffer.toString('ascii', 0, 3) === 'ID3') return '.mp3';
   // Raw MPEG audio frame: 0xFF followed by 0xEx/0xFx (sync bits + MPEG-1/2 layer).
@@ -116,12 +125,12 @@ const validateAudioUpload = (file, fallbackName) => {
 
   const ext = extensionOf(file.originalname) || extensionOf(fallbackName);
   if (!ALLOWED_AUDIO[ext]) {
-    throw new ApiError('Only MP3 and WAV recordings are supported.', 400);
+    throw new ApiError('Only MP3, WAV and M4A recordings are supported.', 400);
   }
 
   const sniffed = sniffAudioExtension(file.buffer);
   if (!sniffed) {
-    throw new ApiError('That file does not look like a valid MP3 or WAV recording.', 400);
+    throw new ApiError('That file does not look like a valid MP3, WAV or M4A recording.', 400);
   }
   if (sniffed !== ext) {
     throw new ApiError(`The file contents do not match its ${ext} extension.`, 400);
