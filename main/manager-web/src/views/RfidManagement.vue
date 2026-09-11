@@ -11,6 +11,7 @@
                 <el-button v-else-if="activeTab === 'packs'" size="small" type="primary" @click="showAddPackDialog">New SKU</el-button>
                 <el-button v-else-if="activeTab === 'cards'" size="small" type="primary" @click="showAddCardDialog">New card</el-button>
                 <el-button v-else-if="activeTab === 'series'" size="small" type="primary" @click="showAddSeriesDialog">New range</el-button>
+                <el-button v-else-if="activeTab === 'gameCards'" size="small" type="primary" @click="showAddGameCardDialog">New game card</el-button>
             </div>
         </div>
 
@@ -76,6 +77,9 @@
                 </div>
                 <div class="tab-btn" :class="{ active: activeTab === 'aiCards' }" @click="switchTab('aiCards')">
                     <i class="el-icon-cpu"></i> AI Cards
+                </div>
+                <div class="tab-btn" :class="{ active: activeTab === 'gameCards' }" @click="switchTab('gameCards')">
+                    <i class="el-icon-trophy"></i> Game Cards
                 </div>
                 <div class="tab-btn" :class="{ active: activeTab === 'customCards' }" @click="switchTab('customCards')">
                     <i class="el-icon-microphone"></i> Custom Cards
@@ -458,6 +462,91 @@
                             </div>
                         </template>
 
+
+                        <!-- Game Cards Tab: sound-quiz packs and the cards that launch them -->
+                        <template v-if="activeTab === 'gameCards'">
+                            <div class="section-header game-section-header">
+                                <div class="section-info">
+                                    <h3 class="section-title">
+                                        <i class="el-icon-trophy"></i> Game Packs
+                                        <el-tag size="mini" type="info" class="section-count">{{ gamePacksList.length }} total</el-tag>
+                                    </h3>
+                                    <p class="section-description">
+                                        Sound-quiz games. Each round is a sound, a prompt, an icon and two wrong answers. The toy downloads the pack when a card mapped to it is tapped.
+                                    </p>
+                                </div>
+                                <el-button size="mini" type="success" @click="showAddGamePackDialog">Create game pack</el-button>
+                            </div>
+                            <el-table :data="gamePacksList" class="transparent-table" v-loading="gamePacksLoading"
+                                element-loading-text="Loading..." element-loading-spinner="el-icon-loading"
+                                element-loading-background="rgba(255, 255, 255, 0.7)">
+                                <el-table-column label="Name" prop="name" min-width="180" show-overflow-tooltip></el-table-column>
+                                <el-table-column label="Pack code (SD folder)" width="170">
+                                    <template slot-scope="scope">
+                                        <span class="uid-mono">{{ scope.row.packCode }}</span>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="Rounds" prop="totalItems" align="center" width="90"></el-table-column>
+                                <el-table-column label="Version" prop="version" align="center" width="90"></el-table-column>
+                                <el-table-column label="Cards" align="center" width="90">
+                                    <template slot-scope="scope">{{ gameCardsForPack(scope.row.id) }}</template>
+                                </el-table-column>
+                                <el-table-column label="Active" align="center" width="80">
+                                    <template slot-scope="scope">
+                                        <el-tag :type="scope.row.active ? 'success' : 'info'" size="small">
+                                            {{ scope.row.active ? 'Yes' : 'No' }}
+                                        </el-tag>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="Actions" align="center" width="100">
+                                    <template slot-scope="scope">
+                                        <el-button size="mini" type="text" @click="editContentPack(scope.row)">Edit</el-button>
+                                    </template>
+                                </el-table-column>
+                            </el-table>
+
+                            <div class="section-header game-section-header game-cards-header">
+                                <div class="section-info">
+                                    <h3 class="section-title">
+                                        <i class="el-icon-postcard"></i> Game Cards
+                                        <el-tag size="mini" type="info" class="section-count">{{ gameCardsList.length }} total</el-tag>
+                                    </h3>
+                                    <p class="section-description">
+                                        Physical cards that launch a game pack. One pack can have many cards.
+                                    </p>
+                                </div>
+                                <el-button size="mini" type="success" @click="showAddGameCardDialog">Add game card</el-button>
+                            </div>
+                            <el-table :data="gameCardsList" class="transparent-table" v-loading="gameCardsLoading"
+                                element-loading-text="Loading..." element-loading-spinner="el-icon-loading"
+                                element-loading-background="rgba(255, 255, 255, 0.7)">
+                                <el-table-column label="RFID UID" align="center" width="160">
+                                    <template slot-scope="scope">
+                                        <span class="uid-mono">{{ scope.row.rfidUid }}</span>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="Game pack" min-width="200" show-overflow-tooltip>
+                                    <template slot-scope="scope">
+                                        <span v-if="gamePackLabel(scope.row.contentPackId)">{{ gamePackLabel(scope.row.contentPackId) }}</span>
+                                        <span v-else class="text-muted">pack #{{ scope.row.contentPackId || '-' }}</span>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="Notes" prop="notes" show-overflow-tooltip></el-table-column>
+                                <el-table-column label="Active" align="center" width="80">
+                                    <template slot-scope="scope">
+                                        <el-tag :type="scope.row.active ? 'success' : 'info'" size="small">
+                                            {{ scope.row.active ? 'Yes' : 'No' }}
+                                        </el-tag>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="Actions" align="center" width="120">
+                                    <template slot-scope="scope">
+                                        <el-button size="mini" type="text" @click="editCard(scope.row)">Edit</el-button>
+                                        <el-button size="mini" type="text" @click="deleteGameCard(scope.row)">Delete</el-button>
+                                    </template>
+                                </el-table-column>
+                            </el-table>
+                        </template>
 
                         <!-- Content Packs Tab (Grid View) -->
                         <template v-if="activeTab === 'contentPacks'">
@@ -1300,6 +1389,11 @@ export default {
             aiCardsPageSize: 10,
             aiCardsTotal: 0,
             isAllAiCardsSelected: false,
+            // Game Cards tab: sound-quiz packs and the cards mapped to them
+            gamePacksList: [],
+            gamePacksLoading: false,
+            gameCardsList: [],
+            gameCardsLoading: false,
 
             // Series
             seriesList: [],
@@ -1875,6 +1969,7 @@ export default {
             else if (tab === 'contentPacks') { this.fetchContentPacks(); this.loadContentPackTypes(); }
             else if (tab === 'series') this.fetchSeries();
             else if (tab === 'aiCards') this.fetchAiCards();
+            else if (tab === 'gameCards') this.fetchGameCards();
             else if (tab === 'cardAnalytics') this.fetchCardTapAnalytics();
             else if (tab === 'customCards') this.fetchCustomCardsTab();
             // Deep-linkable tabs: keep the URL on the active tab so browser
@@ -1894,12 +1989,13 @@ export default {
             else if (tab === 'contentPacks') this.fetchContentPacks();
             else if (tab === 'series') this.fetchSeries();
             else if (tab === 'aiCards') this.fetchAiCards();
+            else if (tab === 'gameCards') this.fetchGameCards();
             else if (tab === 'cardAnalytics') this.fetchCardTapAnalytics();
             else if (tab === 'customCards') this.fetchCustomCardsTab();
         },
 
         isValidTab(tab) {
-            return ['contentPacks', 'packs', 'cards', 'aiCards', 'customCards', 'series', 'cardAnalytics', 'console', 'questions'].includes(tab);
+            return ['contentPacks', 'packs', 'cards', 'aiCards', 'gameCards', 'customCards', 'series', 'cardAnalytics', 'console', 'questions'].includes(tab);
         },
 
         // ── Custom Cards ────────────────────────────────────────────────────
@@ -2463,6 +2559,7 @@ export default {
                     this.cardDialogVisible = false;
                     this.fetchCards();
                     if (this.activeTab === 'aiCards') this.fetchAiCards();
+                    if (this.activeTab === 'gameCards') this.fetchGameCards();
                     this.scheduleStatsRefresh();
                 } else {
                     this.$message.error(data.msg || 'Operation failed');
@@ -2568,6 +2665,63 @@ export default {
             this.deleteAiCard(selected);
         },
 
+        // ==================== GAME CARDS ====================
+        // ponytail: first 100 packs and first 100 cards, no paging; add paging
+        // when the game catalogue outgrows one page.
+        fetchGameCards() {
+            this.gamePacksLoading = true;
+            this.gameCardsLoading = true;
+            Api.rfid.getContentPackPage({ page: 1, limit: 100, contentType: 'sound_quiz' }, ({ data }) => {
+                this.gamePacksLoading = false;
+                if (data.code === 0) this.gamePacksList = data.data.list || [];
+                else this.$message.error(data.msg || 'Failed to load game packs');
+            });
+            Api.rfid.getCardPage({ page: 1, limit: 100, cardType: 'game' }, ({ data }) => {
+                this.gameCardsLoading = false;
+                if (data.code === 0) this.gameCardsList = data.data.list || [];
+                else this.$message.error(data.msg || 'Failed to load game cards');
+            });
+        },
+
+        gamePackLabel(contentPackId) {
+            const pack = this.gamePacksList.find(p => String(p.id) === String(contentPackId));
+            return pack ? `${pack.name} (${pack.packCode})` : '';
+        },
+
+        gameCardsForPack(packId) {
+            return this.gameCardsList.filter(c => String(c.contentPackId) === String(packId)).length;
+        },
+
+        showAddGamePackDialog() {
+            this.contentPackDialogTitle = 'Create Game Pack';
+            this.contentPackForm = { id: null, packCode: '', name: '', description: '', thumbnailUrl: '', contentType: 'sound_quiz', language: 'en', contentMd: '', totalItems: 0, items: [], active: true };
+            this.contentPackDialogVisible = true;
+        },
+
+        showAddGameCardDialog() {
+            this.cardDialogTitle = 'Add Game Card';
+            this.cardForm = { id: null, rfidUid: '', questionPackId: null, packCode: '', packId: null, contentPackId: null, actionType: 'game', cardType: 'game', aiAgentName: 'Cheeko', aiLanguageCode: 'en', aiLanguageName: 'English', aiVoiceId: '', thumbnailUrl: '', actionData: {}, notes: '', active: true };
+            this.cardDialogVisible = true;
+        },
+
+        deleteGameCard(row) {
+            this.$confirm(`Delete game card ${row.rfidUid}?`, 'Warning', {
+                confirmButtonText: 'Confirm',
+                cancelButtonText: 'Cancel',
+                type: 'warning'
+            }).then(() => {
+                Api.rfid.deleteCard([row.id], ({ data }) => {
+                    if (data.code === 0) {
+                        this.$message.success('Deleted successfully');
+                        this.fetchGameCards();
+                        this.scheduleStatsRefresh();
+                    } else {
+                        this.$message.error(data.msg || 'Delete failed');
+                    }
+                });
+            }).catch(() => {});
+        },
+
         // ==================== CONTENT PACKS ====================
         fetchContentPacks() {
             this.contentPacksLoading = true;
@@ -2666,6 +2820,7 @@ export default {
                     this.fetchContentPacks();
                     this.loadContentPackTypes();
                     this.loadDropdownData(['contentPacks']);
+                    if (this.activeTab === 'gameCards') this.fetchGameCards();
                     this.scheduleStatsRefresh();
                 } else {
                     this.$message.error(data.msg || 'Operation failed');
@@ -3256,6 +3411,16 @@ export default {
 </script>
 
 <style lang="scss" scoped>
+.game-section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+}
+.game-cards-header {
+    margin-top: 28px;
+}
+
 @import '@/styles/theme.scss';
 
 .welcome {
