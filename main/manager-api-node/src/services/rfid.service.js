@@ -19,6 +19,7 @@ const qdrantService = require('./integrations/qdrant.service');
 const uploadService = require('./upload.service');
 const contentKeys = require('./contentKeys.service');
 const { wrapKeyForDevice } = require('../utils/contentCrypto');
+const { buildSoundQuizPack, isValidAppId, manifestUrlFor } = require('./soundQuiz');
 
 // =============================================
 // Helper: Format date to yyyy-MM-dd HH:mm:ss
@@ -805,6 +806,32 @@ const buildContentPackResponse = async (pack, normalizedUid, mac) => {
     items = await listContentItemsCompat(pack.id);
   } catch (itemsErr) {
     logger.error('[RFID-LOOKUP] Content items query error:', itemsErr);
+  }
+
+  // Sound-quiz game pack (spec §6). Returned in its own shape: the gateway keys
+  // card_game on `assets` + `appId`, and must never see `items`, which it would
+  // route as an audio content pack. Nothing here is sealed — apps/ stays
+  // plaintext on the SD card (plan §9).
+  if (pack.content_type === 'sound_quiz') {
+    if (!isValidAppId(pack.pack_code)) {
+      logger.warn(`[RFID-LOOKUP] sound_quiz pack ${pack.pack_code} is not a valid app id (1-8 chars [a-z0-9_-]); answering unknown`);
+      return null;
+    }
+    const built = buildSoundQuizPack(pack, items, manifestUrlFor(pack.pack_code));
+    for (const w of built.warnings) logger.warn(`[RFID-LOOKUP] sound_quiz ${pack.pack_code}: ${w}`);
+    logger.info(
+      `[RFID-LOOKUP] Game pack resolved: uid=${normalizedUid}, appId=${pack.pack_code}, version=${pack.version || 'none'}, rounds=${built.prompts.length}, assets=${built.assets.length}`
+    );
+    return {
+      rfid_uid: normalizedUid,
+      contentType: 'sound_quiz',
+      appId: pack.pack_code,
+      title: pack.name,
+      version: pack.version,
+      contentHash: pack.content_hash || null,
+      prompts: built.prompts,
+      assets: built.assets,
+    };
   }
 
   // Grouped content = items with MORE THAN ONE distinct story_number
@@ -4166,6 +4193,7 @@ const getContentPackByCode = async (packCode) => {
         id: Number(item.id),
         sequence: item.item_number,
         title: item.title,
+        description: item.description || '',
         text: item.lyrics_text || '',
         audioUrl: item.audio_url,
         imageUrl: item.image_url || null,
