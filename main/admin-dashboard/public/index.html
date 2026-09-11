@@ -43,6 +43,7 @@
     <nav id="tabs" class="tabs" hidden>
       <button class="tab active" data-tab="editorView">Personas</button>
       <button class="tab" data-tab="testView">Test device</button>
+      <button class="tab" data-tab="gptliveView">GPT-Live</button>
       <button class="tab" data-tab="bankView">Question bank</button>
       <button class="tab" data-tab="progressView">Progress</button>
     </nav>
@@ -184,6 +185,42 @@
 
       <!-- Agent audio elements are attached here; must be in the DOM to play. -->
       <div id="audioSink" hidden></div>
+    </section>
+
+    <!-- GPT-Live: full-duplex realtime agent. Mic stays open; the model owns
+         turn-taking and barge-in, so there is no push-to-talk here. -->
+    <section id="gptliveView" hidden>
+      <div class="card toolbar">
+        <div class="field">
+          <label for="gptAgent">Agent name</label>
+          <input id="gptAgent" value="cheeko-gptlive" />
+        </div>
+        <div class="field">
+          <label for="gptMac">Device MAC</label>
+          <input id="gptMac" value="68:EE:8F:60:BA:AC" />
+        </div>
+        <button id="gptStart" class="btn">▶ Start</button>
+        <button id="gptStop" class="btn ghost danger" hidden>■ Stop</button>
+        <span id="gptState" class="pill">idle</span>
+        <span id="gptMetrics" class="hint">join — · reply — · delegate —</span>
+      </div>
+
+      <div class="test-grid">
+        <div class="card">
+          <label>Conversation</label>
+          <div id="gptTranscript" class="transcript"></div>
+          <div class="actionbar">
+            <button id="gptMute" class="btn ghost" disabled>Mute mic</button>
+            <span class="hint">Full duplex: just talk, interrupt freely. Use headphones.</span>
+          </div>
+        </div>
+        <div class="card">
+          <label>Session log</label>
+          <div id="gptLog" class="testlog"></div>
+        </div>
+      </div>
+
+      <div id="gptAudioSink" hidden></div>
     </section>
 
     <!-- Question bank: the curated table Quizzy/Riddler actually pull from -->
@@ -352,5 +389,6 @@
   <script src="app.js"></script>
   <script src="visualizer.js"></script>
   <script src="test.js"></script>
+  <script src="gptlive.js"></script>
 </body>
 </html>

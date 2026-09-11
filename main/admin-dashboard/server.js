@@ -144,6 +144,7 @@ app.post('/lk/start', requireAdmin, async (req, res) => {
       managerSecret: gatewayEnv('MANAGER_API_SECRET'),
       mac: (req.body?.mac || '00:16:3e:ac:b5:38').trim(),
       characterName: req.body?.characterName || null,
+      agentName: req.body?.agentName || null, // GPT-Live tab: dispatch a worker directly
     });
     res.json(out);
   } catch (e) {
