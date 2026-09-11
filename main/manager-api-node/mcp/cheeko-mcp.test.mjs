@@ -49,7 +49,25 @@ test('uploadPlan: PNG converts to .bin unless it is a thumbnail or convert=false
   assert.deepEqual(uploadPlan('/x/cover.png', { convert: false }), { filename: 'cover.png', mime: 'image/png', shouldConvert: false });
   assert.deepEqual(uploadPlan('/x/song.mp3'), { filename: 'song.mp3', mime: 'audio/mpeg', shouldConvert: false });
   assert.deepEqual(uploadPlan('/x/frame.bin'), { filename: 'frame.bin', mime: 'application/octet-stream', shouldConvert: false });
+  assert.deepEqual(uploadPlan('/x/doorbell.png', { purpose: 'game_asset' }), { filename: 'doorbell.png', mime: 'image/png', shouldConvert: false });
   assert.throws(() => uploadPlan('/x/notes.txt'), /Unsupported file type/);
+});
+
+test('upload_pack_file forwards purpose to the API form', async () => {
+  const seen = [];
+  const api = async (route, opts) => { seen.push({ route, form: opts.form }); return { content: [{ text: '{}' }], isError: false }; };
+  const s = buildServer({ api, canWrite: true });
+  const tool = (s._registeredTools ?? s.registeredTools)['upload_pack_file'];
+  const tmp = path.join(os.tmpdir(), `mcp-${randomUUID()}.png`);
+  await writeFile(tmp, Buffer.from('89504e470d0a1a0a', 'hex'));
+  try {
+    await tool.handler({ path: tmp, purpose: 'game_asset', packCode: 'hometown', category: 'apps/hometown' });
+  } finally {
+    await unlink(tmp);
+  }
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].form.get('purpose'), 'game_asset');
+  assert.equal(seen[0].form.get('file').name, path.basename(tmp));
 });
 
 test('generic proxy tools exist in both modes; curated writes only with ALLOW_WRITES', () => {
