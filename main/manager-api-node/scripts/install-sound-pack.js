@@ -38,9 +38,18 @@ async function api(route, { method = 'GET', body, form } = {}) {
     body: form || (body ? JSON.stringify(body) : undefined),
   });
   const json = await res.json().catch(() => ({ code: res.status, msg: res.statusText }));
-  if (!res.ok || json.code !== 0) throw new Error(`${method} ${route} -> ${json.code}: ${json.msg}`);
+  if (!res.ok || json.code !== 0) {
+    const err = new Error(`${method} ${route} -> ${json.code}: ${json.msg}`);
+    // The API answers a missing pack with 404/code 404; that is the one
+    // failure a lookup may treat as "not there". Anything else — a bad
+    // service key, a 500, a dropped connection — must stop the run, or the
+    // script would create a duplicate on top of a pack it could not see.
+    err.notFound = res.status === 404 || json.code === 404;
+    throw err;
+  }
   return json.data;
 }
+const orNull = (err) => { if (err.notFound) return null; throw err; };
 
 async function upload(packCode, file) {
   const ext = path.extname(file).toLowerCase();
@@ -87,7 +96,7 @@ async function upload(packCode, file) {
   if (!APPLY) { console.log('\nDRY RUN ONLY - rerun with --apply' + (UID ? ` (will map card ${UID})` : '')); return; }
 
   // ---- create or find the pack
-  let pack = await api(`/admin/rfid/content-pack/code/${encodeURIComponent(packCode)}`).catch(() => null);
+  let pack = await api(`/admin/rfid/content-pack/code/${encodeURIComponent(packCode)}`).catch(orNull);
   if (!pack) {
     await api('/admin/rfid/content-pack', { method: 'POST', body: { packCode, name: manifest.name || packCode, contentType: 'sound_quiz', language: 'en', status: 'active', active: true } });
     pack = await api(`/admin/rfid/content-pack/code/${encodeURIComponent(packCode)}`);
@@ -110,7 +119,7 @@ async function upload(packCode, file) {
 
   // ---- map the card
   if (UID) {
-    const existing = await api(`/admin/rfid/card/uid/${encodeURIComponent(UID)}`).catch(() => null);
+    const existing = await api(`/admin/rfid/card/uid/${encodeURIComponent(UID)}`).catch(orNull);
     const body = { rfidUid: UID, contentPackId: pack.id, cardType: 'game', actionType: null, questionPackId: null, notes: `Game: ${manifest.name || packCode}`, active: true };
     if (existing && existing.id) {
       await api('/admin/rfid/card', { method: 'PUT', body: { id: existing.id, ...body } });
