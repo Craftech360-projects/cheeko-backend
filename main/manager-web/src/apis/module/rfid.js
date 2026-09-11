@@ -554,36 +554,48 @@ export default {
     },
 
     // Get content pack by code
-    getContentPackByCode(packCode, callback) {
-        RequestService.sendRequest()
+    // failCallback is optional (backward compatible with existing call sites
+    // that pass only `callback`) — when provided, it is wired to the request
+    // builder's `.fail()` so a 4xx (or a 200 with a non-zero code) rejects
+    // immediately with the server's own message instead of only showing the
+    // global toast.
+    getContentPackByCode(packCode, callback, failCallback) {
+        const req = RequestService.sendRequest()
             .url(`${getServiceUrl()}/admin/rfid/content-pack/code/${encodeURIComponent(packCode)}`)
             .method('GET')
-            .success((res) => {
+        if (failCallback) {
+            req.fail(failCallback)
+        }
+        req.success((res) => {
                 RequestService.clearRequestTime()
                 callback(res)
             })
             .networkFail((err) => {
                 console.error('Failed to get content pack:', err)
                 RequestService.reAjaxFun(() => {
-                    this.getContentPackByCode(packCode, callback)
+                    this.getContentPackByCode(packCode, callback, failCallback)
                 })
             }).send()
     },
 
     // Add content pack
-    addContentPack(data, callback) {
-        RequestService.sendRequest()
+    // failCallback is optional (backward compatible) — see getContentPackByCode above.
+    addContentPack(data, callback, failCallback) {
+        const req = RequestService.sendRequest()
             .url(`${getServiceUrl()}/admin/rfid/content-pack`)
             .method('POST')
             .data(data)
-            .success((res) => {
+        if (failCallback) {
+            req.fail(failCallback)
+        }
+        req.success((res) => {
                 RequestService.clearRequestTime()
                 callback(res)
             })
             .networkFail((err) => {
                 console.error('Failed to add content pack:', err)
                 RequestService.reAjaxFun(() => {
-                    this.addContentPack(data, callback)
+                    this.addContentPack(data, callback, failCallback)
                 })
             }).send()
     },
@@ -947,4 +959,21 @@ export default {
                 })
             }).send()
     }
+}
+
+/**
+ * Sealed pack audio cannot be handed to <audio> directly (spec §8). Fetch it
+ * through the admin-only decrypt proxy with the bearer token and play a blob.
+ * The caller revokes the returned URL when playback stops.
+ */
+export async function previewAudioObjectUrl(url, packCode) {
+    const stored = localStorage.getItem('token');
+    let token = stored;
+    try { token = JSON.parse(stored).token || stored; } catch (e) { /* plain token */ }
+    const q = `url=${encodeURIComponent(url)}&packCode=${encodeURIComponent(packCode || '')}`;
+    const res = await fetch(`${getServiceUrl()}/admin/rfid/content-pack/preview?${q}`, {
+        headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) throw new Error(`preview ${res.status}`);
+    return URL.createObjectURL(await res.blob());
 }

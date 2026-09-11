@@ -380,6 +380,28 @@ describe('custom card artwork write path', () => {
     ]);
   });
 
+  // See resolvePackSealKey in customCard.service.js: custom-card content is
+  // deliberately not sealed because the shipped parent app has no key or
+  // decrypt proxy for it. This holds even when encryption is otherwise on.
+  test('a set-image edit uploads the picture with no sealKey even when encryption is on', async () => {
+    const contentKeys = require('../../src/services/contentKeys.service');
+    const K = Buffer.alloc(16, 9);
+    const isEnabledSpy = jest.spyOn(contentKeys, 'isEnabled').mockReturnValue(true);
+    const getOrCreatePackKeySpy = jest.spyOn(contentKeys, 'getOrCreatePackKey').mockResolvedValue(K);
+
+    try {
+      await customCardService.addCustomCardContent(USER_ID, KID_ID, [MP3], {});
+      await customCardService.setCustomCardItemImage(USER_ID, KID_ID, 1, PNG);
+
+      const opts = mockUpload.uploadCustomCardImage.mock.calls[0][2];
+      expect(opts.sealKey).toBeNull();
+      expect(contentKeys.getOrCreatePackKey).not.toHaveBeenCalled();
+    } finally {
+      isEnabledSpy.mockRestore();
+      getOrCreatePackKeySpy.mockRestore();
+    }
+  });
+
   it('404s for an item that is not on the card', async () => {
     await customCardService.addCustomCardContent(USER_ID, KID_ID, [MP3], {});
 

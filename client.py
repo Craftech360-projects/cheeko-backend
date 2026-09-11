@@ -8,12 +8,15 @@ import struct
 import logging
 import argparse
 import os
+import sys
 import pyaudio
 import keyboard
 # hjvk
 from typing import Dict, Optional, Tuple
 import requests
 import paho.mqtt.client as mqtt_client
+from client_storage import DeviceStore
+import client_crypto
 from paho.mqtt.enums import CallbackAPIVersion
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
@@ -22,7 +25,8 @@ import opuslib
 
 # --- Configuration ---
 
-SERVER_IP = os.getenv("TEST_SERVER_IP", "192.168.0.55")
+SERVER_IP = os.getenv("TEST_SERVER_IP", "64.227.170.31")
+
 OTA_PORT = 8002
 MQTT_BROKER_HOST = os.getenv("TEST_MQTT_BROKER_HOST", SERVER_IP)
 
@@ -62,6 +66,11 @@ stop_recording_event = threading.Event()
 # Set by the recording thread while the mic is actually open, so the Talk key
 # knows whether a press means "start my turn" or "end my turn".
 recording_active = threading.Event()
+# Set by on_mqtt_message once a triggered card_content pack download finishes
+# (success or failure). The card_content payload itself is queued to
+# mqtt_message_queue before the download starts, so callers must wait on this
+# event separately if they need the downloaded files to be complete on disk.
+card_pack_download_done = threading.Event()
 
 
 def generate_mqtt_credentials(device_mac: str) -> Dict[str, str]:
@@ -119,12 +128,41 @@ assert parse_expression_tag("[zzzz] hi") == ("neutral", "hi")
 assert parse_expression_tag("[OK!] hi") == (None, "[OK!] hi")
 
 
+def looks_decoded(name: str, data: bytes) -> Optional[bool]:
+    """Magic-byte check standing in for the MP3 decoder / LVGL loader.
+    None means an unrecognised file type."""
+    if name.endswith(".mp3"):
+        return data[:3] == b"ID3" or data[:2] == b"\xff\xfb"
+    if name.endswith(".bin"):
+        return data[:1] == b"\x19"
+    return None
+
+
+def lvgl_to_image(data: bytes):
+    """LVGL v9 .bin frame -> PIL image, or None if it isn't one we can read.
+    Header layout: main/manager-web/src/utils/lvglBin.js. RGB565A8's alpha
+    plane is ignored; pack artwork is plain RGB565."""
+    from PIL import Image
+    if len(data) < 12 or data[0] != 0x19 or data[1] not in (0x12, 0x14):
+        return None
+    w, h, stride = struct.unpack_from("<HHH", data, 4)
+    stride = stride or w * 2
+    if not w or not h or len(data) < 12 + stride * h:
+        return None
+    return Image.frombuffer("RGB", (w, h), data[12:12 + stride * h], "raw", "BGR;16", stride, 1)
+
+
 class TestClient:
     def __init__(self, device_mac: Optional[str] = None):
         self.mqtt_client = None
         # Generate a unique MAC address for this client instance
         self.device_mac_formatted = device_mac or "02:ab:cd:12:34:56"
         print(f"Generated unique MAC address: {self.device_mac_formatted}")
+
+        # Stand-ins for the toy's NVS and SD card. The content secret is
+        # generated on first run and reused, exactly as the firmware does.
+        self.store = DeviceStore(base_dir=os.getenv("TEST_CLIENT_STATE", "client_state"),
+                                 mac=self.device_mac_formatted)
 
         # MQTT credentials will be set from OTA response
         self.mqtt_credentials = None
@@ -161,6 +199,10 @@ class TestClient:
 
         # Persona requested in the hello (firmware GetSelectedCharacterId mimic).
         self.character_id = None
+
+        # Whether on_mqtt_message auto-downloads a card_content payload to the
+        # SD mimic. Off by default; enabled via --download-pack.
+        self.auto_download_packs = False
 
         logger.info(
             f"Client initialized with unique MAC: {self.device_mac_formatted}")
@@ -264,10 +306,272 @@ class TestClient:
                 except Empty:
                     pass
 
+            elif payload.get("type") == "card_content" and self.auto_download_packs:
+                # Queue the payload FIRST: the waiter's job is to confirm the
+                # card resolved, not to wait for the (potentially many-second)
+                # download below. Clear the completion event before starting
+                # so a caller that waits on it sees the state of THIS
+                # download, not a leftover from a previous one.
+                card_pack_download_done.clear()
+                mqtt_message_queue.put(payload)
+                try:
+                    self.download_card_content(payload)
+                except Exception as exc:
+                    logger.error("[PACK] download failed: %s", exc)
+                finally:
+                    card_pack_download_done.set()
+
             else:
                 mqtt_message_queue.put(payload)
         except (json.JSONDecodeError, Exception) as e:
             logger.error(f"Error processing MQTT message: {e}")
+
+    def _ensure_secret_registered(self, context: str) -> bool:
+        """If reconcile_secret() flagged a rotation whose new secret the
+        server hasn't confirmed yet, register it now via the existing OTA
+        call (register_content_secret).
+
+        The server wraps every pack key under whatever secret it currently
+        holds for this MAC, so proceeding while a registration is pending
+        would hand back a pack wrapped under the OLD secret -- exactly the
+        bug this closes. Returns False if a pending registration exists and
+        could not be resolved; callers must not download in that case.
+        """
+        if not self.store.registration_pending():
+            return True
+        logger.warning(
+            "[SECRET] %s: registration is PENDING (secret rotated, or the server "
+            "held a different one) -- registering now, before the lookup.", context)
+        if self.register_content_secret():
+            self.store.mark_registration_complete()
+            logger.info("[SECRET] %s: registered, pending cleared.", context)
+            return True
+        logger.error(
+            "[SECRET] %s: registration failed -- the server may still hold "
+            "another secret, so anything it wraps right now could be "
+            "undecryptable by this device. Not downloading; retry once the "
+            "server is reachable.", context)
+        return False
+
+    def boot_register_secret(self) -> bool:
+        """Mimic the toy's boot OTA check, which carries content_secret EVERY
+        time (firmware guide Task 3). Local mode builds MQTT credentials
+        itself and skips the rest of OTA, but not this: re-sending on every
+        boot is what lets the server converge on this device's real secret.
+        """
+        self.store.reconcile_secret()
+        logger.info("[BOOT] OTA check with content_secret for %s (secret fingerprint %s)",
+                    self.device_mac_formatted, self.store.secret_fingerprint())
+        if self.register_content_secret():
+            self.store.mark_registration_complete()
+            logger.info("[BOOT] OTA answered 200: the server now wraps pack keys for this "
+                        "secret (if this MAC is a known device). Registration not pending.")
+            return True
+        logger.warning("[BOOT] OTA check failed; the server may hold another secret. A "
+                       "wrong-key playback will mark registration pending for the next tap.")
+        return False
+
+    def _on_wrong_key(self, context: str) -> None:
+        """Firmware guide section 8: a key that unwraps but content that does not
+        decode means the server wrapped it for a different secret (e.g. another
+        client registered one for this MAC). Mark registration pending so the
+        next tap re-registers BEFORE its lookup and gets a key wrapped for us."""
+        if self.store.registration_pending():
+            return
+        self.store.mark_registration_pending()
+        logger.warning("[SECRET] %s: key unwrapped but content does not decode -- the server "
+                       "holds a different secret for %s. Registration marked PENDING; the next "
+                       "tap re-registers before its lookup.", context, self.device_mac_formatted)
+
+    def download_card_content(self, card_content: Dict) -> Dict:
+        """Mimic ContentManager::HandleServerResponse for a card_content payload.
+
+        Files are stored EXACTLY as the CDN serves them — sealed stays sealed.
+        Decryption happens at playback (see play_skill), which is what the toy
+        does and what keeps a copied card useless.
+        """
+        self.store.reconcile_secret()
+        skill_id = (card_content.get("skill_id") or "").lower()
+        if not skill_id:
+            raise ValueError("card_content has no skill_id")
+
+        if not self._ensure_secret_registered("skill '%s' download" % skill_id):
+            return {"skill_id": skill_id, "files": [], "sealed": False, "skipped": True}
+
+        skill_dir = self.store.skill_dir(skill_id)
+
+        enc = card_content.get("encryption") or None
+        if enc and not (enc.get("v") == 2 and len(enc.get("key", "")) == 32
+                        and len(enc.get("nonce", "")) == 16):
+            logger.warning("[PACK] encryption block malformed; treating pack as plaintext")
+            enc = None
+
+        written = []
+
+        def fetch(url, dest):
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            resp = requests.get(url, timeout=60)
+            resp.raise_for_status()
+            with open(dest, "wb") as fh:
+                fh.write(resp.content)
+            written.append(dest)
+            state = "sealed" if client_crypto.parse_header(resp.content) else "plaintext"
+            logger.info("[PACK] %s -> %s (%d bytes, %s)", url, dest, len(resp.content), state)
+
+        stories = card_content.get("stories") or []
+        if stories:
+            for story in stories:
+                group = os.path.join(skill_dir, "s%02d" % int(story.get("index", 1)))
+                for item in story.get("audio", []):
+                    fetch(item["url"], os.path.join(group, "audio", "%02d.mp3" % int(item["index"])))
+                for item in story.get("images", []):
+                    fetch(item["url"], os.path.join(group, "images", "%02d.bin" % int(item["index"])))
+        else:
+            for item in card_content.get("audio", []):
+                fetch(item["url"], os.path.join(skill_dir, "audio", "%02d.mp3" % int(item["index"])))
+            for item in card_content.get("images", []):
+                fetch(item["url"], os.path.join(skill_dir, "images", "%02d.bin" % int(item["index"])))
+
+        # manifest.jsn LAST — it is the completion marker, same as the firmware.
+        manifest = {
+            "skill_id": skill_id,
+            "skill_name": card_content.get("skill_name") or skill_id,
+            "version": card_content.get("version") or 1,
+            "content_hash": card_content.get("latest_content_hash") or "",
+            "content_type": card_content.get("content_type") or "",
+        }
+        if enc:
+            # The WRAPPED key. Unwrapping needs the NVS secret, so this file on
+            # its own gets an attacker nothing.
+            manifest["enc"] = {"v": 2, "key": enc["key"], "nonce": enc["nonce"]}
+        with open(os.path.join(skill_dir, "manifest.jsn"), "w", encoding="utf-8") as fh:
+            json.dump(manifest, fh, indent=2)
+
+        logger.info("[PACK] skill '%s' ready: %d files, %s", skill_id, len(written),
+                    "sealed" if enc else "plaintext")
+        return {"skill_id": skill_id, "files": written, "sealed": bool(enc)}
+
+    def skill_key(self, skill_id: str):
+        """Unwrap this skill's pack key with the NVS secret. None = plaintext pack.
+
+        Mimics ContentManager::GetSkillKey. The key exists only for the duration
+        of playback; nothing caches it and nothing writes it down.
+        """
+        manifest_path = os.path.join(self.store.skill_dir(skill_id), "manifest.jsn")
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as fh:
+                manifest = json.load(fh)
+        except (FileNotFoundError, ValueError):
+            logger.warning("[PLAY] skill '%s' has no readable manifest.jsn", skill_id)
+            return None
+
+        enc = manifest.get("enc")
+        if not enc:
+            return None
+        try:
+            return client_crypto.unwrap_pack_key(
+                self.store.secret(),
+                bytes.fromhex(enc["key"]),
+                bytes.fromhex(enc["nonce"]),
+            )
+        except (KeyError, ValueError) as exc:
+            logger.error("[PLAY] skill '%s': malformed enc block: %s", skill_id, exc)
+            return None
+
+    def read_skill_file(self, path: str, key) -> bytes:
+        """Read a pack file, decrypting in 2048-byte chunks like the firmware.
+
+        Mirrors the firmware's READ_BUF_SIZE (2048), and the decryptor is a
+        single `decrypt_stream` instance whose keystream state carries across
+        chunk boundaries — that statefulness is what matters here, not chunk
+        alignment (2048 is in fact a multiple of the AES block size; the
+        unaligned-boundary case is covered separately by
+        test_client_crypto.py::test_stream_decrypt_across_unaligned_chunks).
+        """
+        CHUNK = 2048
+        with open(path, "rb") as fh:
+            head = fh.read(client_crypto.HEADER_BYTES)
+            parsed = client_crypto.parse_header(head)
+            if parsed is None:
+                # Legacy plaintext file: rewind and read as-is.
+                fh.seek(0)
+                return fh.read()
+
+            version, nonce = parsed
+            if key is None:
+                raise RuntimeError(f"sealed file with no key: {path}")
+            if version != 2:
+                raise RuntimeError(f"unsupported seal version {version}: {path}")
+
+            dec = client_crypto.decrypt_stream(key, nonce)
+            out = bytearray()
+            while True:
+                chunk = fh.read(CHUNK)
+                if not chunk:
+                    break
+                out += dec.update(chunk)
+            return bytes(out)
+
+    def play_skill(self, skill_id: str, decode_check: bool = True) -> Dict:
+        """Read every file of a downloaded skill and check it decodes.
+
+        Stands in for the MP3 decoder and the LVGL image loader. A file that
+        fails is counted and logged, never handed onward as audio — playing
+        ciphertext is the one outcome the firmware must also refuse.
+        """
+        self.store.reconcile_secret()
+        key = self.skill_key(skill_id)
+        skill_dir = self.store.skill_dir(skill_id)
+        played = failed = 0
+
+        for root, _dirs, files in os.walk(skill_dir):
+            for name in sorted(files):
+                if name == "manifest.jsn":
+                    continue
+                path = os.path.join(root, name)
+                try:
+                    data = self.read_skill_file(path, key)
+                except Exception as exc:
+                    logger.error("[PLAY] %s: %s", path, exc)
+                    failed += 1
+                    continue
+
+                if decode_check:
+                    ok = looks_decoded(name, data)
+                    if ok is None:
+                        logger.error("[PLAY] %s: unrecognised file type, refusing to "
+                                     "count as played. First bytes: %s", path, data[:8].hex())
+                        failed += 1
+                        continue
+                    if not ok:
+                        logger.error("[PLAY] %s decrypted to garbage — wrong key. "
+                                     "Refusing to play. First bytes: %s", path, data[:8].hex())
+                        if key is not None:
+                            self._on_wrong_key("skill '%s'" % skill_id)
+                        failed += 1
+                        continue
+
+                logger.info("[PLAY] %s OK (%d bytes)", path, len(data))
+                played += 1
+
+        if key is None:
+            key_status = "none (plaintext, no key needed)"
+        elif failed == 0:
+            key_status = "unwrapped, content decoded"
+        elif played == 0:
+            key_status = (
+                "unwrapped but EVERY file failed to decode -- this usually means "
+                "the server wrapped this pack under a DIFFERENT secret than the "
+                "one this device now holds (a rotation, or another client registered "
+                "a secret for this MAC). Registration is now pending, so the next tap "
+                "re-registers and re-downloads."
+            )
+        else:
+            key_status = "unwrapped, %d of %d file(s) failed to decode" % (failed, played + failed)
+
+        logger.info("[PLAY] skill '%s': %d played, %d failed, key=%s",
+                    skill_id, played, failed, key_status)
+        return {"played": played, "failed": failed}
 
     def publish_device_message(self, payload: Dict) -> None:
         """Publish a raw device message to the gateway."""
@@ -581,7 +885,11 @@ class TestClient:
                 "board": {
                     "type": "doit-ai-01-kit"
                 },
-                "client_id": session_client_id
+                "client_id": session_client_id,
+                # Spec section 6: the toy registers its content secret on the
+                # OTA call it already makes. Write-only — the server never
+                # returns it.
+                "content_secret": self.store.secret_hex(),
             }
             response = requests.post(
                 f"http://{SERVER_IP}:{OTA_PORT}/toy/ota/", headers=headers, json=data, timeout=5)
@@ -659,6 +967,34 @@ class TestClient:
             return True
         except requests.exceptions.RequestException as e:
             logger.error(f"[ERROR] Failed to get OTA config: {e}")
+            return False
+
+    def register_content_secret(self) -> bool:
+        """POST the content secret to the OTA endpoint without the full handshake.
+
+        RFID mode configures MQTT locally and never calls OTA, so a fresh MAC has
+        no secret on the server and every lookup comes back unencrypted. This is
+        the one call that fixes that.
+        """
+        url = f"http://{SERVER_IP}:{OTA_PORT}/toy/ota/"
+        body = {
+            "application": {"version": "1.7.6", "name": "cheeko-client-mimic"},
+            "board": {"type": "doit-ai-01-kit"},
+            "mac_address": self.device_mac_formatted,
+            "content_secret": self.store.secret_hex(),
+        }
+        try:
+            resp = requests.post(url, headers={"device-id": self.device_mac_formatted},
+                                 json=body, timeout=10)
+            logger.info("[SECRET] Registered content secret for %s: HTTP %s",
+                        self.device_mac_formatted, resp.status_code)
+            body_text = resp.text or ""
+            if self.store.secret_hex() in body_text:
+                logger.error("[SECRET] SERVER ECHOED THE SECRET BACK — that is a leak, report it")
+                return False
+            return resp.ok
+        except requests.exceptions.RequestException as exc:
+            logger.error("[SECRET] Failed to register content secret: %s", exc)
             return False
 
     def connect_mqtt(self) -> bool:
@@ -1173,9 +1509,24 @@ class TestClient:
         request_download: bool = False,
         download_current_version: Optional[str] = None,
         analytics_token: Optional[str] = None,
+        download_pack: bool = False,
+        play_pack: bool = False,
     ):
         """Run a focused RFID tap/version test against local services."""
+        self.auto_download_packs = download_pack
         self.setup_local_test_config()
+        self.boot_register_secret()
+
+        if download_pack:
+            # The server wraps a pack's key under whatever secret it holds
+            # for this MAC AT LOOKUP TIME -- that's baked into the
+            # card_content response, before download_card_content() ever
+            # runs. So a registration still pending (boot check failed, or a
+            # wrong-key playback) must be resolved here, before the tap
+            # below, not merely before the download.
+            self.store.reconcile_secret()
+            self._ensure_secret_registered("RFID tap for %s" % rfid_uid)
+
         if not self.connect_mqtt():
             return
 
@@ -1190,6 +1541,33 @@ class TestClient:
             logger.error("[RFID-TEST] Timed out waiting for card lookup response")
         else:
             logger.info("[RFID-TEST] card_lookup response:\n%s", json.dumps(lookup_response, indent=2))
+
+        # card_content was queued to us by on_mqtt_message before its pack
+        # download started (see on_mqtt_message), so the download may still
+        # be running on the MQTT callback thread here. Wait for it to finish
+        # before reading the files back or cleaning up out from under it.
+        # 120s is a generous bound: the 20-file pack that motivated this
+        # timeout took ~16s, so this leaves ~7x headroom for a much larger
+        # pack or a slow link while still failing loudly instead of hanging.
+        DOWNLOAD_WAIT_TIMEOUT = 120
+        if download_pack and lookup_response and lookup_response.get("type") == "card_content":
+            if not card_pack_download_done.wait(timeout=DOWNLOAD_WAIT_TIMEOUT):
+                logger.error(
+                    "[RFID-TEST] Pack download did not finish within %ds; not "
+                    "playing a partial pack, and cleanup may now race the "
+                    "still-running download thread",
+                    DOWNLOAD_WAIT_TIMEOUT,
+                )
+            elif play_pack:
+                skill_id = (lookup_response.get("skill_id") or "").lower()
+                if skill_id:
+                    stats = self.play_skill(skill_id)
+                    if stats["failed"]:
+                        logger.error("[RFID-TEST] %d file(s) failed to decrypt", stats["failed"])
+                else:
+                    logger.warning("[RFID-TEST] card_content had no skill_id; nothing to play")
+        elif play_pack:
+            logger.warning("[RFID-TEST] lookup did not return card_content; nothing to play")
 
         if request_download:
             effective_version = download_current_version if download_current_version is not None else local_version
@@ -1303,16 +1681,233 @@ class TestClient:
         self.cleanup()
 
 
+def run_ui(client: TestClient, default_uid: str) -> None:
+    """Minimal toy window: tap a card, the pack downloads to the SD mimic
+    folder, then play it. Files stay sealed on disk; each track and its image
+    are decrypted in RAM right before use, same as play_skill / the firmware.
+    """
+    import glob
+    import io
+    import tkinter as tk
+    from tkinter import ttk
+    os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
+    import pygame
+    from PIL import ImageTk
+
+    pygame.mixer.init()
+    client.auto_download_packs = True
+    client.setup_local_test_config()
+    registered = client.boot_register_secret()
+    connected = client.connect_mqtt()
+
+    root = tk.Tk()
+    root.title(f"Cheeko mimic {client.device_mac_formatted}")
+    ui_jobs = Queue()  # worker threads hand tk calls to the main loop; tk is not thread-safe
+    state = {"skill": None, "key": None, "tracks": [], "playing": None}
+    uid_var = tk.StringVar(value=default_uid)
+    status = tk.StringVar(value=("MQTT connected" if connected else "MQTT connect FAILED (offline playback only)")
+                          + (" | secret registered" if registered else " | secret NOT registered"))
+
+    def say(msg, level=logging.INFO):
+        """Window status line, mirrored to the console log."""
+        logger.log(level, "[UI] %s", msg)
+        status.set(msg)
+
+    def background(fn):
+        threading.Thread(target=fn, daemon=True).start()
+
+    def load_skill(skill_id):
+        client.store.reconcile_secret()
+        d = client.store.skill_dir(skill_id)
+        state.update(skill=skill_id, key=client.skill_key(skill_id), playing=None,
+                     tracks=sorted(glob.glob(os.path.join(d, "**", "audio", "*.mp3"), recursive=True)))
+        track_list.delete(0, "end")
+        for p in state["tracks"]:
+            track_list.insert("end", os.path.relpath(p, d))
+        say(f"{skill_id}: {len(state['tracks'])} tracks, "
+            f"{'sealed' if state['key'] else 'plaintext'}  |  {os.path.abspath(d)}")
+
+    def stop():
+        pygame.mixer.music.stop()
+        state["playing"] = None
+
+    def play(i):
+        stop()
+        if not 0 <= i < len(state["tracks"]):
+            return
+        path = state["tracks"][i]
+        name = os.path.relpath(path, client.store.skill_dir(state["skill"]))
+        try:
+            data = client.read_skill_file(path, state["key"])
+        except Exception as exc:
+            say(f"{name}: {exc}", logging.ERROR)
+            return
+        if not looks_decoded(path, data):
+            if state["key"] is not None:
+                client._on_wrong_key(f"track {name}")
+            say(f"{name} decrypted to garbage (wrong key) - refusing to play. "
+                "Tap the card again: it re-registers the secret first.", logging.ERROR)
+            return
+        pygame.mixer.music.load(io.BytesIO(data), "mp3")
+        pygame.mixer.music.play()
+        state["playing"] = i
+        track_list.selection_clear(0, "end")
+        track_list.selection_set(i)
+        track_list.see(i)
+        say(f"Playing {name} ({'decrypted in RAM' if state['key'] else 'plaintext'})")
+
+        # images/NN.bin sits beside audio/NN.mp3
+        img_path = os.path.join(os.path.dirname(os.path.dirname(path)), "images",
+                                os.path.basename(path)[:-4] + ".bin")
+        photo = None
+        if os.path.exists(img_path):
+            try:
+                img = lvgl_to_image(client.read_skill_file(img_path, state["key"]))
+                photo = img and ImageTk.PhotoImage(img)
+            except Exception as exc:
+                logger.error("[UI] %s: %s", img_path, exc)
+        art.configure(image=photo or "")
+        art.image = photo  # keep a reference or tk drops the image
+
+    def tap():
+        uid = uid_var.get().strip()
+        if not uid:
+            return
+        stop()
+        tap_btn.state(["disabled"])
+        say(f"Tapped {uid}, looking up...")
+
+        def done(msg, skill_id=None):
+            def apply():
+                tap_btn.state(["!disabled"])
+                if skill_id:
+                    load_skill(skill_id)
+                    play(0)
+                else:
+                    say(msg, logging.WARNING)
+            ui_jobs.put(apply)
+
+        def work():
+            # Register BEFORE the lookup: the server bakes the key wrap into
+            # the card_content reply (see run_rfid_test).
+            client.store.reconcile_secret()
+            if not client._ensure_secret_registered(f"RFID tap for {uid}"):
+                return done("Secret registration is pending and failed (is the API on :8002 up?)")
+            resp = client.send_rfid_card_lookup(uid)
+            kind = (resp or {}).get("type")
+            if kind != "card_content":
+                return done(f"{uid}: {kind or 'no reply from gateway'}")
+            ui_jobs.put(lambda: say(f"Downloading {resp.get('skill_name') or resp.get('skill_id')}..."))
+            if not card_pack_download_done.wait(timeout=120):
+                return done("Download did not finish within 120s")
+            done(None, (resp.get("skill_id") or "").lower())
+
+        background(work)
+
+    def register():
+        say("Registering content secret...")
+
+        def work():
+            ok = client.register_content_secret()
+            if ok:
+                client.store.mark_registration_complete()
+            ui_jobs.put(lambda: say("Secret registered" if ok else "Secret registration FAILED",
+                                    logging.INFO if ok else logging.ERROR))
+
+        background(work)
+
+    def open_folder():
+        path = client.store.skill_dir(state["skill"]) if state["skill"] else client.store.sd_root()
+        os.startfile(os.path.abspath(path))  # ponytail: Windows-only, the only place this runs
+
+    def selected():
+        sel = track_list.curselection()
+        return sel[0] if sel else 0
+
+    top = ttk.Frame(root, padding=8)
+    top.pack(fill="x")
+    ttk.Label(top, text="Card UID").pack(side="left")
+    ttk.Entry(top, textvariable=uid_var, width=16).pack(side="left", padx=4)
+    tap_btn = ttk.Button(top, text="Tap card", command=tap)
+    tap_btn.pack(side="left")
+    ttk.Button(top, text="Register secret", command=register).pack(side="left", padx=4)
+    ttk.Button(top, text="Open folder", command=open_folder).pack(side="left")
+    ttk.Label(root, textvariable=status, padding=(8, 0)).pack(fill="x")
+
+    mid = ttk.Frame(root, padding=8)
+    mid.pack(fill="both", expand=True)
+    track_list = tk.Listbox(mid, width=24, height=16)
+    track_list.pack(side="left", fill="y")
+    track_list.bind("<Double-Button-1>", lambda _e: play(selected()))
+    art = ttk.Label(mid)
+    art.pack(side="left", padx=8)
+
+    bottom = ttk.Frame(root, padding=8)
+    bottom.pack(fill="x")
+    ttk.Button(bottom, text="Play", command=lambda: play(selected())).pack(side="left")
+    ttk.Button(bottom, text="Stop", command=stop).pack(side="left", padx=4)
+
+    def pump():
+        while True:
+            try:
+                ui_jobs.get_nowait()()
+            except Empty:
+                break
+        # Track finished: advance to the next one, like the toy playing a pack.
+        if state["playing"] is not None and not pygame.mixer.music.get_busy():
+            play(state["playing"] + 1)
+        root.after(200, pump)
+
+    def close():
+        pygame.mixer.quit()
+        client.cleanup()
+        root.destroy()
+
+    # Start on whatever was downloaded last, so the card plays offline too.
+    existing = glob.glob(os.path.join(client.store.sd_root(), "skills", "*", "manifest.jsn"))
+    if existing:
+        load_skill(os.path.basename(os.path.dirname(max(existing, key=os.path.getmtime))))
+
+    root.protocol("WM_DELETE_WINDOW", close)
+    pump()
+    root.mainloop()
+
+
+MODES = [
+    ("voice", "talk to Cheeko (push-to-talk, full OTA handshake)"),
+    ("ui", "window: tap a card, download its pack, play it decrypted"),
+    ("rfid", "console: tap one card, download, decrypt and verify the pack"),
+    ("imagine", "AI Imagine: speak a prompt, get a generated image"),
+]
+
+
+def choose_mode(args, ask=input) -> str:
+    """No --mode on the command line: pick one from a numbered menu."""
+    print(f"\nServer: {SERVER_IP}  (set TEST_SERVER_IP to change)")
+    for n, (mode, desc) in enumerate(MODES, 1):
+        print(f"  {n}) {mode:8s} {desc}")
+    choice = ask("Mode [1]: ").strip().lower() or "1"
+    names = [m for m, _ in MODES]
+    mode = names[int(choice) - 1] if choice.isdigit() and 0 < int(choice) <= len(names) else choice
+    if mode not in names:
+        raise SystemExit(f"Unknown mode {choice!r}; pick 1-{len(names)} or one of {names}")
+    if mode == "rfid":
+        args.rfid_uid = args.rfid_uid or ask("Card UID [ABCDEF090901]: ").strip() or "ABCDEF090901"
+        args.play_pack = True  # from the menu, a tap means download + decrypt + verify
+    return mode
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Cheeko test client. Defaults to voice mode; use --mode rfid with --rfid-uid for card tests."
     )
     parser.add_argument(
         "--mode",
-        choices=["voice", "rfid", "imagine"],
-        default="voice",
-        help="Test mode to run. RFID mode requires --rfid-uid. "
-             "imagine mode = AI Imagine (speak a prompt, get a generated image).",
+        choices=["voice", "rfid", "imagine", "ui"],
+        default=None,
+        help="Test mode to run; omit it to pick from a menu. RFID mode requires --rfid-uid. "
+             "imagine mode = AI Imagine (speak a prompt, get a generated image). "
+             "ui mode = window to tap a card, download its pack and play it decrypted.",
     )
     parser.add_argument(
         "--ota",
@@ -1339,7 +1934,27 @@ if __name__ == "__main__":
     parser.add_argument("--request-download", action="store_true")
     parser.add_argument("--download-current-version", default=os.getenv("TEST_DOWNLOAD_CURRENT_VERSION"))
     parser.add_argument("--analytics-token", default=os.getenv("TEST_MANAGER_API_TOKEN"))
+    parser.add_argument(
+        "--download-pack",
+        action="store_true",
+        help="rfid mode: auto-download a card_content payload to the SD mimic, "
+             "keeping any pack key wrapped on disk.",
+    )
+    parser.add_argument(
+        "--play-pack",
+        action="store_true",
+        help="rfid mode: decrypt and verify every downloaded file. Implies --download-pack.",
+    )
+    parser.add_argument(
+        "--register-secret",
+        action="store_true",
+        help="No longer needed: rfid and ui modes send the secret on startup, "
+             "like the toy's boot OTA check. Kept so old commands still parse.",
+    )
     args = parser.parse_args()
+    if args.mode is None:
+        # ponytail: no terminal (scripts, pipes) keeps the old voice default
+        args.mode = choose_mode(args) if sys.stdin.isatty() else "voice"
 
     print(f"[SEQ] Sequence logging: {'ENABLED' if ENABLE_SEQUENCE_LOGGING else 'DISABLED'}")
     print(f"[STATS] Log frequency: Every {LOG_SEQUENCE_EVERY_N_PACKETS} packets")
@@ -1364,6 +1979,8 @@ if __name__ == "__main__":
             client.run_test()
         elif args.mode == "imagine":
             client.run_imagine_test(use_ota=args.ota)
+        elif args.mode == "ui":
+            run_ui(client, args.rfid_uid or "ABCDEF090901")
         else:
             if not args.rfid_uid:
                 raise SystemExit("--rfid-uid is required in --mode rfid")
@@ -1375,6 +1992,8 @@ if __name__ == "__main__":
                 request_download=args.request_download,
                 download_current_version=args.download_current_version,
                 analytics_token=args.analytics_token,
+                download_pack=args.download_pack or args.play_pack,
+                play_pack=args.play_pack,
             )
     except KeyboardInterrupt:
         logger.info("Manual interruption detected. Cleaning up...")

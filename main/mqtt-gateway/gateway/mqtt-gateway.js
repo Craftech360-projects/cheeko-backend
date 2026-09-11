@@ -207,6 +207,9 @@ async function fetchRfidContentFromManagerApi(rfidUid, sequence, deviceMac) {
       // is invisible to the gateway until it is named here - which is why a
       // card_ai reply carried the character's NAME but never its artwork.
       character: data.character || null,
+      // Spec §6: the pack key wrapped for this device. Same trap as character:
+      // not named here means the toy never sees it and plays nothing.
+      encryption: data.encryption || null,
     };
   } catch (error) {
     logger.error(
@@ -1166,6 +1169,7 @@ class MQTTGateway {
               latest_content_hash: tapAck?.latestContentHash || null,
               download_manifest_path: tapAck?.downloadManifestPath || null,
               replace_mode: "safe_background_refresh",
+              ...(rfidContent.encryption ? { encryption: rfidContent.encryption } : {}),
             };
 
             logger.info(
@@ -1209,6 +1213,7 @@ class MQTTGateway {
             latest_content_hash: tapAck?.latestContentHash || null,
             download_manifest_path: tapAck?.downloadManifestPath || null,
             replace_mode: "safe_background_refresh",
+            ...(rfidContent.encryption ? { encryption: rfidContent.encryption } : {}),
           };
 
           logger.info(
@@ -1272,6 +1277,10 @@ class MQTTGateway {
               // download and falls back to the default face - and this is the
               // path EVERY tap takes when no session is already open.
               ...(rfidContent.character ? { character: rfidContent.character } : {}),
+              // The wrapped content key, same trap: not spread here means the
+              // AI card path never carries it (virtual-connection.js's spread
+              // path already does, since it forwards cardData wholesale).
+              ...(rfidContent.encryption ? { encryption: rfidContent.encryption } : {}),
             });
             return;
           }
@@ -2085,7 +2094,8 @@ class MQTTGateway {
           pack_name: manifest.packName,
           version: manifest.version,
           total_items: manifest.totalItems,
-          stories: stories
+          stories: stories,
+          ...(manifest.encryption ? { encryption: manifest.encryption } : {}),
         });
       } else {
         // Flat download â€” existing behavior
@@ -2114,7 +2124,8 @@ class MQTTGateway {
           pack_name: manifest.packName,
           version: manifest.version,
           total_items: manifest.totalItems,
-          files: files
+          files: files,
+          ...(manifest.encryption ? { encryption: manifest.encryption } : {}),
         });
       }
 

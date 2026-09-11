@@ -39,6 +39,23 @@ jest.mock('../../src/services/upload.service', () => ({
   ...mockUpload
 }));
 
+// Encryption switched ON for the whole suite: character art must still be
+// uploaded plaintext (ruled out 2026-09-10), whatever the flag says.
+jest.mock('../../src/services/contentKeys.service', () => ({ isEnabled: () => true }));
+
+// A real config/database import builds a live pg Pool and Supabase client
+// against whatever DATABASE_URL/.env this process has — this suite only ever
+// wants the three ai_agent_template methods it spies on below.
+jest.mock('../../src/config/database', () => ({
+  prisma: {
+    ai_agent_template: {
+      findUnique: jest.fn(),
+      update: jest.fn(),
+      create: jest.fn()
+    }
+  }
+}));
+
 const request = require('supertest');
 const app = require('../../src/app');
 const { prisma } = require('../../src/config/database');
@@ -159,6 +176,14 @@ describe('POST /agent/template/:id/art', () => {
 
     expect(res.status).toBe(404);
   });
+
+  it('uploads character art plaintext even when encryption is on', async () => {
+    const res = await request(app).post(BASE).attach('talk', PNG, 'talk.png');
+
+    expect(res.status).toBe(200);
+    // No sealKey options argument reaches the uploader.
+    expect(mockUpload.uploadCharacterArt.mock.calls[0]).toHaveLength(4);
+  });
 });
 
 /**
@@ -213,6 +238,22 @@ describe('sd_folder validation', () => {
 
     expect(prisma.ai_agent_template.create).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ sd_folder: null }) })
+    );
+  });
+
+  it('accepts the Add Template form as sent, with an empty agentCode', async () => {
+    // The dashboard form has no code field and always sends agentCode ''.
+    const res = await request(app)
+      .post('/toy/agent/template')
+      .send({
+        agentName: 'test', agentCode: '', language: 'English', langCode: 'en',
+        systemPrompt: 'test', summaryMemory: 'test', chatHistoryConf: 1, sort: 0,
+        sdFolder: '', isVisible: 1
+      });
+
+    expect(res.status).toBe(200);
+    expect(prisma.ai_agent_template.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ agent_code: null }) })
     );
   });
 });

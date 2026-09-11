@@ -265,7 +265,8 @@ describe('an audio-only edit', () => {
     // any way to tell the recording had changed.
     expect(itemOne().audio_url).not.toBe(before);
     expect(card.contentPack.items[0].fileUrl).toBe(itemOne().audio_url);
-    expect(mockUpload.uploadCustomCardAudio.mock.calls[0][4]).toBeUndefined();
+    // No reuseKey was passed, so uploadCustomCardAudio mints a fresh S3 key.
+    expect(mockUpload.uploadCustomCardAudio.mock.calls[0][4]?.reuseKey).toBeUndefined();
     // Swept post-commit, so fresh keys do not leak an object on every edit.
     expect(mockUpload.deleteCustomCardObject).toHaveBeenCalledWith(AUDIO_KEY);
   });
@@ -310,7 +311,8 @@ describe('an image-only edit', () => {
 
     expect(itemOne().image_url).not.toBe(before);
     expect(card.contentPack.items[0].imageUrl).toBe(itemOne().image_url);
-    expect(mockUpload.uploadCustomCardImage.mock.calls[0][2]).toBeUndefined();
+    // No reuseKey was passed, so uploadCustomCardImage mints a fresh S3 key.
+    expect(mockUpload.uploadCustomCardImage.mock.calls[0][2]?.reuseKey).toBeUndefined();
     // The object it replaced is now a different object, so it is swept.
     expect(mockUpload.deleteCustomCardObject).toHaveBeenCalledWith(IMAGE_KEY);
   });

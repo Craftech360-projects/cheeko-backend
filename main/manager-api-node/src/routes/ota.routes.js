@@ -115,7 +115,7 @@ router.post('/',
         'client-id': req.headers['client-id'],
         'content-type': req.headers['content-type']
       },
-      body: req.body
+      body: { ...req.body, content_secret: req.body.content_secret ? '[REDACTED]' : undefined }
     }, null, 2));
 
     // Spring Boot compatibility: MAC comes from Device-Id header, not body
@@ -147,7 +147,8 @@ router.post('/',
         chipInfo: req.body.chip_info,
         application: req.body.application,
         board: req.body.board,
-        ota: req.body.ota
+        ota: req.body.ota,
+        contentSecret: req.body.content_secret || null
       };
 
       const result = await deviceService.checkOtaVersion(mac, clientId, deviceReport);
@@ -243,7 +244,8 @@ router.post('/activate',
           chipInfo: req.body.chip_info,
           application: req.body.application,
           board: req.body.board,
-          ota: req.body.ota
+          ota: req.body.ota,
+          contentSecret: req.body.content_secret || null
         };
 
         const result = await deviceService.checkOtaVersion(mac, clientId || mac, deviceReport);

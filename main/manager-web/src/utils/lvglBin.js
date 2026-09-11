@@ -133,11 +133,20 @@ const cache = new Map();
 
 /**
  * The CDN serves these without an Access-Control-Allow-Origin header, so a
- * direct fetch is blocked. The API's proxy re-serves them same-origin — the
- * same route the pack editor's preview uses.
+ * direct fetch is blocked. The API's proxy re-serves them same-origin.
  */
 function proxied(url) {
   return `/toy/content/proxy?url=${encodeURIComponent(url)}`;
+}
+
+/**
+ * Same idea, but through the decrypt-aware preview route (the pack editor's
+ * audio preview uses this too): it unseals a sealed `.bin` server-side, and
+ * passes a plaintext one through unchanged. Needs packCode to look up the
+ * pack's content key, so it's only used when a caller can supply one.
+ */
+function previewProxied(url, packCode) {
+  return `/toy/admin/rfid/content-pack/preview?url=${encodeURIComponent(url)}&packCode=${encodeURIComponent(packCode)}`;
 }
 
 function authHeaders() {
@@ -155,12 +164,17 @@ function authHeaders() {
  * Fetch a `.bin` and return a PNG data URL for it.
  * Resolves to null when the URL cannot be fetched or decoded, so a caller can
  * show a placeholder without a try/catch at every call site.
+ *
+ * Pass `packCode` for artwork that may be sealed (pack items) so it goes
+ * through the decrypt-aware preview route; the plain proxy is kept for
+ * callers with no pack to key off (it still works for plaintext `.bin`s).
  */
-export function loadLvglBinAsDataUrl(url) {
+export function loadLvglBinAsDataUrl(url, packCode) {
   if (!url) return Promise.resolve(null);
   if (cache.has(url)) return cache.get(url);
 
-  const pending = fetch(proxied(url), { headers: authHeaders() })
+  const endpoint = packCode ? previewProxied(url, packCode) : proxied(url);
+  const pending = fetch(endpoint, { headers: authHeaders() })
     .then(response => {
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       return response.arrayBuffer();

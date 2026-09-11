@@ -481,6 +481,7 @@ import Api from "@/apis/api";
 import { pairMediaFiles, fileName } from "@/utils/pairMediaFiles.mjs";
 import { MAX_TRACKS, roomFor } from "@/utils/trackLimit.mjs";
 import { isBinUrl, lvglBinToDataUrl, loadLvglBinAsDataUrl } from "@/utils/lvglBin";
+import { previewAudioObjectUrl } from "@/apis/module/rfid";
 import {
   DEFAULT_CONTENT_TYPES,
   contentTypeLabel,
@@ -540,11 +541,13 @@ export default {
       dialogKey: Date.now(),
       saving: false,
       currentAudio: null,
+      currentObjectUrl: null,
       playingUrl: null,
       storyMode: false,
       stories: [],  // [{title: '', items: [{title, audioUrl, imageUrl, text}]}]
       selectedStory: null, // index of the story a grouped-mode folder import goes into
       pendingUpload: null, // { mode: 'flat'|'story'|'packThumbnail', storyIndex, itemIndex, field: 'audioUrl'|'imageUrl'|'thumbnailUrl' }
+      _ensurePackIdPromise: null, // in-flight create+lookup, shared so two files picked at once can't create two packs
       uploadingMedia: false,
       importing: false,
       folderAction: 'import', // 'import' adds the folder's tracks, 'replace' swaps them in
@@ -969,6 +972,9 @@ export default {
       formData.append('file', file);
       formData.append('contentType', 'rfidcontent');
       formData.append('category', category);
+      if (this.form.packCode) {
+        formData.append('packCode', this.form.packCode);
+      }
       if (contentPackId) {
         formData.append('contentPackId', contentPackId);
       }
@@ -995,6 +1001,123 @@ export default {
       }
       return result.data.url;
     },
+    // Item files upload to S3 as soon as they're picked, before the dialog's
+    // Save button is pressed. For a brand-new pack that means no row exists
+    // yet to hang an encryption key on, so create it early.
+    //
+    // POST /admin/rfid/content-pack never returns the created row (its `data`
+    // is always null — see rfid.routes.js), so success is read from the
+    // envelope's `code`, not from a returned id. The id then comes from a
+    // second call, GET /admin/rfid/content-pack/code/:packCode.
+    //
+    // A single cached promise is returned to every caller while it's in
+    // flight, so two files picked in quick succession can't race two creates
+    // for the same pack.
+    ensurePackId() {
+      if (this.form.id) return Promise.resolve(this.form.id);
+      if (this._ensurePackIdPromise) return this._ensurePackIdPromise;
+
+      this._ensurePackIdPromise = this.createPackAndFetchId()
+        .then((id) => {
+          this.form.id = id;
+          return id;
+        })
+        .finally(() => {
+          this._ensurePackIdPromise = null;
+        });
+
+      return this._ensurePackIdPromise;
+    },
+    async createPackAndFetchId() {
+      const packCode = String(this.form.packCode || '').trim();
+      const name = String(this.form.name || '').trim();
+      if (!packCode || !name) {
+        // Checked here, before the request, because the server 400s this
+        // exact case and that failure never reaches our callback (see
+        // callWithTimeout below) — better to never send it.
+        throw new Error('Enter a Pack Code and Name before uploading files.');
+      }
+
+      await this.callWithTimeout(
+        (resolve, reject) => Api.rfid.addContentPack({
+          packCode,
+          name,
+          description: this.form.description,
+          contentType: this.normalizeContentType(this.form.contentType),
+          language: this.form.language,
+          status: this.form.status,
+          version: this.form.version,
+          active: this.form.active
+        }, ({ data }) => {
+          if (data && data.code === 0) {
+            resolve();
+          } else {
+            reject(new Error((data && data.msg) || 'Failed to create the pack.'));
+          }
+        }, (info) => {
+          reject(new Error(this.extractApiErrorMessage(info) || 'Failed to create the pack.'));
+        }),
+        'Creating the pack timed out. Check your connection and try again.'
+      );
+
+      return this.callWithTimeout(
+        (resolve, reject) => Api.rfid.getContentPackByCode(packCode, ({ data }) => {
+          if (data && data.code === 0 && data.data && data.data.id) {
+            resolve(data.data.id);
+          } else {
+            reject(new Error('The pack was created, but its id could not be loaded. Reopen this pack and try again.'));
+          }
+        }, (info) => {
+          reject(new Error(this.extractApiErrorMessage(info) || 'The pack was created, but looking it up failed. Reopen this pack and try again.'));
+        }),
+        'The pack was created, but looking it up timed out. Reopen this pack and try again.'
+      );
+    },
+    // httpHandlerError (httpRequest.js) calls a wired `.fail()` callback on a
+    // 4xx, or on a 200 whose envelope carries a non-zero `code` — passing it
+    // the raw success `res` in the latter case (msg at `info.data.msg`) and
+    // the raw axios error in the former (msg at `info.response.data.msg`).
+    // Read both shapes so the server's own message surfaces either way.
+    extractApiErrorMessage(info) {
+      return info?.data?.msg || info?.response?.data?.msg;
+    },
+    // A dropped/timed-out request, or a 5xx, still never reaches either
+    // callback: httpRequest.js only wires the fail path above for 4xx/bad-code
+    // responses, and for anything else (including a real network drop) it
+    // falls through to `.networkFail()`, which for a non-GET just shows a
+    // warning toast and gives up (no retry, no callback) — see reAjaxFun in
+    // httpRequest.js. So a genuinely dropped request would hang forever
+    // without this backstop. `run` gets `(resolve, reject)` and must call one
+    // of them on success/failure; this wrapper guarantees the other side
+    // settles too. Kept comfortably above axios's own 30s `http.defaults.timeout`
+    // (httpRequest.js) so a legitimately slow-but-succeeding request isn't cut
+    // off first — shortened from the original 35s now that ordinary server
+    // errors are caught immediately via `.fail()` above and this only has to
+    // cover a genuinely dropped request or an unwired 5xx.
+    callWithTimeout(run, timeoutMessage, ms = 32000) {
+      return new Promise((resolve, reject) => {
+        let settled = false;
+        const timer = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          reject(new Error(timeoutMessage));
+        }, ms);
+        run(
+          (value) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            resolve(value);
+          },
+          (err) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            reject(err);
+          }
+        );
+      });
+    },
     async uploadFileToS3(file, type) {
       if (!this.pendingUpload) {
         this.$message.error('No target item selected for upload.');
@@ -1011,6 +1134,9 @@ export default {
 
       this.uploadingMedia = true;
       try {
+        if (!isPackThumbnail && !this.form.id) {
+          await this.ensurePackId();
+        }
         targetItem[this.pendingUpload.field] = await this.uploadOne(
           file,
           type === 'audio' ? 'audio' : 'images',
@@ -1078,6 +1204,15 @@ export default {
       const replaced = replacing ? target.slice() : [];
       if (replacing && !(await this.confirmReplace(replaced.length, pairs.length, targetStory))) return;
       if (!(await this.confirmPairs(pairs, fileByPath))) return;
+
+      if (!this.form.id) {
+        try {
+          await this.ensurePackId();
+        } catch (error) {
+          this.$message.error(`Import failed: ${error.message}`);
+          return;
+        }
+      }
 
       // One item per pair; each file uploads into its own field.
       const newItems = pairs.map(p => ({ _rowKey: nextRowKey(), sequence: 0, title: p.title, audioUrl: '', imageUrl: '', text: '' }));
@@ -1296,9 +1431,9 @@ export default {
       );
       await Promise.all(runners);
     },
-    toggleAudio(url) {
+    async toggleAudio(url) {
       if (!url) return;
-      
+
       if (this.playingUrl === url) {
         // Pause current
         if (this.currentAudio) {
@@ -1308,24 +1443,29 @@ export default {
       } else {
         // Stop previous
         this.stopAudio();
-        
-        // Play new
-        this.currentAudio = new Audio(url);
-        this.currentAudio.onended = () => {
-          this.playingUrl = null;
-        };
-        this.currentAudio.play().catch(err => {
-          console.error('Audio playback failed', err);
+
+        try {
+          const objectUrl = await previewAudioObjectUrl(url, this.form.packCode);
+          this.currentObjectUrl = objectUrl;
+          this.currentAudio = new Audio(objectUrl);
+          this.currentAudio.onended = () => { this.playingUrl = null; };
+          await this.currentAudio.play();
+          this.playingUrl = url;
+        } catch (err) {
+          console.error('Audio preview failed', err);
           this.$message.error('Could not play audio');
           this.playingUrl = null;
-        });
-        this.playingUrl = url;
+        }
       }
     },
     stopAudio() {
         if (this.currentAudio) {
             this.currentAudio.pause();
             this.currentAudio = null;
+        }
+        if (this.currentObjectUrl) {
+            URL.revokeObjectURL(this.currentObjectUrl);
+            this.currentObjectUrl = null;
         }
         this.playingUrl = null;
     },

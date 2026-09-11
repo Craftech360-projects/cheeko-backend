@@ -45,6 +45,21 @@ jest.mock('../../src/services/rfid.service', () => ({
   updateContentPack: jest.fn(async () => ({ id: 31 })),
 }));
 
+// Disabled by default (matches no CONTENT_MASTER_KEY set), so the tests above
+// see the same plaintext behaviour they did before this mock existed. The
+// sealing describe block below turns it on to check the sealKey wiring.
+const mockContentKeys = {
+  isEnabled: jest.fn(() => false),
+  getOrCreatePackKey: jest.fn(async () => null),
+};
+jest.mock('../../src/services/contentKeys.service', () => mockContentKeys);
+
+// A real config/database import builds a live pg Pool and Supabase client
+// against whatever DATABASE_URL/.env this process has — nothing this route
+// exercises (rfid.service and contentKeys.service are both mocked above)
+// needs prisma at all.
+jest.mock('../../src/config/database', () => ({ prisma: {} }));
+
 const request = require('supertest');
 const app = require('../../src/app');
 const { toLvglRgb565Bin } = require('../../src/utils/lvglImage');
@@ -200,5 +215,52 @@ describe('POST /admin/rfid/content-pack/upload — pack thumbnail', () => {
     expect(res.status).toBe(200);
     expect(toLvglRgb565Bin).toHaveBeenCalledTimes(1);
     expect(storedCall()[1]).toBe('lion.bin');
+  });
+});
+
+// Caller-level coverage for the sealKey wiring: nothing else exercised it
+// reaching uploadContentFile at all, so setting the call site to null passed
+// 153/153 tests before this was added.
+describe('POST /admin/rfid/content-pack/upload — sealing', () => {
+  // A thumbnail upload never calls isEnabled() at all (isPackThumbnail short-
+  // circuits it), so a `...Once` value queued for it would otherwise leak
+  // into the next test unconsumed. Reset explicitly rather than rely on
+  // every test consuming what it queues.
+  afterEach(() => {
+    mockContentKeys.isEnabled.mockReset().mockReturnValue(false);
+    mockContentKeys.getOrCreatePackKey.mockReset().mockResolvedValue(null);
+  });
+
+  it('uploads item artwork with the pack key as sealKey when encryption is on', async () => {
+    const K = Buffer.alloc(16, 7);
+    mockContentKeys.isEnabled.mockReturnValueOnce(true);
+    mockContentKeys.getOrCreatePackKey.mockResolvedValueOnce(K);
+
+    const res = await upload(PNG, 'lion.png', { packCode: 'CK0001' });
+
+    expect(res.status).toBe(200);
+    expect(mockContentKeys.getOrCreatePackKey).toHaveBeenCalledWith('CK0001');
+    const opts = storedCall()[5];
+    expect(opts.sealKey).toEqual(K);
+  });
+
+  it('uploads a pack thumbnail with no sealKey even when encryption is on', async () => {
+    mockContentKeys.isEnabled.mockReturnValueOnce(true);
+
+    const res = await upload(PNG, 'cover.png', { purpose: 'thumbnail', packCode: 'CK0001' });
+
+    expect(res.status).toBe(200);
+    expect(mockContentKeys.getOrCreatePackKey).not.toHaveBeenCalled();
+    const opts = storedCall()[5];
+    expect(opts.sealKey).toBeNull();
+  });
+
+  it('uploads item artwork with no sealKey when encryption is off', async () => {
+    const res = await upload(PNG, 'lion.png', { packCode: 'CK0001' });
+
+    expect(res.status).toBe(200);
+    expect(mockContentKeys.getOrCreatePackKey).not.toHaveBeenCalled();
+    const opts = storedCall()[5];
+    expect(opts.sealKey).toBeNull();
   });
 });
