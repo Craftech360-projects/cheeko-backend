@@ -271,6 +271,9 @@
                                         <el-tag v-if="scope.row.cardType === 'ai'" type="danger" size="small" class="content-badge">
                                             <i class="el-icon-cpu"></i> AI Card
                                         </el-tag>
+                                        <el-tag v-else-if="scope.row.cardType === 'game'" type="success" size="small" class="content-badge">
+                                            <i class="el-icon-trophy"></i> Game
+                                        </el-tag>
                                         <el-tag v-else-if="scope.row.contentPackId" type="warning" size="small" class="content-badge">
                                             <i class="el-icon-notebook-2"></i> Story/Rhyme
                                         </el-tag>
@@ -810,7 +813,7 @@
                                 <el-table-column label="Toy Alias" prop="deviceAlias" align="center" width="140" show-overflow-tooltip></el-table-column>
                                 <el-table-column label="Card Type" align="center" width="110">
                                     <template slot-scope="scope">
-                                        <el-tag size="small" :type="scope.row.cardType === 'content' ? 'warning' : (scope.row.cardType === 'ai' ? 'danger' : 'info')">
+                                        <el-tag size="small" :type="scope.row.cardType === 'content' ? 'warning' : (scope.row.cardType === 'ai' ? 'danger' : (scope.row.cardType === 'game' ? 'success' : 'info'))">
                                             {{ scope.row.cardType || 'unknown' }}
                                         </el-tag>
                                     </template>
@@ -2422,7 +2425,9 @@ export default {
                 form.questionIds = [];
             }
             if (!form.actionType) {
-                form.actionType = form.cardType === 'ai' ? 'ai' : (form.questionPackId ? 'qna' : 'content');
+                form.actionType = form.cardType === 'ai' ? 'ai'
+                    : form.cardType === 'game' ? 'game'
+                    : (form.questionPackId ? 'qna' : 'content');
             }
             const actionData = form.actionData || {};
             form.aiAgentName = actionData.agent_name || form.aiAgentName || 'Cheeko';

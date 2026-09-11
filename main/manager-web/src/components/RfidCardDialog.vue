@@ -40,6 +40,10 @@
                     <i class="el-icon-cpu"></i>
                     <span>AI Card</span>
                 </div>
+                <div class="type-option" :class="{ active: form.actionType === 'game' }" @click="setActionType('game')">
+                    <i class="el-icon-trophy"></i>
+                    <span>Game Card</span>
+                </div>
             </div>
         </el-form-item>
 
@@ -96,15 +100,16 @@
           </div>
         </el-form-item>
 
-        <!-- Content Pack Selector -->
-        <el-form-item v-if="form.actionType === 'content'" label="Content Pack" prop="contentPackId" class="form-item">
-          <el-select v-model="form.contentPackId" placeholder="Select content pack" class="custom-select" filterable clearable>
+        <!-- Content Pack / Game Pack Selector -->
+        <el-form-item v-if="form.actionType === 'content' || form.actionType === 'game'" :label="form.actionType === 'game' ? 'Game Pack' : 'Content Pack'" prop="contentPackId" class="form-item">
+          <el-select v-model="form.contentPackId" :placeholder="form.actionType === 'game' ? 'Select sound-quiz pack' : 'Select content pack'" class="custom-select" filterable clearable>
             <el-option
-              v-for="cp in contentPacks"
+              v-for="cp in packOptions"
               :key="cp.id"
               :label="`${cp.packCode} - ${cp.name}`"
               :value="cp.id"/>
           </el-select>
+          <div v-if="form.actionType === 'game'" class="field-hint">Only packs of type Sound Quiz (Game) are listed. The card downloads the pack onto the toy and launches it.</div>
         </el-form-item>
 
         <el-form-item label="Product SKU" prop="packId" class="form-item">
@@ -209,6 +214,13 @@ export default {
         ]
       }
     };
+  },
+  computed: {
+    // Game cards list only sound-quiz packs; content cards list everything else.
+    packOptions() {
+      const isGame = this.form.actionType === 'game';
+      return (this.contentPacks || []).filter(cp => (cp.contentType === 'sound_quiz') === isGame);
+    }
   },
   mounted() {
     this.fetchAgentTemplates();
@@ -370,6 +382,9 @@ export default {
         if (this.form.thumbnailUrl === undefined) {
           this.$set(this.form, 'thumbnailUrl', '');
         }
+      } else if (newVal === 'game') {
+        this.form.questionPackId = null;
+        this.form.cardType = 'game';
       }
     }
   }
