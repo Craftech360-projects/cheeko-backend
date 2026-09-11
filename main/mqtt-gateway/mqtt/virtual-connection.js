@@ -17,6 +17,7 @@ const {
   mediaAxiosConfig,
 } = require("../core/media-api-client");
 const logger = require("../utils/logger");
+const { isCardGame, buildCardGameMessage } = require("../gateway/card-game");
 const { buildDispatchMetadata, DEFAULT_RUNTIME_AGENT } = require("../core/mem0-integration");
 const { runImagine } = require("../imagine/imagine-orchestrator");
 const { generateImagine } = require("../imagine/imagine-client");
@@ -1657,6 +1658,17 @@ class VirtualMQTTConnection {
           console.log(
             `✅ [RFID] Card found: contentType=${cardData.contentType}, title="${cardData.title || cardData.packName || ""}"`
           );
+
+          // Game pack: explicit branch instead of the wholesale spread below,
+          // which would label it card_content and leak camelCase fields.
+          if (isCardGame(cardData)) {
+            const gameMsg = buildCardGameMessage(rfidUid, cardData, { session_id: json.session_id });
+            this.sendMqttMessage(JSON.stringify(gameMsg));
+            console.log(
+              `📤 [RFID] Sent card_game (app=${gameMsg.app_id}, v=${gameMsg.version}, assets=${gameMsg.assets.length}) to device ${this.deviceId}`
+            );
+            return;
+          }
 
           // Treat AI session-config cards as card_ai even though the lookup
           // payload uses contentType="prompt" for conversational flows.

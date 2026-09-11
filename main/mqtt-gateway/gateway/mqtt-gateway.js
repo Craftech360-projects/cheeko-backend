@@ -23,6 +23,7 @@ const {
 } = require("../livekit/livekit-bridge");
 const { SetupBackoff } = require("./setup-backoff");
 const { ownsDevice } = require("./shard");
+const { isCardGame, buildCardGameMessage } = require("./card-game");
 const {
   MEDIA_API_BASE,
   mediaAxiosConfig,
@@ -210,6 +211,12 @@ async function fetchRfidContentFromManagerApi(rfidUid, sequence, deviceMac) {
       // Spec §6: the pack key wrapped for this device. Same trap as character:
       // not named here means the toy never sees it and plays nothing.
       encryption: data.encryption || null,
+      // Sound-quiz game packs (card_game). Same whitelist trap as `character`
+      // and `encryption`: unnamed here means the toy never gets the pack.
+      appId: data.appId || null,
+      contentHash: data.contentHash || null,
+      prompts: data.prompts || null,
+      assets: data.assets || null,
     };
   } catch (error) {
     logger.error(
@@ -1111,6 +1118,19 @@ class MQTTGateway {
           };
           this.mqttPublish(`devices/p2p/${clientId}`, unknownResponse);
           logger.warn(`[RFID-SCAN] Unknown card ${rfidUid}, sent card_unknown to device ${deviceId}`);
+          return;
+        }
+
+        // ====== BRANCH G: GAME PACK — send card_game directly via MQTT ======
+        // Before the textToSend guard below: a game lookup carries no items and
+        // no prompt text, and that guard would otherwise return early.
+        if (isCardGame(rfidContent)) {
+          const gameMsg = buildCardGameMessage(rfidUid, rfidContent);
+          logger.info(
+            `🎮 [RFID-ROUTING] Sending card_game: app=${gameMsg.app_id}, v=${gameMsg.version}, ` +
+            `rounds=${gameMsg.prompts.length}, assets=${gameMsg.assets.length} to device ${deviceId}`
+          );
+          this.mqttPublish(`devices/p2p/${clientId}`, gameMsg);
           return;
         }
 
