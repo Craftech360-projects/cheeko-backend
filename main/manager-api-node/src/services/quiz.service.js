@@ -18,6 +18,7 @@ const {
   WIRE_AGE_BAND, deriveLevelState, countCompletedLevels, agedOutLevels, levelCompletedToday
 } = require('./quiz.logic');
 const { resolveBank, clearedResultsFor, DEFAULT_BANK } = require('./banks');
+const { markContentSeen } = require('./contentbank.service');
 const { spokenAnswerMatches } = require('./answer-normalise');
 
 // One bank for everyone (ADR-0009, ticket 013). The age_band column is gone; the
@@ -454,6 +455,16 @@ const nextQuestions = async (deviceMac, bankName = DEFAULT_BANK) => {
     logger.warn(`[${tables.label}] wonder question read failed for ${deviceMac}: ${error.message}`);
   }
 
+  // The question to LEAVE the child with today, chosen here rather than by the
+  // model. Null when the bank is empty or the read fails, and the worker then
+  // falls back to the model inventing one against the history list above.
+  let wonderToAsk = null;
+  try {
+    wonderToAsk = await pickWonderToAsk(context, language);
+  } catch (error) {
+    logger.warn(`[${tables.label}] wonder bank read failed for ${deviceMac}: ${error.message}`);
+  }
+
   return {
     // Frozen wire fields (ticket 005): constant now that the bank is shared.
     age_band: WIRE_AGE_BAND,
@@ -465,6 +476,9 @@ const nextQuestions = async (deviceMac, bankName = DEFAULT_BANK) => {
     wonder_answer: wonderAnswer,
     // Newest first, including the one served above. Never gates anything.
     recent_wonder_questions: wonderHistory,
+    // {code, question_text, second_pass, previous_answer} or null. The worker
+    // tells the model to ask exactly this; the model chooses nothing.
+    wonder_to_ask: wonderToAsk,
     language,
     level,
     replay,
@@ -534,7 +548,7 @@ const toQuestionId = (questionId) => {
 const normaliseWonder = (text) =>
   text.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '').replace(/\s+/g, ' ').trim();
 
-const recordWonderQuestion = async (deviceMac, question, answer) => {
+const recordWonderQuestion = async (deviceMac, question, answer, code) => {
   const text = String(question ?? '').trim();
   if (!text) throw new ApiError('question is required', 400);
   // Long enough for a real question, short enough that a runaway model reply
@@ -545,6 +559,33 @@ const recordWonderQuestion = async (deviceMac, question, answer) => {
   const answerText = String(answer ?? '').trim().slice(0, 500) || null;
 
   const context = await resolveDeviceContext(deviceMac);
+
+  // A bank question. The code is the identity, so the text dedupe below is
+  // beside the point: "make a house" and "build a house" are both WQ-FOOD-01,
+  // and the ledger is what stops it being served again. Marked seen on report,
+  // not on serve, so a question the toy was switched off before is not burned.
+  const bankCode = String(code ?? '').trim().slice(0, 50) || null;
+  if (bankCode) {
+    // One log row per code per day: a session that reconnects after the
+    // question was asked reports it again, and that is the same moment of
+    // curiosity, not a second one. The answer is the only thing that can change.
+    const today = await prisma.kid_wonder_question.findFirst({
+      where: { ...wonderScope(context), code: bankCode, asked_at: { gte: startOfToday() } },
+      select: { id: true, answer_text: true },
+    });
+    if (today) {
+      if (answerText && !today.answer_text) {
+        await prisma.kid_wonder_question.update({ where: { id: today.id }, data: { answer_text: answerText } });
+      }
+      return { id: String(today.id), question: text, code: bankCode, answered: Boolean(answerText || today.answer_text), asked_at: null, duplicate: true };
+    }
+    const row = await prisma.kid_wonder_question.create({
+      data: { device_mac: deviceMac, kid_id: context.kidId ?? null, question: text, answer_text: answerText, code: bankCode },
+      select: { id: true, asked_at: true },
+    });
+    await markContentSeen({ deviceMac, bank: WONDER_BANK, codes: [bankCode] });
+    return { id: String(row.id), question: text, code: bankCode, answered: answerText !== null, asked_at: row.asked_at };
+  }
 
   // The mechanic feeds itself: the stored question is read back as the NEXT
   // session's opening beat, so by the time the model is asked for a new one it
@@ -571,6 +612,73 @@ const recordWonderQuestion = async (deviceMac, question, answer) => {
     select: { id: true, asked_at: true },
   });
   return { id: String(row.id), question: text, answered: answerText !== null, asked_at: row.asked_at };
+};
+
+// The kid_content_seen bank name. Same ledger the jokes, words and Tara's
+// why-questions use, so "has this child heard it" is one table for everything.
+const WONDER_BANK = 'wonder';
+
+const startOfToday = () => {
+  const d = new Date();
+  d.setUTCHours(0, 0, 0, 0);
+  return d;
+};
+
+// Deterministic within a day: every session that day gets the SAME question,
+// so a toy switched off before the closing beat does not get a fresh one on
+// reconnect and quietly burn through the bank two at a time.
+const dayPick = (items, deviceMac) => {
+  const key = new Date().toISOString().slice(0, 10) + '|' + String(deviceMac).toLowerCase();
+  let h = 0;
+  for (const ch of key) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return items[h % items.length];
+};
+
+/**
+ * The Wonder Question to leave this child with today.
+ *
+ * Chosen here, not by the model. Every guard on the model's own choice was a
+ * string comparison with a short memory, and it re-asked the food-house
+ * question ten days later with one word changed. A set difference on codes
+ * against the child's whole ledger cannot be paraphrased past.
+ *
+ * Unseen first. When the child has heard every question, the one they heard
+ * LONGEST ago comes round again, flagged as a second pass with what they said
+ * last time, so the model can ask "would you still pick that?" instead of
+ * pretending it is new. Silence is never an option: a child at the end of the
+ * bank is exactly the child who has been playing the longest.
+ *
+ * Returns null only when the bank has nothing active.
+ */
+const pickWonderToAsk = async (context, language = DEFAULT_LANGUAGE) => {
+  let bank = await prisma.wonder_bank.findMany({ where: { active: true, language }, orderBy: [{ level: 'asc' }, { code: 'asc' }] });
+  if (!bank.length && language !== DEFAULT_LANGUAGE) {
+    bank = await prisma.wonder_bank.findMany({ where: { active: true, language: DEFAULT_LANGUAGE }, orderBy: [{ level: 'asc' }, { code: 'asc' }] });
+  }
+  if (!bank.length) return null;
+
+  const seenRows = await prisma.kid_content_seen.findMany({
+    where: { ...wonderScope(context), bank: WONDER_BANK },
+    select: { code: true, seen_at: true },
+  });
+  const seenAt = new Map(seenRows.map((r) => [r.code, r.seen_at]));
+
+  const unseen = bank.filter((q) => !seenAt.has(q.code));
+  if (unseen.length) {
+    const q = dayPick(unseen, context.deviceMac);
+    return { code: q.code, question_text: q.question_text, second_pass: false, previous_answer: null };
+  }
+
+  // Second pass: oldest seen first.
+  const oldest = bank
+    .filter((q) => seenAt.has(q.code))
+    .sort((a, b) => seenAt.get(a.code) - seenAt.get(b.code))[0];
+  const last = await prisma.kid_wonder_question.findFirst({
+    where: { ...wonderScope(context), code: oldest.code, answer_text: { not: null } },
+    orderBy: { asked_at: 'desc' },
+    select: { answer_text: true },
+  });
+  return { code: oldest.code, question_text: oldest.question_text, second_pass: true, previous_answer: last ? last.answer_text : null };
 };
 
 const wonderScope = (context) => (
@@ -1253,6 +1361,7 @@ module.exports = {
   lastWonderQuestion,
   recentWonderQuestions,
   takePendingWonderQuestion,
+  pickWonderToAsk,
   // Exported for tests: the Door ladder is the part of the payload most likely
   // to be got wrong quietly.
   toQuestion,

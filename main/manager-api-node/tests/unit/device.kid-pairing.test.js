@@ -31,6 +31,7 @@ jest.mock('../../src/config/database', () => {
     kid_character_state: { updateMany: jest.fn(), deleteMany: jest.fn(async () => ({ count: 0 })) },
     kid_session_progress: { updateMany: jest.fn(), deleteMany: jest.fn(async () => ({ count: 0 })) },
     kid_content_seen: { updateMany: jest.fn(), deleteMany: jest.fn(async () => ({ count: 0 })) },
+    kid_wonder_question: { updateMany: jest.fn(), deleteMany: jest.fn(async () => ({ count: 0 })) },
     device_workspace_artifacts: { updateMany: jest.fn(), findMany: jest.fn(), update: jest.fn(), delete: jest.fn(), deleteMany: jest.fn(async () => ({ count: 0 })) },
     device_memory_documents: { updateMany: jest.fn(), findMany: jest.fn(), update: jest.fn(), delete: jest.fn(), deleteMany: jest.fn(async () => ({ count: 0 })) },
     device_memory_chunks: { updateMany: jest.fn(), findMany: jest.fn(), update: jest.fn(), delete: jest.fn(), deleteMany: jest.fn(async () => ({ count: 0 })) },
@@ -83,6 +84,9 @@ describe('device pairing to a child', () => {
       };
       expect(prisma.quiz_question_answer.updateMany).toHaveBeenCalledWith(expected);
       expect(prisma.riddle_question_answer.updateMany).toHaveBeenCalledWith(expected);
+      // The Wonder Question log follows the child too: a pre-pairing callback
+      // must not be stranded on the MAC the moment a child is linked.
+      expect(prisma.kid_wonder_question.updateMany).toHaveBeenCalledWith(expected);
     });
 
     it('cannot steal rows already attributed to a sibling', async () => {

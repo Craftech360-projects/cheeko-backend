@@ -228,6 +228,9 @@ const clearUnattributedDeviceRows = async (tx, macAddress) => {
   await tx.kid_character_state.deleteMany({ where: answerWhere });
   await tx.kid_session_progress.deleteMany({ where: answerWhere });
   await tx.kid_content_seen.deleteMany({ where: answerWhere });
+  // The Wonder Question log: the callback is the most personal line the toy
+  // says, and it must not greet the next child with the last one's answer.
+  await tx.kid_wonder_question.deleteMany({ where: answerWhere });
 
   const macKey = ownerKeyForDevice({ mac_address: macAddress });
   for (const { model } of OWNER_KEYED_STORES) {
@@ -255,6 +258,7 @@ const adoptUnattributedRows = async (tx, macAddress, kidId) => {
   await tx.kid_character_state.updateMany({ where: answerWhere, data: { kid_id: BigInt(kidId) } });
   await tx.kid_session_progress.updateMany({ where: answerWhere, data: { kid_id: BigInt(kidId) } });
   await tx.kid_content_seen.updateMany({ where: answerWhere, data: { kid_id: BigInt(kidId) } });
+  await tx.kid_wonder_question.updateMany({ where: answerWhere, data: { kid_id: BigInt(kidId) } });
 
   const fromKey = ownerKeyForDevice({ mac_address: macAddress });
   const toKey = `kid:${BigInt(kidId)}`;
