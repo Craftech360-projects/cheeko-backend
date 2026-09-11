@@ -22,7 +22,7 @@ Eight tools. Three are always registered; five need `ALLOW_WRITES=1`.
 | `admin_request` | GET no · others yes | Call **any** route under `/toy`. See [§6 safety](#6-safety-model) for what it refuses |
 | `create_content_pack` | yes | New pack row |
 | `update_content_pack` | yes | Change pack fields and/or **replace** its items |
-| `upload_pack_file` | yes | Local audio / image / `.bin` → CDN URL. PNG/JPEG auto-convert to the LVGL `.bin` the toy renders. Pass `packCode` (except for a thumbnail) so the file is sealed under that pack's key when SD content encryption is on — omit it and the tool warns that the upload may have landed in plaintext |
+| `upload_pack_file` | yes | Local audio / image / `.bin` → CDN URL. PNG/JPEG auto-convert to the LVGL `.bin` the toy renders. Pass `packCode` (except for a thumbnail) so the file is sealed under that pack's key when SD content encryption is on — omit it and the tool warns that the upload may have landed in plaintext. `purpose: 'game_asset'` uploads a sound-quiz sound or icon as-is (no .bin conversion, never sealed) |
 
 The first five are "curated" — typed inputs, good descriptions, the daily
 content job. The proxy trio reaches everything else (devices, agents,

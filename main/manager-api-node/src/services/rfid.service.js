@@ -19,6 +19,7 @@ const qdrantService = require('./integrations/qdrant.service');
 const uploadService = require('./upload.service');
 const contentKeys = require('./contentKeys.service');
 const { wrapKeyForDevice } = require('../utils/contentCrypto');
+const { buildSoundQuizPack, isValidAppId, manifestUrlFor } = require('./soundQuiz');
 
 // =============================================
 // Helper: Format date to yyyy-MM-dd HH:mm:ss
@@ -805,6 +806,32 @@ const buildContentPackResponse = async (pack, normalizedUid, mac) => {
     items = await listContentItemsCompat(pack.id);
   } catch (itemsErr) {
     logger.error('[RFID-LOOKUP] Content items query error:', itemsErr);
+  }
+
+  // Sound-quiz game pack (spec §6). Returned in its own shape: the gateway keys
+  // card_game on `assets` + `appId`, and must never see `items`, which it would
+  // route as an audio content pack. Nothing here is sealed — apps/ stays
+  // plaintext on the SD card (plan §9).
+  if (pack.content_type === 'sound_quiz') {
+    if (!isValidAppId(pack.pack_code)) {
+      logger.warn(`[RFID-LOOKUP] sound_quiz pack ${pack.pack_code} is not a valid app id (1-8 chars [a-z0-9_-]); answering unknown`);
+      return null;
+    }
+    const built = buildSoundQuizPack(pack, items, manifestUrlFor(pack.pack_code));
+    for (const w of built.warnings) logger.warn(`[RFID-LOOKUP] sound_quiz ${pack.pack_code}: ${w}`);
+    logger.info(
+      `[RFID-LOOKUP] Game pack resolved: uid=${normalizedUid}, appId=${pack.pack_code}, version=${pack.version || 'none'}, rounds=${built.prompts.length}, assets=${built.assets.length}`
+    );
+    return {
+      rfid_uid: normalizedUid,
+      contentType: 'sound_quiz',
+      appId: pack.pack_code,
+      title: pack.name,
+      version: pack.version,
+      contentHash: pack.content_hash || null,
+      prompts: built.prompts,
+      assets: built.assets,
+    };
   }
 
   // Grouped content = items with MORE THAN ONE distinct story_number
@@ -2804,12 +2831,30 @@ const determineTapCardType = (mapping) => {
   if (cardType === 'ai' || actionType === 'ai' || actionType === 'agent') {
     return 'ai';
   }
+  // A game card is a content-pack mapping whose pack is a sound quiz. The
+  // explicit card_type is what the dashboard writes; the pack check catches a
+  // mapping made before the type existed.
+  if (cardType === 'game' || mapping.rfid_content_pack?.content_type === 'sound_quiz') {
+    return 'game';
+  }
   if (mapping.content_pack_id) return 'content';
   if (mapping.question_pack_id) return 'qna';
   if (mapping.question_id || (Array.isArray(mapping.question_ids) && mapping.question_ids.length > 0)) {
     return 'prompt';
   }
   return cardType || 'unknown';
+};
+
+/** Card type when there is no mapping row and only the lookup result to go on. */
+const classifyLookupCardType = (lookupResolved) => {
+  if (!lookupResolved) return 'unknown';
+  if (lookupResolved.agentName || lookupResolved.actionType === 'agent' || lookupResolved.actionType === 'ai') {
+    return 'ai';
+  }
+  if (lookupResolved.contentType === 'sound_quiz') return 'game';
+  if (lookupResolved.contentType === 'prompt_pack') return 'qna';
+  if (lookupResolved.contentType && lookupResolved.contentType !== 'prompt') return 'content';
+  return 'prompt';
 };
 
 /**
@@ -2847,7 +2892,7 @@ const recordCardTap = async (payload = {}) => {
       where: { rfid_uid: normalizedUid, active: true },
       include: {
         rfid_content_pack: {
-          select: { id: true, pack_code: true, name: true, version: true, content_hash: true }
+          select: { id: true, pack_code: true, name: true, version: true, content_hash: true, content_type: true }
         }
       }
     })
@@ -2864,19 +2909,7 @@ const recordCardTap = async (payload = {}) => {
     }
   }
 
-  const resolvedCardTypeFromLookup = (() => {
-    if (!lookupResolved) return 'unknown';
-    if (lookupResolved.agentName || lookupResolved.actionType === 'agent' || lookupResolved.actionType === 'ai') {
-      return 'ai';
-    }
-    if (lookupResolved.contentType === 'prompt_pack') {
-      return 'qna';
-    }
-    if (lookupResolved.contentType && lookupResolved.contentType !== 'prompt') {
-      return 'content';
-    }
-    return 'prompt';
-  })();
+  const resolvedCardTypeFromLookup = classifyLookupCardType(lookupResolved);
 
   const cardType = mapping ? determineTapCardType(mapping) : resolvedCardTypeFromLookup;
   const recognized = Boolean(mapping || lookupResolved);
@@ -4166,6 +4199,7 @@ const getContentPackByCode = async (packCode) => {
         id: Number(item.id),
         sequence: item.item_number,
         title: item.title,
+        description: item.description || '',
         text: item.lyrics_text || '',
         audioUrl: item.audio_url,
         imageUrl: item.image_url || null,
@@ -4235,7 +4269,40 @@ const getContentPacksByLanguage = async (language) => {
 /**
  * Create content pack with packCode uniqueness check
  */
+/**
+ * Regenerate and upload manifest.jsn for a sound-quiz pack. Runs at the end of
+ * every pack save; a non-game pack returns null without touching S3. Throws
+ * on upload failure — by then the rows are committed, so the admin must know
+ * the device would download a stale manifest and save again.
+ * @param {bigint|number|string} packId
+ * @returns {Promise<{url: string, rounds: number}|null>}
+ */
+const publishSoundQuizManifest = async (packId) => {
+  const pack = await prisma.rfid_content_pack.findFirst({ where: { id: BigInt(packId) } });
+  if (!pack || pack.content_type !== 'sound_quiz') return null;
+  if (!isValidAppId(pack.pack_code)) {
+    throw new ApiError(`Pack code "${pack.pack_code}" must be 1-8 chars of a-z 0-9 _ - to be a game pack`, 400);
+  }
+  const items = await listContentItemsCompat(pack.id);
+  const built = buildSoundQuizPack(pack, items, manifestUrlFor(pack.pack_code));
+  for (const w of built.warnings) logger.warn(`[SOUND-QUIZ] ${pack.pack_code}: ${w}`);
+  try {
+    const { url } = await uploadService.uploadGamePackManifest(pack.pack_code, built.manifest);
+    return { url, rounds: built.manifest.rounds.length };
+  } catch (err) {
+    logger.error(`[SOUND-QUIZ] manifest upload failed for ${pack.pack_code}: ${err.message}`);
+    throw new ApiError('Pack saved, but the game manifest could not be uploaded. Save again to retry.', 500);
+  }
+};
+
 const createContentPack = async (data, userId) => {
+  // A game pack's code becomes the SD folder. Checking it here, before the
+  // insert, stops the dashboard's create-on-first-upload path from leaving an
+  // orphan row behind with a code the toy could never hold.
+  if ((data.contentType || data.content_type) === 'sound_quiz' && !isValidAppId(data.packCode)) {
+    throw new ApiError(`Pack code "${data.packCode}" must be 1-8 chars of a-z 0-9 _ - to be a game pack`, 400);
+  }
+
   // Check for duplicate packCode
   const existing = await getContentPackByCode(data.packCode);
   if (existing) {
@@ -4318,6 +4385,7 @@ const createContentPack = async (data, userId) => {
     logger.info('[createContentPack] No items to insert');
   }
 
+  await publishSoundQuizManifest(newPack.id);
   return null;
 };
 
@@ -4361,6 +4429,21 @@ const updateContentPack = async (data, userId) => {
       select: { content_hash: true, ...Object.fromEntries(VERSIONED_PACK_FIELDS.map(f => [f, true])) }
     })
     : null;
+
+  // Same check as createContentPack, run before the write: a save that flips
+  // an existing pack to sound_quiz (or renames its code) must not commit a
+  // code the toy could never hold as an SD folder.
+  if (updateData.content_type !== undefined || updateData.pack_code !== undefined) {
+    const current = await prisma.rfid_content_pack.findFirst({
+      where: { id: BigInt(data.id) },
+      select: { content_type: true, pack_code: true }
+    });
+    const type = updateData.content_type ?? current?.content_type;
+    const code = updateData.pack_code ?? current?.pack_code;
+    if (type === 'sound_quiz' && !isValidAppId(code)) {
+      throw new ApiError(`Pack code "${code}" must be 1-8 chars of a-z 0-9 _ - to be a game pack`, 400);
+    }
+  }
 
   let updated;
   try {
@@ -4492,6 +4575,7 @@ const updateContentPack = async (data, userId) => {
     });
   }
 
+  await publishSoundQuizManifest(data.id);
   return null;
 };
 
@@ -5128,6 +5212,8 @@ module.exports = {
   processScan,
   getScanLogs,
   recordCardTap,
+  determineTapCardType,
+  classifyLookupCardType,
   getCardTapLogs,
   getCardTapAnalyticsSummary,
   registerDeviceTags,
@@ -5162,6 +5248,7 @@ module.exports = {
   getContentPacksByLanguage,
   createContentPack,
   updateContentPack,
+  publishSoundQuizManifest,
   deleteContentPacks,
   transformContentPackToCamelCase,
 

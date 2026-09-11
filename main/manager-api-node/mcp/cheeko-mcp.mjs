@@ -88,12 +88,14 @@ const MIME = {
  * through rather than decoded twice. It does mean `convert: false` no longer
  * gets a PNG stored as a PNG unless contentPackId is set.
  */
-export function uploadPlan(filePath, { convert, contentPackId } = {}) {
+export function uploadPlan(filePath, { convert, contentPackId, purpose } = {}) {
   const ext = path.extname(filePath).toLowerCase();
   const mime = MIME[ext];
   if (!mime) throw new Error(`Unsupported file type ${ext || '(none)'}; expected ${Object.keys(MIME).join(' ')}`);
   const convertible = ext === '.png' || ext === '.jpg' || ext === '.jpeg';
-  const shouldConvert = convertible && (convert ?? !contentPackId);
+  // A game asset is stored as-is by the API too (purpose=game_asset), so
+  // converting here would hand the quiz an icon it cannot draw.
+  const shouldConvert = convertible && purpose !== 'game_asset' && (convert ?? !contentPackId);
   return {
     filename: shouldConvert ? path.basename(filePath, ext) + '.bin' : path.basename(filePath),
     mime: shouldConvert ? MIME['.bin'] : mime,
@@ -254,16 +256,17 @@ export function buildServer({ api, canWrite, hasUserToken = false }) {
     }, (data) => api('/admin/rfid/content-pack', { method: 'PUT', body: data }));
 
     server.registerTool('upload_pack_file', {
-      description: 'Upload a local audio, image or .bin file to the content CDN and return its URL for use in update_content_pack items. PNG/JPEG are converted to the LVGL .bin the toy renders; only a pack thumbnail (contentPackId set) stays a real image, because the API converts item artwork server-side as well. Pass packCode for anything but a thumbnail: if SD content encryption is on, the API seals the file under that pack\'s key, and a missing packCode silently stores it in PLAINTEXT.',
+      description: 'Upload a local audio, image or .bin file to the content CDN and return its URL for use in update_content_pack items. PNG/JPEG are converted to the LVGL .bin the toy renders; only a pack thumbnail (contentPackId set) stays a real image, because the API converts item artwork server-side as well. Pass packCode for anything but a thumbnail: if SD content encryption is on, the API seals the file under that pack\'s key, and a missing packCode silently stores it in PLAINTEXT. Pass purpose "game_asset" for sound-quiz game packs: the file is stored as-is (PNG stays PNG) and never sealed.',
       inputSchema: z.object({
         path: z.string().describe('Absolute path on this machine'),
         category: z.string().optional().describe('CDN subfolder, e.g. the pack code. Default "uploads"'),
         packCode: z.string().optional().describe('Pack this file belongs to, e.g. STORY_JUNGLE_EN. Used to seal the file under the pack\'s encryption key when SD content encryption is enabled. Not needed for a thumbnail upload (contentPackId set) — thumbnails always stay plaintext by design.'),
         contentPackId: z.number().int().optional().describe('Set to use this file as that pack\'s thumbnail'),
-        convert: z.boolean().optional().describe('Convert PNG/JPEG -> .bin here rather than letting the API do it. Turning it off does not keep a PNG a PNG: the API converts item artwork too.')
+        convert: z.boolean().optional().describe('Convert PNG/JPEG -> .bin here rather than letting the API do it. Turning it off does not keep a PNG a PNG: the API converts item artwork too.'),
+        purpose: z.enum(['thumbnail', 'game_asset']).optional().describe('"thumbnail" for pack cover art; "game_asset" for a sound-quiz sound or icon (stored as-is, never sealed)')
       })
-    }, async ({ path: filePath, category, packCode, contentPackId, convert }) => {
-      const plan = uploadPlan(filePath, { convert, contentPackId });
+    }, async ({ path: filePath, category, packCode, contentPackId, convert, purpose }) => {
+      const plan = uploadPlan(filePath, { convert, contentPackId, purpose });
       let buf = await readFile(filePath);
       if (plan.shouldConvert) buf = await lvgl.toLvglRgb565Bin(buf);
       const form = new FormData();
@@ -271,13 +274,14 @@ export function buildServer({ api, canWrite, hasUserToken = false }) {
       if (category) form.append('category', category);
       if (packCode) form.append('packCode', packCode);
       if (contentPackId) form.append('contentPackId', String(contentPackId));
+      if (purpose) form.append('purpose', purpose);
       const result = await api('/admin/rfid/content-pack/upload', { method: 'POST', form });
       // Mirrors the API's own condition for sealing (rfid.routes.js: isPackThumbnail
       // || !packCode -> plaintext): a thumbnail upload is plaintext by design, but any
       // other upload with no packCode risks landing unencrypted with only a server log
       // to show for it. The MCP can't see whether encryption is enabled server-side, so
       // this warns unconditionally rather than staying silent like the log line does.
-      if (!contentPackId && !packCode && !result.isError) {
+      if (!contentPackId && !packCode && purpose !== 'game_asset' && !result.isError) {
         result.content[0].text =
           'WARNING: no packCode was sent. If SD content encryption is enabled on this ' +
           'server, this file was just stored in PLAINTEXT (not sealed under any pack key). ' +

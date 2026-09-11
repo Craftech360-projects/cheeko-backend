@@ -320,6 +320,19 @@ class TestClient:
                 finally:
                     card_pack_download_done.set()
 
+            elif payload.get("type") == "card_game" and self.auto_download_packs:
+                # Same order as card_content above: queue first so the waiter
+                # sees the tap resolve, then download, then signal completion.
+                card_pack_download_done.clear()
+                mqtt_message_queue.put(payload)
+                try:
+                    self.last_game_result = self.download_card_game(payload)
+                except Exception as exc:
+                    logger.error("[GAME] download failed: %s", exc)
+                    self.last_game_result = {"error": str(exc)}
+                finally:
+                    card_pack_download_done.set()
+
             else:
                 mqtt_message_queue.put(payload)
         except (json.JSONDecodeError, Exception) as e:
@@ -449,6 +462,89 @@ class TestClient:
         logger.info("[PACK] skill '%s' ready: %d files, %s", skill_id, len(written),
                     "sealed" if enc else "plaintext")
         return {"skill_id": skill_id, "files": written, "sealed": bool(enc)}
+
+    def download_card_game(self, card_game: Dict) -> Dict:
+        """Mimic the firmware's EnsureGamePack for a card_game payload.
+
+        Every asset goes to apps/<app_id>/<name> by NAME, with manifest.jsn
+        written LAST as the completion marker. The toy sends no local version
+        for app cards, so the gate is local: a manifest already at this version
+        means no download. Game packs are plaintext, so nothing is unwrapped.
+        After the download the manifest is checked the way the quiz parser
+        reads it, so a file the manifest names but the card lacks is reported.
+        """
+        app_id = (card_game.get("app_id") or "").lower()
+        if not re.fullmatch(r"[a-z0-9_-]{1,8}", app_id):
+            raise ValueError("card_game app_id %r cannot be an 8.3 folder" % app_id)
+        version = int(card_game.get("version") or 1)
+        app_dir = os.path.join(self.store.sd_root(), "apps", app_id)
+        manifest_path = os.path.join(app_dir, "manifest.jsn")
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as fh:
+                local_version = int(json.load(fh).get("version") or 0)
+        except (FileNotFoundError, ValueError):
+            local_version = 0
+        if local_version >= version:
+            logger.info("[GAME] '%s' v%d already on the card (local v%d); no download",
+                        app_id, version, local_version)
+            return {"app_id": app_id, "files": [], "skipped": True, "dir": app_dir,
+                    "problems": self._check_game_pack(app_dir, version)}
+
+        assets = card_game.get("assets") or []
+        manifest_asset = next((a for a in assets if a.get("name") == "manifest.jsn"), None)
+        if not manifest_asset:
+            raise ValueError("card_game carries no manifest.jsn asset")
+        os.makedirs(app_dir, exist_ok=True)
+        # Drop the old completion marker first: a download that dies halfway
+        # must not leave the previous version's manifest vouching for new files.
+        if os.path.exists(manifest_path):
+            os.remove(manifest_path)
+
+        written = []
+        for asset in [a for a in assets if a is not manifest_asset] + [manifest_asset]:
+            name = asset.get("name") or ""
+            if not re.fullmatch(r"[A-Za-z0-9_-]{1,8}\.[A-Za-z0-9]{1,3}", name):
+                raise ValueError("asset name %r is not an 8.3 short name" % name)
+            resp = requests.get(asset["url"], timeout=60)
+            resp.raise_for_status()
+            dest = os.path.join(app_dir, name)
+            with open(dest, "wb") as fh:
+                fh.write(resp.content)
+            written.append(dest)
+            logger.info("[GAME] %s -> %s (%d bytes)", asset["url"], dest, len(resp.content))
+
+        problems = self._check_game_pack(app_dir, version)
+        logger.info("[GAME] '%s' v%d on the card: %d files, %s", app_id, version, len(written),
+                    "manifest checks OK" if not problems else "%d problem(s)" % len(problems))
+        return {"app_id": app_id, "files": written, "skipped": False, "dir": app_dir,
+                "problems": problems}
+
+    def _check_game_pack(self, app_dir: str, version: int) -> list:
+        """What the quiz parser would trip over: wrong template, a version that
+        disagrees with the tap, a bad answer index, or a named file not on disk."""
+        try:
+            with open(os.path.join(app_dir, "manifest.jsn"), "r", encoding="utf-8") as fh:
+                manifest = json.load(fh)
+        except (FileNotFoundError, ValueError) as exc:
+            return ["manifest.jsn unreadable: %s" % exc]
+        problems = []
+        if manifest.get("type") != "miniapp" or manifest.get("template") != "sound_quiz":
+            problems.append("type/template is %s/%s" % (manifest.get("type"), manifest.get("template")))
+        if int(manifest.get("version") or 0) != version:
+            problems.append("manifest version %s, tap said %d" % (manifest.get("version"), version))
+        rounds = manifest.get("rounds") or []
+        if not 2 <= len(rounds) <= 16:
+            problems.append("%d rounds (the parser takes 2-16)" % len(rounds))
+        for i, rnd in enumerate(rounds, 1):
+            options = rnd.get("options") or []
+            if not 0 <= int(rnd.get("correct", -1)) < len(options):
+                problems.append("round %d: correct=%s with %d options" % (i, rnd.get("correct"), len(options)))
+            for name in [rnd.get("sound")] + [o.get("icon") for o in options]:
+                if not name or not os.path.isfile(os.path.join(app_dir, name)):
+                    problems.append("round %d: %s is not on the card" % (i, name))
+        for problem in problems:
+            logger.error("[GAME] %s", problem)
+        return problems
 
     def skill_key(self, skill_id: str):
         """Unwrap this skill's pack key with the NVS secret. None = plaintext pack.
@@ -629,7 +725,7 @@ class TestClient:
 
         self.publish_device_message(payload)
         return self.wait_for_message(
-            {"card_up_to_date", "card_content", "card_ai", "card_unknown"},
+            {"card_up_to_date", "card_content", "card_ai", "card_unknown", "card_game"},
             timeout=15,
         )
 
@@ -1549,7 +1645,7 @@ class TestClient:
         # timeout took ~16s, so this leaves ~7x headroom for a much larger
         # pack or a slow link while still failing loudly instead of hanging.
         DOWNLOAD_WAIT_TIMEOUT = 120
-        if download_pack and lookup_response and lookup_response.get("type") == "card_content":
+        if download_pack and lookup_response and lookup_response.get("type") in ("card_content", "card_game"):
             if not card_pack_download_done.wait(timeout=DOWNLOAD_WAIT_TIMEOUT):
                 logger.error(
                     "[RFID-TEST] Pack download did not finish within %ds; not "
@@ -1557,6 +1653,17 @@ class TestClient:
                     "still-running download thread",
                     DOWNLOAD_WAIT_TIMEOUT,
                 )
+            elif lookup_response.get("type") == "card_game":
+                # Nothing to decrypt in a game pack. "Play" here is the prompt
+                # list the server sent and whether the card holds every file.
+                logger.info("[GAME] Sound | Prompt | File")
+                for p in lookup_response.get("prompts") or []:
+                    logger.info("[GAME] %s | %s | %s", p.get("sound"), p.get("prompt"), p.get("file"))
+                result = getattr(self, "last_game_result", None) or {}
+                if result.get("error") or result.get("problems"):
+                    logger.error("[GAME] pack NOT playable: %s", result.get("error") or result.get("problems"))
+                else:
+                    logger.info("[GAME] pack playable from %s", result.get("dir"))
             elif play_pack:
                 skill_id = (lookup_response.get("skill_id") or "").lower()
                 if skill_id:

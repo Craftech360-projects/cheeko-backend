@@ -478,6 +478,32 @@ async function uploadCustomCardImage(binBuffer, kidId, { reuseKey = null, sealKe
 }
 
 /**
+ * The device manifest of a sound-quiz game pack, at a FIXED key so the card
+ * lookup can name its URL without storing anything. Overwritten on every pack
+ * save, with the same no-cache + invalidation pair the custom-card objects
+ * use, so the toy's next download sees the rows as they are now. Plaintext by
+ * design: apps/ is never sealed (plan §9).
+ * @param {string} packCode - the pack's code, already validated as an app id
+ * @param {Object} manifest - from soundQuiz.buildSoundQuizPack
+ * @returns {Promise<{s3Key: string, url: string}>}
+ */
+async function uploadGamePackManifest(packCode, manifest) {
+  const { manifestKeyFor } = require('./soundQuiz');
+  const s3Key = manifestKeyFor(packCode);
+  await s3Client.send(new PutObjectCommand({
+    Bucket: S3_BUCKET,
+    Key: s3Key,
+    Body: Buffer.from(JSON.stringify(manifest), 'utf8'),
+    ContentType: 'application/json',
+    CacheControl: CUSTOM_CARD_CACHE_CONTROL
+  }));
+  await invalidateCloudFront([s3Key]);
+  const url = `https://${CLOUDFRONT_DOMAIN}/${s3Key}`;
+  logger.info('Game pack manifest uploaded to S3', { s3Key, packCode, rounds: (manifest.rounds || []).length });
+  return { s3Key, url };
+}
+
+/**
  * The four conversation sprites of one character, at one version.
  *
  * Key layout — `chars/<sd_folder>/v<version>/<state>.bin`, matching the 44
@@ -556,6 +582,7 @@ module.exports = {
   listImagineImagesForKid,
   uploadCustomCardAudio,
   uploadCustomCardImage,
+  uploadGamePackManifest,
   uploadCharacterArt,
   customCardKeyFromUrl,
   invalidateCloudFront,

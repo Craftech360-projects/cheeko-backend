@@ -3767,10 +3767,12 @@ router.get('/content-pack/code/:packCode',
  *                 description: Optional folder under rfidcontent (e.g., audio, images)
  *               purpose:
  *                 type: string
- *                 enum: [thumbnail]
+ *                 enum: [thumbnail, game_asset]
  *                 description: >
  *                   Send `thumbnail` for a pack's cover art so it is stored as a web
- *                   image. Anything else is item artwork and is converted to .bin.
+ *                   image. Anything else, except `game_asset`, is item artwork and is converted to .bin.
+ *                   `game_asset` stores the file as-is (no .bin conversion) and
+ *                   never seals it — for sound-quiz game packs.
  *               contentPackId:
  *                 type: string
  *                 description: >
@@ -3801,10 +3803,16 @@ router.post('/content-pack/upload',
     // It still counts as a signal that this is cover art — but `purpose` is
     // what a client should send.
     const isPackThumbnail = req.body?.purpose === 'thumbnail' || Boolean(contentPackId);
+    // A sound-quiz game asset: the quiz renderer loads PNG icons straight off
+    // the card and game packs are never sealed (apps/ is plaintext), so the
+    // file goes up exactly as picked.
+    const isGameAsset = req.body?.purpose === 'game_asset';
 
     let artwork;
     try {
-      artwork = await toDeviceArtwork(req.file, { isPackThumbnail });
+      artwork = isGameAsset
+        ? { buffer: req.file.buffer, filename: req.file.originalname, mimeType: req.file.mimetype }
+        : await toDeviceArtwork(req.file, { isPackThumbnail });
     } catch (error) {
       // A header that says PNG over a body that is not one. That is the admin's
       // file being wrong, so it is a 400; ffmpeg missing or timing out is ours
@@ -3823,7 +3831,7 @@ router.post('/content-pack/upload',
       // that; without it the file goes out plaintext and we say so in the log.
       const packCode = req.body?.packCode || null;
       let sealKey = null;
-      if (!isPackThumbnail && contentKeys.isEnabled()) {
+      if (!isPackThumbnail && !isGameAsset && contentKeys.isEnabled()) {
         sealKey = packCode ? await contentKeys.getOrCreatePackKey(packCode) : null;
         if (!sealKey) logger.warn(`[RFID-UPLOAD] no pack key for packCode=${packCode || 'none'}; uploading plaintext`);
       }
