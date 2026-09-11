@@ -119,7 +119,7 @@
 
         <!-- Story Grouping Toggle -->
         <el-form-item label="Group by Stories" class="form-item">
-          <el-switch v-model="storyMode" active-text="Grouped" inactive-text="Flat" @change="onStoryModeChange"></el-switch>
+          <el-switch v-model="storyMode" active-text="Grouped" inactive-text="Flat" :disabled="isSoundQuiz" @change="onStoryModeChange"></el-switch>
           <span class="story-mode-hint">{{ storyMode ? 'Items grouped into stories. Encoder rotates between stories.' : 'Flat list. Encoder rotates between individual tracks.' }}</span>
         </el-form-item>
 
@@ -198,8 +198,11 @@
                   </div>
                   <div class="item-col main-col">
                       <div class="inputs-wrapper" style="flex: 1; min-width: 0;">
-                          <el-input v-model="item.title" placeholder="Title" size="small" class="mb-1"></el-input>
-                          <el-input v-model="item.audioUrl" placeholder="Audio URL (https://...)" size="small" class="mb-1">
+                          <el-input v-model="item.title" :placeholder="isSoundQuiz ? 'Sound (e.g. Doorbell)' : 'Title'" size="small" class="mb-1"></el-input>
+                          <el-input v-if="isSoundQuiz" v-model="item.text" placeholder="Prompt shown on the toy (e.g. DING-DONG?)" size="small" class="mb-1">
+                              <template slot="prepend"><i class="el-icon-chat-dot-square"></i></template>
+                          </el-input>
+                          <el-input v-model="item.audioUrl" :placeholder="isSoundQuiz ? 'Sound file (MP3, 22050 Hz mono)' : 'Audio URL (https://...)'" size="small" class="mb-1">
                               <template slot="prepend"><i class="el-icon-headset"></i></template>
                               <template slot="append">
                                 <el-button
@@ -214,7 +217,7 @@
                                 ></el-button>
                               </template>
                           </el-input>
-                          <el-input v-model="item.imageUrl" placeholder="Image URL (Thumbnail)" size="small" class="mb-1">
+                          <el-input v-model="item.imageUrl" :placeholder="isSoundQuiz ? 'Icon (48x48 PNG)' : 'Image URL (Thumbnail)'" size="small" class="mb-1">
                                <template slot="prepend"><i class="el-icon-picture"></i></template>
                                <template slot="append">
                                  <el-button
@@ -224,7 +227,15 @@
                                  ></el-button>
                                </template>
                           </el-input>
-                          <el-input type="textarea" v-model="item.text" placeholder="Voice script / Text content" size="small" :rows="2" class="text-input">
+                          <div v-if="isSoundQuiz" class="distractor-row">
+                            <el-select :value="distractorAt(item, 0)" @input="setDistractor(item, 0, $event)" placeholder="Wrong answer 1" size="small" clearable filterable>
+                              <el-option v-for="name in distractorOptions(index)" :key="'d0-' + name" :label="name" :value="name"/>
+                            </el-select>
+                            <el-select :value="distractorAt(item, 1)" @input="setDistractor(item, 1, $event)" placeholder="Wrong answer 2" size="small" clearable filterable>
+                              <el-option v-for="name in distractorOptions(index)" :key="'d1-' + name" :label="name" :value="name"/>
+                            </el-select>
+                          </div>
+                          <el-input v-else type="textarea" v-model="item.text" placeholder="Voice script / Text content" size="small" :rows="2" class="text-input">
                           </el-input>
                       </div>
                       <div v-if="item.imageUrl" class="img-preview-box">
@@ -581,7 +592,17 @@ export default {
       rules: {
         packCode: [
           { required: true, message: "Please enter pack code", trigger: "blur" },
-          { max: 8, message: "Pack code must be 8 characters or less", trigger: "blur" }
+          { max: 8, message: "Pack code must be 8 characters or less", trigger: "blur" },
+          {
+            validator: (rule, value, callback) => {
+              if (this.isSoundQuiz && !/^[a-z0-9_-]{1,8}$/.test(String(value || ''))) {
+                callback(new Error('Game pack code: 1-8 chars, a-z 0-9 _ - (it becomes the SD folder)'));
+              } else {
+                callback();
+              }
+            },
+            trigger: 'blur'
+          }
         ],
         name: [
           { required: true, message: "Please enter name", trigger: "blur" }
@@ -607,6 +628,12 @@ export default {
       this.createdTypes.forEach(t => values.add(t.value));
       if (this.form.contentType) values.add(this.form.contentType);
       return [...values].map(value => ({ value, label: contentTypeLabel(value) }));
+    },
+
+    // Sound-quiz packs are game packs: rows are quiz rounds, files are stored
+    // as-is, and the pack code becomes the SD folder (8.3).
+    isSoundQuiz() {
+      return this.normalizeContentType(this.form.contentType) === 'sound_quiz';
     },
 
     newPlaylistSlug() {
@@ -726,7 +753,8 @@ export default {
             title: '',
             audioUrl: '',
             imageUrl: '',
-            text: ''  // Voice script / lyrics text
+            text: '',  // Voice script / lyrics text — the Prompt for a sound quiz
+            description: ''  // Sound quiz: "A,B" wrong-answer Sound names
         };
         if (index === null || index >= this.form.items.length) {
             this.form.items.push(item);
@@ -747,6 +775,26 @@ export default {
         this.form.items.splice(index, 1);
         // Re-sequence
         this.resequence(this.form.items);
+    },
+    // ---- Sound quiz: wrong answers live in `description` as "A,B" ----
+    distractorList(item) {
+      return String(item.description || '').split(',').map(s => s.trim()).filter(Boolean);
+    },
+    distractorAt(item, idx) {
+      return this.distractorList(item)[idx] || '';
+    },
+    setDistractor(item, idx, value) {
+      const list = this.distractorList(item);
+      list[idx] = value || '';
+      // Keep both slots so slot 1 can be set before slot 0.
+      while (list.length < 2) list.push('');
+      this.$set(item, 'description', list.slice(0, 2).join(','));
+    },
+    // Every other row's Sound name. A round cannot be its own wrong answer.
+    distractorOptions(index) {
+      return this.form.items
+        .filter((it, i) => i !== index && String(it.title || '').trim())
+        .map(it => it.title.trim());
     },
     // ---- Story Mode Methods ----
     onStoryModeChange(val) {
@@ -1139,10 +1187,10 @@ export default {
         }
         targetItem[this.pendingUpload.field] = await this.uploadOne(
           file,
-          type === 'audio' ? 'audio' : 'images',
+          this.isSoundQuiz && !isPackThumbnail ? `apps/${this.form.packCode}` : (type === 'audio' ? 'audio' : 'images'),
           {
             contentPackId: isPackThumbnail ? this.form.id : null,
-            purpose: isPackThumbnail ? 'thumbnail' : undefined
+            purpose: isPackThumbnail ? 'thumbnail' : (this.isSoundQuiz ? 'game_asset' : undefined)
           }
         );
         this.$message.success(`${type === 'audio' ? 'Audio' : 'Image'} uploaded successfully.`);
@@ -1534,6 +1582,21 @@ export default {
             if (this.form.items.length === 0) {
               this.$message.warning("Please add at least one item to the pack.");
               return;
+            }
+            if (this.isSoundQuiz) {
+              const n = this.form.items.length;
+              if (n < 2 || n > 16) {
+                this.$message.warning('A sound quiz needs between 2 and 16 rounds.');
+                return;
+              }
+              const bad = this.form.items.findIndex(it =>
+                !String(it.title || '').trim() || !String(it.text || '').trim() ||
+                !it.audioUrl || !it.imageUrl || this.distractorList(it).length !== 2
+              );
+              if (bad !== -1) {
+                this.$message.warning(`Round ${bad + 1} needs a Sound, a Prompt, a sound file, an icon and two wrong answers.`);
+                return;
+              }
             }
             // itemNumber comes from array position, so the order shown here is
             // the order that is saved. `id` rides along untouched, which is how
@@ -2082,6 +2145,9 @@ export default {
     .mb-1 {
       margin-bottom: 6px;
     }
+
+    .distractor-row { display: flex; gap: 8px; margin-bottom: 4px; }
+    .distractor-row .el-select { flex: 1; }
 
     .text-input {
       :deep(.el-textarea__inner) {
