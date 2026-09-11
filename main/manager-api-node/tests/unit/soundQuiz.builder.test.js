@@ -103,6 +103,9 @@ describe('buildSoundQuizPack', () => {
       { sound: 'Phone', prompt: 'RING?', file: 'phone.mp3' },
       { sound: 'Clock', prompt: 'TICK-TOCK?', file: 'clock.mp3' }
     ]);
+
+    const assetNames = new Set(assets.map((a) => a.name));
+    for (const r of manifest.rounds) for (const o of r.options) expect(assetNames.has(o.icon)).toBe(true);
   });
 
   it('orders rounds by item_number regardless of array order', () => {
@@ -137,6 +140,15 @@ describe('buildSoundQuizPack', () => {
     expect(warnings.join(' ')).toMatch(/Doorbell/);
     expect(warnings.join(' ')).toMatch(/Phone/);
     expect(warnings.join(' ')).toMatch(/Kettle/);
+
+    // Fan's wrong answers are Phone and Clock, both dropped rounds — their
+    // icons must still ship, or the tile has nothing to draw.
+    const { assets } = buildSoundQuizPack(PACK, items, MANIFEST_URL);
+    const names = assets.map((a) => a.name);
+    expect(names).toEqual(expect.arrayContaining(['fan.mp3', 'fan.png', 'phone.png', 'clock.png']));
+    expect(names).not.toContain('phone.mp3');
+    expect(names).not.toContain('clock.mp3');
+    expect(names).not.toContain('doorbell.png');
   });
 
   it('resolves distractors case-insensitively and trims', () => {

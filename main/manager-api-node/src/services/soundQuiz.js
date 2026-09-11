@@ -74,13 +74,14 @@ const buildSoundQuizPack = (pack, items, manifestUrl) => {
   assignStems(rounds);
   // Distractors are resolved against every row that has a label and an icon,
   // not only the rounds that survive: a round dropped for a missing prompt can
-  // still lend its icon as a wrong answer.
+  // still lend its icon as a wrong answer. A lent icon is still shipped in assets.
   const byLabel = new Map();
   for (const r of rounds) {
     if (r.title && r.imageUrl) byLabel.set(norm(r.title), r);
   }
 
   const kept = [];
+  const referenced = new Set();
   for (const r of rounds) {
     const label = r.title || '(untitled)';
     if (!r.title) { warnings.push(`round dropped: missing Sound name`); continue; }
@@ -95,6 +96,7 @@ const buildSoundQuizPack = (pack, items, manifestUrl) => {
     const missing = r.distractors.filter((_, i) => !resolved[i] || resolved[i] === r);
     if (missing.length) { warnings.push(`${label}: unknown wrong answer(s) ${missing.join(', ')}`); continue; }
     kept.push({ ...r, resolved });
+    resolved.forEach((d) => referenced.add(d));
   }
 
   const manifestRounds = kept.map((r, idx) => {
@@ -122,6 +124,11 @@ const buildSoundQuizPack = (pack, items, manifestUrl) => {
   for (const r of kept) {
     assets.push({ name: `${r.stem}.mp3`, url: r.audioUrl });
     assets.push({ name: `${r.stem}.png`, url: r.imageUrl });
+  }
+
+  const keptStems = new Set(kept.map((r) => r.stem));
+  for (const d of referenced) {
+    if (!keptStems.has(d.stem)) assets.push({ name: `${d.stem}.png`, url: d.imageUrl });
   }
 
   const prompts = kept.map((r) => ({ sound: r.title, prompt: r.prompt, file: `${r.stem}.mp3` }));
