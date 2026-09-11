@@ -54,6 +54,7 @@ function logout() {
 function showTab(id) {
   $('editorView').hidden = id !== 'editorView';
   $('testView').hidden = id !== 'testView';
+  $('gptliveView').hidden = id !== 'gptliveView';
   $('bankView').hidden = id !== 'bankView';
   $('progressView').hidden = id !== 'progressView';
   document.querySelectorAll('.tab').forEach((b) =>

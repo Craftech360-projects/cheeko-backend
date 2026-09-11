@@ -24,6 +24,7 @@ jest.mock('../../src/config/database', () => ({
     kid_character_state: { updateMany: jest.fn(), deleteMany: jest.fn(async () => ({ count: 0 })) },
     kid_session_progress: { updateMany: jest.fn(), deleteMany: jest.fn(async () => ({ count: 0 })) },
     kid_content_seen: { updateMany: jest.fn(), deleteMany: jest.fn(async () => ({ count: 0 })) },
+    kid_wonder_question: { updateMany: jest.fn(), deleteMany: jest.fn(async () => ({ count: 0 })) },
     device_workspace_artifacts: { updateMany: jest.fn(), findMany: jest.fn(), delete: jest.fn() },
     device_memory_documents: { updateMany: jest.fn(), findMany: jest.fn(), delete: jest.fn() },
     device_memory_chunks: { updateMany: jest.fn(), findMany: jest.fn(), delete: jest.fn() },

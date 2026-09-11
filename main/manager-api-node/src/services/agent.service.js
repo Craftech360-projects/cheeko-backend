@@ -2675,6 +2675,8 @@ const updateTemplateArt = async (templateId, files) => {
     converted[state] = await toLvglRgb565A8Bin(files[state]);
   }
 
+  // Character art is never sealed (ruled out 2026-09-10): it goes to S3
+  // plaintext even when CONTENT_MASTER_KEY is set.
   const updateData = { art_version: nextVersion, updated_at: new Date() };
   for (const state of states) {
     const { url } = await uploadService.uploadCharacterArt(

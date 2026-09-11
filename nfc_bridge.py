@@ -11,6 +11,7 @@ Usage:
 import asyncio
 import json
 import argparse
+
 import time
 from smartcard.System import readers
 from smartcard.CardMonitoring import CardMonitor, CardObserver

@@ -1,0 +1,4 @@
+livekit-agents[openai,silero]~=1.8.1
+python-dotenv
+jinja2
+tzdata

@@ -391,10 +391,29 @@ const toDeviceAudio = async (file) => {
  * is not orphaned: patchCustomCardItem sweeps the previous URL after the commit
  * lands, precisely because the new URL now differs from it.
  */
-const uploadDeviceImage = async (bin, kidId) => {
-  const { url } = await uploadService.uploadCustomCardImage(bin, kidId);
+const uploadDeviceImage = async (bin, kidId, sealKey = null) => {
+  const { url } = await uploadService.uploadCustomCardImage(bin, kidId, { sealKey });
   return url;
 };
+
+/**
+ * Custom-card content is deliberately NOT sealed, even though this pack has a
+ * content key like any other (spec §6 covers this path too). Always resolves
+ * to null so every uploadCustomCardAudio / uploadCustomCardImage call below
+ * degrades to its plaintext path.
+ *
+ * Why: GET /api/mobile/kids/:kidId/custom-card (mobile.routes.js) hands
+ * fileUrl straight to the parent's shipped Flutter app, which has no key and
+ * no decrypt proxy — a sealed URL would play as noise for every new parent
+ * recording the moment the flag is on. The toy is the only consumer that
+ * needs sealing here, and it has no firmware for this content path yet, so
+ * sealing buys nothing today and costs a real regression. Re-enable this
+ * (call contentKeys.getOrCreatePackKey(pack.pack_code) again) once both the
+ * parent app and the firmware can decrypt custom-card content. Do not re-add
+ * it just because the sealKey parameter is sitting right there on the upload
+ * functions below — it stays wired for that reason.
+ */
+const resolvePackSealKey = async (_pack) => null;
 
 /**
  * Pair the multipart parts of an add request.
@@ -737,6 +756,7 @@ const addCustomCardContent = async (userId, kidId, files, { title, images = [] }
   }
 
   const pack = await ensurePackForKid(kid, userId);
+  const sealKey = await resolvePackSealKey(pack);
   const existing = await loadPackItems(pack.id);
 
   if (existing.length + validated.length > MAX_ITEMS) {
@@ -764,7 +784,8 @@ const addCustomCardContent = async (userId, kidId, files, { title, images = [] }
       entry.audio.buffer,
       kid.id,
       `recording${AUDIO_EXT}`,
-      AUDIO_MIME
+      AUDIO_MIME,
+      { sealKey }
     );
 
     const itemNumber = existing.length + index + 1;
@@ -774,7 +795,7 @@ const addCustomCardContent = async (userId, kidId, files, { title, images = [] }
       audioUrl: url,
       audioSizeBytes: entry.audio.buffer.length,
       audioDurationMs: entry.audio.durationMs,
-      imageUrl: entry.imageBin ? await uploadDeviceImage(entry.imageBin, kid.id) : null
+      imageUrl: entry.imageBin ? await uploadDeviceImage(entry.imageBin, kid.id, sealKey) : null
     });
   }
 
@@ -799,6 +820,7 @@ const replaceCustomCardItem = async (userId, kidId, itemNumber, file, { title, i
   }
 
   const { kid, pack, existing, target } = await loadTargetItem(userId, kidId, itemNumber);
+  const sealKey = await resolvePackSealKey(pack);
 
   validateAudioUpload(file, title);
   const imageInfo = image ? validateImageUpload(image) : null;
@@ -813,9 +835,10 @@ const replaceCustomCardItem = async (userId, kidId, itemNumber, file, { title, i
     audio.buffer,
     kid.id,
     `recording${AUDIO_EXT}`,
-    AUDIO_MIME
+    AUDIO_MIME,
+    { sealKey }
   );
-  const imageUrl = imageBin ? await uploadDeviceImage(imageBin, kid.id) : null;
+  const imageUrl = imageBin ? await uploadDeviceImage(imageBin, kid.id, sealKey) : null;
 
   const items = existing.map((item) => (
     item.item_number === Number(itemNumber)
@@ -845,9 +868,10 @@ const setCustomCardItemImage = async (userId, kidId, itemNumber, file) => {
   }
 
   const { kid, pack, existing, target } = await loadTargetItem(userId, kidId, itemNumber);
+  const sealKey = await resolvePackSealKey(pack);
   const imageInfo = validateImageUpload(file);
 
-  const imageUrl = await uploadDeviceImage(await toDeviceImage(file, imageInfo), kid.id);
+  const imageUrl = await uploadDeviceImage(await toDeviceImage(file, imageInfo), kid.id, sealKey);
 
   const items = existing.map((item) => (
     item.item_number === Number(itemNumber)
@@ -994,6 +1018,7 @@ const patchCustomCardItem = async (userId, kidId, itemNumber, {
   // that can fail cheaply, and there is no point spending an ffmpeg on a write
   // that is about to be refused as stale.
   const audio = audioInfo ? await toDeviceAudio(audioFile) : null;
+  const sealKey = (audio || frameInfo) ? await resolvePackSealKey(pack) : null;
 
   // ── storage ───────────────────────────────────────────────────────────────
   const data = { updater: BigInt(userId), update_date: new Date() };
@@ -1004,14 +1029,15 @@ const patchCustomCardItem = async (userId, kidId, itemNumber, {
       audio.buffer,
       kid.id,
       `recording${AUDIO_EXT}`,
-      AUDIO_MIME
+      AUDIO_MIME,
+      { sealKey }
     );
     data.audio_url = url;
     data.audio_size_bytes = BigInt(audio.buffer.length);
     data.audio_duration_ms = BigInt(audio.durationMs);
   }
   if (frameInfo) {
-    data.image_url = await uploadDeviceImage(frameInfo.frame, kid.id);
+    data.image_url = await uploadDeviceImage(frameInfo.frame, kid.id, sealKey);
   }
   if (clearImage) {
     // null, never '': an empty string reaches the app as a url and renders as a

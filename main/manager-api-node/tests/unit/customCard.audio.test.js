@@ -183,6 +183,28 @@ describe('the bytes that reach S3', () => {
     expect(mockUpload.uploadCustomCardAudio).not.toHaveBeenCalled();
     expect(mockRfid.updateContentPack).not.toHaveBeenCalled();
   });
+
+  // Custom-card content is deliberately not sealed (see resolvePackSealKey in
+  // customCard.service.js): the shipped parent app has no key or decrypt
+  // proxy for it, so sealing it would break every new recording. This asserts
+  // that stays true even when encryption is otherwise on for the app.
+  test('custom card audio is uploaded with no sealKey even when encryption is on', async () => {
+    const contentKeys = require('../../src/services/contentKeys.service');
+    const K = Buffer.alloc(16, 9);
+    const isEnabledSpy = jest.spyOn(contentKeys, 'isEnabled').mockReturnValue(true);
+    const getOrCreatePackKeySpy = jest.spyOn(contentKeys, 'getOrCreatePackKey').mockResolvedValue(K);
+
+    try {
+      await customCardService.addCustomCardContent(USER_ID, KID_ID, [mp3Upload()], {});
+
+      const opts = audioCall()[4];
+      expect(opts.sealKey).toBeNull();
+      expect(contentKeys.getOrCreatePackKey).not.toHaveBeenCalled();
+    } finally {
+      isEnabledSpy.mockRestore();
+      getOrCreatePackKeySpy.mockRestore();
+    }
+  });
 });
 
 // ── what reaches the database ───────────────────────────────────────────────

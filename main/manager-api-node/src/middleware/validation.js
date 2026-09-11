@@ -136,7 +136,9 @@ const schemas = {
 
   // Agent template create/update
   agentTemplate: Joi.object({
-    agentCode: Joi.string().max(100).pattern(/^[^0-9]+$/)
+    // Optional: the Add Template form has no code field and always sends ''.
+    // The service stores '' as null.
+    agentCode: Joi.string().max(100).pattern(/^[^0-9]+$/).allow(null, '')
       .messages({ 'string.pattern.base': 'agentCode must not contain numbers' }),
     agentName: Joi.string().max(255).required().pattern(/^[^0-9]+$/)
       .messages({ 'string.pattern.base': 'agentName must not contain numbers' }),

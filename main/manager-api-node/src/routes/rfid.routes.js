@@ -23,6 +23,9 @@ const path = require('path');
 const rfidService = require('../services/rfid.service');
 const bulkImportService = require('../services/bulkImport.service');
 const uploadService = require('../services/upload.service');
+const contentKeys = require('../services/contentKeys.service');
+const { parseHeader, createUnsealStream, HEADER_BYTES } = require('../utils/contentCrypto');
+const { Readable, pipeline } = require('stream');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { requireAuth, requireAdmin } = require('../middleware/auth');
 const { success, badRequest, notFound } = require('../utils/response');
@@ -3814,12 +3817,23 @@ router.post('/content-pack/upload',
     }
 
     try {
+      // Pack thumbnails stay plaintext: the dashboard shows them in an <img>.
+      // Everything else on this route lands on an SD card, so it is sealed
+      // under the pack's key when encryption is on. packCode is required for
+      // that; without it the file goes out plaintext and we say so in the log.
+      const packCode = req.body?.packCode || null;
+      let sealKey = null;
+      if (!isPackThumbnail && contentKeys.isEnabled()) {
+        sealKey = packCode ? await contentKeys.getOrCreatePackKey(packCode) : null;
+        if (!sealKey) logger.warn(`[RFID-UPLOAD] no pack key for packCode=${packCode || 'none'}; uploading plaintext`);
+      }
       const result = await uploadService.uploadContentFile(
         artwork.buffer,
         artwork.filename,
         'rfidcontent',
         category,
-        artwork.mimeType
+        artwork.mimeType,
+        { sealKey }
       );
 
       // The URL is handed back and nothing else. Saving it here used to write
@@ -4015,6 +4029,136 @@ router.post('/content-pack/delete',
 
     await rfidService.deleteContentPacks(ids);
     success(res, null, 'Content packs deleted successfully');
+  })
+);
+
+// Matches contentPackUpload's fileSize limit above (50 MB) — that limit
+// constrains objects written through the API, this constrains objects read
+// back from arbitrary CDN paths for preview, but the intent is the same cap.
+const PREVIEW_MAX_BYTES = 50 * 1024 * 1024;
+
+/**
+ * @swagger
+ * /admin/rfid/content-pack/preview:
+ *   get:
+ *     tags: [RFID Content Pack]
+ *     summary: Decrypt-and-stream proxy for previewing a pack object in the dashboard
+ *     description: >
+ *       Fetches the object from the content CDN server-side, unseals it if it carries a
+ *       CKE1 header, and streams the resulting bytes back. A browser cannot fetch the CDN
+ *       object directly (no CORS headers) or decrypt it (no key), so both plaintext and
+ *       sealed objects are served through this route.
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: url
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Absolute https URL on the content CDN
+ *       - in: query
+ *         name: packCode
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Pack code, used to look up the pack's content key when the object is sealed
+ *     responses:
+ *       200:
+ *         description: File content (plaintext passthrough or decrypted bytes)
+ *         content:
+ *           application/octet-stream:
+ *             schema:
+ *               type: string
+ *               format: binary
+ *       400:
+ *         description: Invalid url/packCode, or the object is off the CDN or too large
+ *       404:
+ *         description: Upstream object not found, or no content key for this pack
+ */
+/**
+ * Admin-only decrypt proxy for the dashboard's play button (spec §8). The
+ * pack key is fetched and used server-side and only decrypted bytes go to
+ * the browser. `url` is pinned to the content CDN by parsing it (not by
+ * string-prefix matching) so a lookalike hostname, credentials embedded in
+ * the URL, or an upstream redirect to another host can't be used to turn
+ * this into an open proxy. Legacy plaintext objects (no CKE1 header) are sent
+ * through as-is — a browser can't fetch them directly either, since the CDN
+ * sends no Access-Control-Allow-Origin header, so this route is the only path
+ * for both plaintext and sealed objects.
+ *
+ * Binary streaming response: the {code,msg,data} envelope does not apply
+ * here, only to the 400/404 error paths.
+ */
+router.get('/content-pack/preview',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { url, packCode } = req.query;
+    if (typeof url !== 'string') return badRequest(res, 'url must be a valid absolute URL on the content CDN');
+    if (typeof packCode !== 'string') return badRequest(res, 'packCode must be a string');
+    const cloudfrontHost = process.env.CLOUDFRONT_DOMAIN || 'dsmzc13oafp54.cloudfront.net';
+
+    let parsed;
+    try {
+      parsed = new URL(url);
+    } catch {
+      return badRequest(res, 'url must be a valid absolute URL on the content CDN');
+    }
+    if (
+      parsed.protocol !== 'https:' ||
+      parsed.hostname !== cloudfrontHost ||
+      parsed.port !== '' ||
+      parsed.username ||
+      parsed.password
+    ) {
+      return badRequest(res, 'url must be on the content CDN');
+    }
+
+    // 'manual' so an upstream redirect (CloudFront misconfig or a crafted
+    // response) is never followed off-domain; it's simply treated as a
+    // failed fetch below.
+    const upstream = await fetch(parsed.href, { redirect: 'manual' });
+    if (!upstream.ok) return notFound(res, `upstream ${upstream.status}`);
+
+    // Reject on size before buffering: this route can be pointed at any
+    // object on the CDN, not just ones multer wrote, so there is no upload-
+    // time guarantee it is small. A missing/unparseable Content-Length is
+    // treated as a reject too, rather than guessing a length to read up to —
+    // CloudFront always sends it for these objects, so its absence means
+    // something is already off with the response.
+    const contentLength = Number(upstream.headers.get('content-length'));
+    if (!Number.isFinite(contentLength) || contentLength < 0) {
+      return badRequest(res, 'upstream did not report a usable Content-Length');
+    }
+    if (contentLength > PREVIEW_MAX_BYTES) {
+      return badRequest(res, 'object exceeds the preview size cap');
+    }
+
+    const bytes = Buffer.from(await upstream.arrayBuffer());
+    const header = parseHeader(bytes);
+    const contentType = parsed.pathname.toLowerCase().endsWith('.mp3') ? 'audio/mpeg' : 'application/octet-stream';
+
+    if (!header) {
+      // Legacy plaintext object: no key involved, send the bytes as fetched.
+      res.type(contentType);
+      res.set('Cache-Control', 'private, no-store');
+      res.set('X-Content-Type-Options', 'nosniff');
+      return res.send(bytes);
+    }
+    if (header.version !== 2) return badRequest(res, 'unsupported content encryption version');
+
+    const key = await contentKeys.getPackKey(packCode);
+    if (!key) return notFound(res, 'No content key for this pack');
+
+    res.type(contentType);
+    res.set('Cache-Control', 'private, no-store');
+    res.set('X-Content-Type-Options', 'nosniff');
+    pipeline(
+      Readable.from([bytes.subarray(HEADER_BYTES)]),
+      createUnsealStream(key, header.nonce),
+      res,
+      (err) => { if (err) logger.error('preview stream failed', { error: err.message }); }
+    );
   })
 );
 

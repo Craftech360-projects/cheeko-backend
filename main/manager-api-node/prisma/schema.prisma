@@ -101,6 +101,7 @@ model ai_agent_template {
   art_listen_url     String?
   art_think_url      String?
   art_talk_url       String?
+  art_content_key    Bytes?
 }
 
 model ai_device {
@@ -116,6 +117,7 @@ model ai_device {
   mode                       String?                      @default("conversation") @db.VarChar(50)
   device_mode                String?                      @default("auto") @db.VarChar(50)
   app_version                String?                      @db.VarChar(50)
+  content_secret             Bytes?
   sort                       Int?                         @default(0)
   creator                    BigInt?
   create_date                DateTime?                    @default(now()) @db.Timestamptz(6)
@@ -848,6 +850,7 @@ model rfid_content_pack {
   age_range         String?             @db.VarChar(50)
   thumbnail_url     String?             @db.VarChar(500)
   content_hash      String?             @db.VarChar(255)
+  content_key       Bytes?
   active            Boolean?            @default(true)
   creator           BigInt?
   create_date       DateTime?           @default(now()) @db.Timestamptz(6)
@@ -1565,6 +1568,24 @@ model joke_bank {
   @@index([language, level], map: "idx_joke_bank_lang_level")
 }
 
+/// The Wonder Question bank (M4). The server picks one per child per day from
+/// here, excluding everything in kid_content_seen for bank='wonder', so a child
+/// never hears a question twice until they have heard them all. No answer
+/// column: there is no right answer, that is the point of the mechanic.
+model wonder_bank {
+  id            BigInt   @id @default(autoincrement())
+  code          String   @unique @db.VarChar(50)
+  level         Int      @default(1)
+  category      String?  @db.VarChar(100)
+  language      String   @default("en") @db.VarChar(10)
+  question_text String
+  active        Boolean  @default(true)
+  create_date   DateTime @default(now()) @db.Timestamptz(6)
+  update_date   DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([language, level], map: "idx_wonder_bank_lang_level")
+}
+
 model why_bank {
   id            BigInt   @id @default(autoincrement())
   code          String   @unique @db.VarChar(50)
@@ -1722,6 +1743,9 @@ model kid_wonder_question {
   /// means the question was left open. Decides which recall the next session
   /// gets: a callback to their own idea, or the question asked again.
   answer_text String?
+  /// Which wonder_bank question this was. Null for the model-invented rows
+  /// from before the bank; those keep their text and stay recallable.
+  code        String?  @db.VarChar(50)
 
   @@index([kid_id, asked_at(sort: Desc)], map: "idx_kid_wonder_kid_time")
   @@index([device_mac, asked_at(sort: Desc)], map: "idx_kid_wonder_device_time")

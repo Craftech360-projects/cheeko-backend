@@ -254,22 +254,36 @@ export function buildServer({ api, canWrite, hasUserToken = false }) {
     }, (data) => api('/admin/rfid/content-pack', { method: 'PUT', body: data }));
 
     server.registerTool('upload_pack_file', {
-      description: 'Upload a local audio, image or .bin file to the content CDN and return its URL for use in update_content_pack items. PNG/JPEG are converted to the LVGL .bin the toy renders; only a pack thumbnail (contentPackId set) stays a real image, because the API converts item artwork server-side as well.',
+      description: 'Upload a local audio, image or .bin file to the content CDN and return its URL for use in update_content_pack items. PNG/JPEG are converted to the LVGL .bin the toy renders; only a pack thumbnail (contentPackId set) stays a real image, because the API converts item artwork server-side as well. Pass packCode for anything but a thumbnail: if SD content encryption is on, the API seals the file under that pack\'s key, and a missing packCode silently stores it in PLAINTEXT.',
       inputSchema: z.object({
         path: z.string().describe('Absolute path on this machine'),
         category: z.string().optional().describe('CDN subfolder, e.g. the pack code. Default "uploads"'),
+        packCode: z.string().optional().describe('Pack this file belongs to, e.g. STORY_JUNGLE_EN. Used to seal the file under the pack\'s encryption key when SD content encryption is enabled. Not needed for a thumbnail upload (contentPackId set) — thumbnails always stay plaintext by design.'),
         contentPackId: z.number().int().optional().describe('Set to use this file as that pack\'s thumbnail'),
         convert: z.boolean().optional().describe('Convert PNG/JPEG -> .bin here rather than letting the API do it. Turning it off does not keep a PNG a PNG: the API converts item artwork too.')
       })
-    }, async ({ path: filePath, category, contentPackId, convert }) => {
+    }, async ({ path: filePath, category, packCode, contentPackId, convert }) => {
       const plan = uploadPlan(filePath, { convert, contentPackId });
       let buf = await readFile(filePath);
       if (plan.shouldConvert) buf = await lvgl.toLvglRgb565Bin(buf);
       const form = new FormData();
       form.append('file', new Blob([buf], { type: plan.mime }), plan.filename);
       if (category) form.append('category', category);
+      if (packCode) form.append('packCode', packCode);
       if (contentPackId) form.append('contentPackId', String(contentPackId));
-      return api('/admin/rfid/content-pack/upload', { method: 'POST', form });
+      const result = await api('/admin/rfid/content-pack/upload', { method: 'POST', form });
+      // Mirrors the API's own condition for sealing (rfid.routes.js: isPackThumbnail
+      // || !packCode -> plaintext): a thumbnail upload is plaintext by design, but any
+      // other upload with no packCode risks landing unencrypted with only a server log
+      // to show for it. The MCP can't see whether encryption is enabled server-side, so
+      // this warns unconditionally rather than staying silent like the log line does.
+      if (!contentPackId && !packCode && !result.isError) {
+        result.content[0].text =
+          'WARNING: no packCode was sent. If SD content encryption is enabled on this ' +
+          'server, this file was just stored in PLAINTEXT (not sealed under any pack key). ' +
+          'Re-upload with packCode set to the file\'s pack code to seal it.\n\n' + result.content[0].text;
+      }
+      return result;
     });
   }
 

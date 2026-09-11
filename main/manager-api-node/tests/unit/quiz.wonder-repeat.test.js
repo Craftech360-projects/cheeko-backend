@@ -14,6 +14,10 @@ const mockCreate = jest.fn();
 const mockFindFirst = jest.fn();
 const mockUpdate = jest.fn();
 const mockFindMany = jest.fn();
+const mockBankFindMany = jest.fn();
+const mockSeenFindMany = jest.fn();
+const mockSeenUpdateMany = jest.fn();
+const mockMarkSeen = jest.fn();
 
 jest.mock('../../src/config/database', () => ({
   prisma: {
@@ -25,7 +29,13 @@ jest.mock('../../src/config/database', () => ({
       update: (...a) => mockUpdate(...a),
       findMany: (...a) => mockFindMany(...a),
     },
+    wonder_bank: { findMany: (...a) => mockBankFindMany(...a) },
+    kid_content_seen: { findMany: (...a) => mockSeenFindMany(...a), updateMany: (...a) => mockSeenUpdateMany(...a) },
   },
+}));
+
+jest.mock('../../src/services/contentbank.service', () => ({
+  markContentSeen: (...a) => mockMarkSeen(...a),
 }));
 
 jest.mock('../../src/utils/logger', () => ({
@@ -43,6 +53,10 @@ beforeEach(() => {
   mockFindFirst.mockResolvedValue(null);
   mockUpdate.mockResolvedValue({});
   mockFindMany.mockResolvedValue([]);
+  mockBankFindMany.mockResolvedValue([]);
+  mockSeenFindMany.mockResolvedValue([]);
+  mockSeenUpdateMany.mockResolvedValue({ count: 1 });
+  mockMarkSeen.mockResolvedValue(1);
 });
 
 // The dedupe read is now a list, so a test that used to seed "the previous one"
@@ -200,5 +214,99 @@ describe('recentWonderQuestions', () => {
 
     expect(result.duplicate).toBe(true);
     expect(mockCreate).not.toHaveBeenCalled();
+  });
+});
+
+// The server chooses the question. Every guard on the model's own choice was a
+// string comparison with a five-item memory, and on prod 2026-09-11 it re-asked
+// the food-house question from 2026-09-01 as "make a house" for "build a house".
+describe('pickWonderToAsk', () => {
+  const context = { kidId: 15n, deviceMac: MAC };
+  const BANK = [
+    { code: 'WQ-FOOD-01', question_text: 'If you could build a house out of any food, what would you use?', level: 1 },
+    { code: 'WQ-MAGIC-02', question_text: 'If you could have any superpower, which one would you pick?', level: 1 },
+    { code: 'WQ-SPACE-01', question_text: 'If you could visit the moon, what is the first thing you would do?', level: 1 },
+  ];
+
+  it('never serves a question this child has heard', async () => {
+    mockBankFindMany.mockResolvedValue(BANK);
+    mockSeenFindMany.mockResolvedValue([
+      { code: 'WQ-FOOD-01', seen_at: new Date('2026-09-01') },
+      { code: 'WQ-MAGIC-02', seen_at: new Date('2026-09-09') },
+    ]);
+
+    const pick = await quizService.pickWonderToAsk(context);
+
+    expect(pick).toEqual({ code: 'WQ-SPACE-01', question_text: BANK[2].question_text, second_pass: false, previous_answer: null });
+    expect(mockSeenFindMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ bank: 'wonder', kid_id: 15n }),
+    }));
+  });
+
+  it('is the same question all day, so a reconnect does not burn a second one', async () => {
+    mockBankFindMany.mockResolvedValue(BANK);
+
+    const a = await quizService.pickWonderToAsk(context);
+    const b = await quizService.pickWonderToAsk(context);
+
+    expect(a.code).toBe(b.code);
+  });
+
+  it('comes round to the question heard longest ago once the bank is exhausted, with what the child said', async () => {
+    mockBankFindMany.mockResolvedValue(BANK);
+    mockSeenFindMany.mockResolvedValue([
+      { code: 'WQ-FOOD-01', seen_at: new Date('2026-06-01') },
+      { code: 'WQ-MAGIC-02', seen_at: new Date('2026-07-01') },
+      { code: 'WQ-SPACE-01', seen_at: new Date('2026-08-01') },
+    ]);
+    mockFindFirst.mockResolvedValue({ answer_text: 'biryani' });
+
+    const pick = await quizService.pickWonderToAsk(context);
+
+    expect(pick).toEqual({ code: 'WQ-FOOD-01', question_text: BANK[0].question_text, second_pass: true, previous_answer: 'biryani' });
+  });
+
+  it('is null when the bank is empty, so the worker falls back rather than breaking', async () => {
+    expect(await quizService.pickWonderToAsk(context)).toBeNull();
+  });
+});
+
+describe('recordWonderQuestion with a bank code', () => {
+  it('stores the code, marks it seen, and skips the text dedupe', async () => {
+    // The text is on the history list: the old dedupe would refuse it.
+    history(BEE);
+    mockFindFirst.mockResolvedValue(null);
+
+    const result = await quizService.recordWonderQuestion(MAC, BEE, 'Bubbles', 'WQ-ANIMAL-04');
+
+    expect(result.duplicate).toBeUndefined();
+    expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ code: 'WQ-ANIMAL-04', answer_text: 'Bubbles' }),
+    }));
+    expect(mockMarkSeen).toHaveBeenCalledWith({ deviceMac: MAC, bank: 'wonder', codes: ['WQ-ANIMAL-04'] });
+  });
+
+  it('moves a re-asked question to the back of the second-pass queue', async () => {
+    // The ledger row already exists; markContentSeen leaves it alone, and the
+    // second pass sorts by seen_at - so the oldest would be served every day.
+    mockFindFirst.mockResolvedValue(null);
+
+    await quizService.recordWonderQuestion(MAC, BEE, 'Bubbles', 'WQ-ANIMAL-04');
+
+    expect(mockSeenUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ bank: 'wonder', code: 'WQ-ANIMAL-04' }),
+      data: { seen_at: expect.any(Date) },
+    }));
+  });
+
+  it('reported twice in one day is one row, and the answer can arrive on the second report', async () => {
+    mockFindFirst.mockResolvedValue({ id: 9n, answer_text: null });
+
+    const result = await quizService.recordWonderQuestion(MAC, BEE, 'Bubbles', 'WQ-ANIMAL-04');
+
+    expect(result.duplicate).toBe(true);
+    expect(mockCreate).not.toHaveBeenCalled();
+    expect(mockUpdate).toHaveBeenCalledWith({ where: { id: 9n }, data: { answer_text: 'Bubbles' } });
+    expect(mockMarkSeen).not.toHaveBeenCalled();
   });
 });

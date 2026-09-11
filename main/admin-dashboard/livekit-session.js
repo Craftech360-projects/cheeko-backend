@@ -100,17 +100,17 @@ async function fetchChildProfile(managerApiUrl, managerSecret, mac) {
 /**
  * Create a room, dispatch the agent into it, and return a browser join token.
  */
-async function startSession({ livekit, managerApiUrl, managerSecret, mac, characterName }) {
+async function startSession({ livekit, managerApiUrl, managerSecret, mac, characterName, agentName: agentOverride = null }) {
   const roomService = new RoomServiceClient(livekit.url, livekit.apiKey, livekit.apiSecret);
   const dispatchClient = new AgentDispatchClient(livekit.url, livekit.apiKey, livekit.apiSecret);
 
   const [character, childProfile] = await Promise.all([
-    resolveCharacter(managerApiUrl, mac, characterName),
+    agentOverride ? null : resolveCharacter(managerApiUrl, mac, characterName), // override skips the manager lookup
     fetchChildProfile(managerApiUrl, managerSecret, mac),
   ]);
 
   const roomName = roomNameFor(mac);
-  const agentName = character?.runtimeAgentName || DEFAULT_RUNTIME_AGENT;
+  const agentName = agentOverride || character?.runtimeAgentName || DEFAULT_RUNTIME_AGENT;
 
   await roomService.createRoom({ name: roomName, emptyTimeout: 300, maxParticipants: 5 });
 

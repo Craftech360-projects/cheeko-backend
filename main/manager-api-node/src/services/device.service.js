@@ -7,6 +7,7 @@
 const { prisma } = require('../config/database');
 const logger = require('../utils/logger');
 const { generateDeviceCode, normalizeMacAddress, ownerKeyForDevice } = require('../utils/helpers');
+const contentKeys = require('./contentKeys.service');
 // Binding fails for ordinary user reasons — a mistyped code, an expired one, a toy
 // that belongs to someone else. Those were plain Errors, so the route answered 500,
 // and the app both mis-reported them and retried the whole create-then-bind flow,
@@ -228,6 +229,9 @@ const clearUnattributedDeviceRows = async (tx, macAddress) => {
   await tx.kid_character_state.deleteMany({ where: answerWhere });
   await tx.kid_session_progress.deleteMany({ where: answerWhere });
   await tx.kid_content_seen.deleteMany({ where: answerWhere });
+  // The Wonder Question log: the callback is the most personal line the toy
+  // says, and it must not greet the next child with the last one's answer.
+  await tx.kid_wonder_question.deleteMany({ where: answerWhere });
 
   const macKey = ownerKeyForDevice({ mac_address: macAddress });
   for (const { model } of OWNER_KEYED_STORES) {
@@ -255,6 +259,7 @@ const adoptUnattributedRows = async (tx, macAddress, kidId) => {
   await tx.kid_character_state.updateMany({ where: answerWhere, data: { kid_id: BigInt(kidId) } });
   await tx.kid_session_progress.updateMany({ where: answerWhere, data: { kid_id: BigInt(kidId) } });
   await tx.kid_content_seen.updateMany({ where: answerWhere, data: { kid_id: BigInt(kidId) } });
+  await tx.kid_wonder_question.updateMany({ where: answerWhere, data: { kid_id: BigInt(kidId) } });
 
   const fromKey = ownerKeyForDevice({ mac_address: macAddress });
   const toKey = `kid:${BigInt(kidId)}`;
@@ -893,6 +898,17 @@ const checkOtaVersion = async (mac, clientIdOrVersion, deviceReportOrBoard) => {
       version: clientIdOrVersion || null,
       board: deviceReportOrBoard || null,
     };
+  }
+
+  // Spec §6: the toy registers its content secret on the OTA call it already
+  // makes. Best effort and never in the response: a bad value is the toy's
+  // problem to fix, not a reason to refuse an OTA answer.
+  if (deviceReport?.contentSecret) {
+    try {
+      await contentKeys.registerDeviceSecret(normalizedMac, deviceReport.contentSecret);
+    } catch (err) {
+      logger.warn(`[OTA] content_secret rejected for ${normalizedMac}: ${err.message}`);
+    }
   }
 
   // Extract device info from report (Spring Boot DeviceReportReqDTO format)

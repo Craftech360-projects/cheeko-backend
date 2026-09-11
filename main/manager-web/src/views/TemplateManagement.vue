@@ -170,6 +170,11 @@
               </div>
             </el-form-item>
           </el-col>
+          <el-col :span="12">
+            <el-form-item label="Agent Code" prop="agentCode">
+              <el-input v-model="form.agentCode" placeholder="Optional, no numbers" maxlength="100" />
+            </el-form-item>
+          </el-col>
         </el-row>
 
         <el-form-item label="System Prompt" prop="systemPrompt">
@@ -350,6 +355,10 @@ export default {
         ],
         langCode: [
           { required: true, message: "Please select language code", trigger: "change" }
+        ],
+        // Same rule the API enforces on create (validation.js agentTemplate).
+        agentCode: [
+          { pattern: /^[^0-9]*$/, message: 'Agent code must not contain numbers', trigger: 'blur' }
         ],
         // Optional, but wrong is not allowed: the toy's SD card cannot store a
         // longer or upper-case name and fails silently when given one, so it is
