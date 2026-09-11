@@ -4296,6 +4296,13 @@ const publishSoundQuizManifest = async (packId) => {
 };
 
 const createContentPack = async (data, userId) => {
+  // A game pack's code becomes the SD folder. Checking it here, before the
+  // insert, stops the dashboard's create-on-first-upload path from leaving an
+  // orphan row behind with a code the toy could never hold.
+  if ((data.contentType || data.content_type) === 'sound_quiz' && !isValidAppId(data.packCode)) {
+    throw new ApiError(`Pack code "${data.packCode}" must be 1-8 chars of a-z 0-9 _ - to be a game pack`, 400);
+  }
+
   // Check for duplicate packCode
   const existing = await getContentPackByCode(data.packCode);
   if (existing) {
@@ -4422,6 +4429,21 @@ const updateContentPack = async (data, userId) => {
       select: { content_hash: true, ...Object.fromEntries(VERSIONED_PACK_FIELDS.map(f => [f, true])) }
     })
     : null;
+
+  // Same check as createContentPack, run before the write: a save that flips
+  // an existing pack to sound_quiz (or renames its code) must not commit a
+  // code the toy could never hold as an SD folder.
+  if (updateData.content_type !== undefined || updateData.pack_code !== undefined) {
+    const current = await prisma.rfid_content_pack.findFirst({
+      where: { id: BigInt(data.id) },
+      select: { content_type: true, pack_code: true }
+    });
+    const type = updateData.content_type ?? current?.content_type;
+    const code = updateData.pack_code ?? current?.pack_code;
+    if (type === 'sound_quiz' && !isValidAppId(code)) {
+      throw new ApiError(`Pack code "${code}" must be 1-8 chars of a-z 0-9 _ - to be a game pack`, 400);
+    }
+  }
 
   let updated;
   try {

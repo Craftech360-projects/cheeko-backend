@@ -95,6 +95,7 @@ const buildSoundQuizPack = (pack, items, manifestUrl) => {
     const resolved = r.distractors.map((d) => byLabel.get(norm(d)));
     const missing = r.distractors.filter((_, i) => !resolved[i] || resolved[i] === r);
     if (missing.length) { warnings.push(`${label}: unknown wrong answer(s) ${missing.join(', ')}`); continue; }
+    if (resolved[0] === resolved[1]) { warnings.push(`${label}: wrong answers must differ`); continue; }
     kept.push({ ...r, resolved });
     resolved.forEach((d) => referenced.add(d));
   }

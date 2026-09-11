@@ -3770,7 +3770,7 @@ router.get('/content-pack/code/:packCode',
  *                 enum: [thumbnail, game_asset]
  *                 description: >
  *                   Send `thumbnail` for a pack's cover art so it is stored as a web
- *                   image. Anything else is item artwork and is converted to .bin.
+ *                   image. Anything else, except `game_asset`, is item artwork and is converted to .bin.
  *                   `game_asset` stores the file as-is (no .bin conversion) and
  *                   never seals it — for sound-quiz game packs.
  *               contentPackId:

@@ -166,4 +166,15 @@ describe('buildSoundQuizPack', () => {
     const { manifest } = buildSoundQuizPack({ ...PACK, version: null }, ITEMS, MANIFEST_URL);
     expect(manifest.version).toBe(1);
   });
+
+  it('drops a round whose two wrong answers are the same sound', () => {
+    const items = [
+      row(1, 'Doorbell', 'DING-DONG?', 'Phone,Phone'),
+      row(2, 'Phone', 'RING?', 'Doorbell,Clock'),
+      row(3, 'Clock', 'TICK-TOCK?', 'Phone,Doorbell'),
+    ];
+    const { manifest, warnings } = buildSoundQuizPack(PACK, items, MANIFEST_URL);
+    expect(manifest.rounds.map(r => r.prompt)).toEqual(['RING?', 'TICK-TOCK?']);
+    expect(warnings).toEqual([expect.stringMatching(/Doorbell: wrong answers must differ/)]);
+  });
 });

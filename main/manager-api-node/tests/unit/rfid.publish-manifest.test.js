@@ -68,4 +68,17 @@ describe('publishSoundQuizManifest', () => {
     mockUpload.uploadGamePackManifest.mockRejectedValueOnce(new Error('s3 down'));
     await expect(rfidService.updateContentPack({ id: 9, name: 'Renamed' }, 1)).rejects.toThrow(/manifest/i);
   });
+
+  it('createContentPack rejects an invalid game pack code before inserting', async () => {
+    mockPrisma.rfid_content_pack.findFirst.mockResolvedValue(null);
+    await expect(rfidService.createContentPack({ packCode: 'Hometown', name: 'X', contentType: 'sound_quiz' }, 1))
+      .rejects.toThrow(/1-8 chars/);
+    expect(mockPrisma.rfid_content_pack.create).not.toHaveBeenCalled();
+  });
+
+  it('updateContentPack rejects switching a badly coded pack to sound_quiz before writing', async () => {
+    mockPrisma.rfid_content_pack.findFirst.mockResolvedValue({ ...PACK, pack_code: 'AroundTheHouse', content_type: 'story_pack' });
+    await expect(rfidService.updateContentPack({ id: 9, contentType: 'sound_quiz' }, 1)).rejects.toThrow(/1-8 chars/);
+    expect(mockPrisma.rfid_content_pack.updateMany).not.toHaveBeenCalled();
+  });
 });

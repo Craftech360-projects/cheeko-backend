@@ -1602,10 +1602,11 @@ export default {
               }
               const bad = this.form.items.findIndex(it =>
                 !String(it.title || '').trim() || !String(it.text || '').trim() ||
-                !it.audioUrl || !it.imageUrl || this.distractorList(it).length !== 2
+                !it.audioUrl || !it.imageUrl || this.distractorList(it).length !== 2 ||
+                this.distractorSlots(it)[0] === this.distractorSlots(it)[1]
               );
               if (bad !== -1) {
-                this.$message.warning(`Round ${bad + 1} needs a Sound, a Prompt, a sound file, an icon and two wrong answers.`);
+                this.$message.warning(`Round ${bad + 1} needs a Sound, a Prompt, a sound file, an icon and two different wrong answers.`);
                 return;
               }
             }

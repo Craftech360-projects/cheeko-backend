@@ -22,6 +22,7 @@ one adds `session_id`:
 - `manifest.jsn` is already in the `sound_quiz` shape the integration-branch
   parser accepts (`rounds[].sound`, `options[].{label,icon}`, `correct`). Its
   `version` equals the message `version`. Download it last as the completion marker.
+  `assets[]` order is not a download order: `manifest.jsn` is listed first but must be written last.
 - `prompts` is informational (Sound | Prompt | File); the manifest is authoritative.
 - The message is sent on **every** tap. The toy sends no local version for app
   cards, so gate re-downloads locally: skip when `apps/<app_id>/manifest.jsn`
