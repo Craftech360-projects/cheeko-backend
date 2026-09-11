@@ -75,6 +75,8 @@ function gSetRunning(on) {
   G('gptMute').disabled = !on;
   G('gptAgent').disabled = on;
   G('gptMac').disabled = on;
+  G('gptVoice').disabled = on;
+  G('gptAccent').disabled = on;
   G('gptState').textContent = on ? 'live' : 'idle';
   G('gptState').className = 'pill ' + (on ? 'live' : '');
 }
@@ -95,11 +97,15 @@ async function gptStart() {
   const res = await fetch('/lk/start', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-    body: JSON.stringify({ agentName: G('gptAgent').value.trim(), mac: G('gptMac').value.trim() }),
+    body: JSON.stringify({
+      agentName: G('gptAgent').value.trim(),
+      mac: G('gptMac').value.trim(),
+      gptlive: { voice: G('gptVoice').value, accent: G('gptAccent').value },
+    }),
   });
   gSession = await res.json();
   if (!res.ok) throw new Error(gSession.msg || 'HTTP ' + res.status);
-  glog(`Room ${gSession.roomName} -> agent "${gSession.agentName}"`, 'ok');
+  glog(`Room ${gSession.roomName} -> agent "${gSession.agentName}" (voice ${G('gptVoice').value}, accent ${G('gptAccent').value})`, 'ok');
 
   const onAgentJoined = (identity) => {
     gT.join = performance.now() - gT.start;

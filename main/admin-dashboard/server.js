@@ -145,6 +145,7 @@ app.post('/lk/start', requireAdmin, async (req, res) => {
       mac: (req.body?.mac || '00:16:3e:ac:b5:38').trim(),
       characterName: req.body?.characterName || null,
       agentName: req.body?.agentName || null, // GPT-Live tab: dispatch a worker directly
+      gptlive: req.body?.gptlive || null,      // GPT-Live tab: { voice, accent } for the worker
     });
     res.json(out);
   } catch (e) {

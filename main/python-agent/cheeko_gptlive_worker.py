@@ -11,6 +11,7 @@ Run:
   python cheeko_gptlive_worker.py start     # production (pm2 on the dev box)
 """
 
+import json
 import logging
 import os
 from datetime import datetime
@@ -56,6 +57,18 @@ Answer greetings, small talk, jokes, and simple questions yourself.
 </delegation>
 """
 
+VOICES = ("aster", "beacon", "cinder", "marin", "stone", "vesper")
+ACCENT_RULES = {
+    "default": "",
+    "indian": """
+
+<accent>
+Speak Indian English: an Indian accent with Indian intonation and rhythm, and the everyday
+phrasing a child in India hears at home and at school. Keep it natural and warm, never a caricature.
+</accent>
+""",
+}
+
 BACKEND_INSTRUCTIONS = (
     "You handle work delegated by a voice model talking to a child aged 3 to 16. "
     "Use tools when current information is required. Reply with one or two short, "
@@ -70,13 +83,13 @@ def load_voice_prompt() -> str:
 
 
 class CheekoGPTLive(Agent):
-    def __init__(self) -> None:
+    def __init__(self, voice: str = "marin", accent: str = "default") -> None:
         super().__init__(
-            instructions=load_voice_prompt(),
+            instructions=load_voice_prompt() + ACCENT_RULES[accent],
             # runs on OpenAI's side, invoked by the backend model
             tools=[openai.tools.WebSearch()],
             llm=GPTLiveModel(
-                voice=os.getenv("GPTLIVE_VOICE", "marin"),
+                voice=voice,
                 responses_options={
                     "model": os.getenv("GPTLIVE_BACKEND_MODEL", "gpt-5.6-luna"),
                     "instructions": BACKEND_INSTRUCTIONS,
@@ -111,6 +124,14 @@ def prewarm(proc: JobProcess) -> None:
 
 async def entrypoint(ctx: JobContext) -> None:
     ctx.log_context_fields = {"room": ctx.room.name}
+    # Per-session voice and accent, chosen in the dashboard and carried in the dispatch metadata.
+    try:
+        opts = json.loads(ctx.job.metadata or "{}").get("gptlive") or {}
+    except ValueError:
+        opts = {}
+    voice = opts.get("voice") if opts.get("voice") in VOICES else os.getenv("GPTLIVE_VOICE", "marin")
+    accent = opts.get("accent") if opts.get("accent") in ACCENT_RULES else "default"
+    logger.info("session options: voice=%s accent=%s", voice, accent)
     session = AgentSession(vad=ctx.proc.userdata["vad"])
 
     @session.on("metrics_collected")
@@ -146,7 +167,7 @@ async def entrypoint(ctx: JobContext) -> None:
 
     await session.start(
         room=ctx.room,
-        agent=CheekoGPTLive(),
+        agent=CheekoGPTLive(voice, accent),
         room_input_options=RoomInputOptions(audio_sample_rate=16000, audio_num_channels=1),
     )
     logger.info("%s is LIVE in %s", AGENT_NAME, ctx.room.name)

@@ -100,7 +100,7 @@ async function fetchChildProfile(managerApiUrl, managerSecret, mac) {
 /**
  * Create a room, dispatch the agent into it, and return a browser join token.
  */
-async function startSession({ livekit, managerApiUrl, managerSecret, mac, characterName, agentName: agentOverride = null }) {
+async function startSession({ livekit, managerApiUrl, managerSecret, mac, characterName, agentName: agentOverride = null, gptlive = null }) {
   const roomService = new RoomServiceClient(livekit.url, livekit.apiKey, livekit.apiSecret);
   const dispatchClient = new AgentDispatchClient(livekit.url, livekit.apiKey, livekit.apiSecret);
 
@@ -114,7 +114,7 @@ async function startSession({ livekit, managerApiUrl, managerSecret, mac, charac
 
   await roomService.createRoom({ name: roomName, emptyTimeout: 300, maxParticipants: 5 });
 
-  const metadata = buildDispatchMetadata({
+  let metadata = buildDispatchMetadata({
     macAddress: mac,
     deviceId: mac,
     character: character?.characterName || characterName || 'Cheeko',
@@ -125,6 +125,9 @@ async function startSession({ livekit, managerApiUrl, managerSecret, mac, charac
     childProfile,
     sessionConfig: {},
   });
+
+  // GPT-Live tab extras (voice, accent) ride alongside the gateway-shaped metadata.
+  if (gptlive) metadata = JSON.stringify({ ...JSON.parse(metadata), gptlive });
 
   // Both, like the gateway: the worker reads job metadata, some paths read room
   // metadata, and they must agree.

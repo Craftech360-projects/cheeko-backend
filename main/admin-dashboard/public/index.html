@@ -199,6 +199,30 @@
           <label for="gptMac">Device MAC</label>
           <input id="gptMac" value="68:EE:8F:60:BA:AC" />
         </div>
+        <div class="field">
+          <label for="gptVoice">Voice</label>
+          <div class="select-wrap">
+            <select id="gptVoice">
+              <option value="marin" selected>marin (default)</option>
+              <option value="aster">aster</option>
+              <option value="beacon">beacon</option>
+              <option value="cinder">cinder</option>
+              <option value="stone">stone</option>
+              <option value="vesper">vesper</option>
+            </select>
+            <svg class="select-arrow" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m6 9 6 6 6-6"/></svg>
+          </div>
+        </div>
+        <div class="field">
+          <label for="gptAccent">Accent</label>
+          <div class="select-wrap">
+            <select id="gptAccent">
+              <option value="indian" selected>Indian English</option>
+              <option value="default">Model default</option>
+            </select>
+            <svg class="select-arrow" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m6 9 6 6 6-6"/></svg>
+          </div>
+        </div>
         <button id="gptStart" class="btn">▶ Start</button>
         <button id="gptStop" class="btn ghost danger" hidden>■ Stop</button>
         <span id="gptState" class="pill">idle</span>
