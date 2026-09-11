@@ -126,13 +126,13 @@
         <!-- ========== FLAT MODE (existing) ========== -->
         <div class="items-section" v-if="!storyMode">
            <div class="items-header">
-              <span class="items-title">Pack Items (Max {{ MAX_TRACKS }})</span>
+              <span class="items-title">Pack Items (Max {{ maxItems }})</span>
               <div class="items-header-actions">
                 <el-button
                   size="mini"
                   icon="el-icon-folder-opened"
                   :loading="importing"
-                  :disabled="importing || form.items.length >= MAX_TRACKS"
+                  :disabled="importing || isSoundQuiz || form.items.length >= maxItems"
                   @click="pickFolder">
                   {{ importing ? `Uploading ${importDone}/${importTotal}` : 'Import Folder' }}
                 </el-button>
@@ -141,7 +141,7 @@
                   class="replace-btn"
                   title="Replace all items with a folder"
                   aria-label="Replace all items with a folder"
-                  :disabled="importing || form.items.length === 0"
+                  :disabled="importing || isSoundQuiz || form.items.length === 0"
                   @click="pickFolder('replace')">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
@@ -160,7 +160,7 @@
                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
                   </svg>
                 </el-button>
-                <el-button size="mini" type="primary" icon="el-icon-plus" @click="addItem()" :disabled="importing || form.items.length >= MAX_TRACKS">Add Item</el-button>
+                <el-button size="mini" type="primary" icon="el-icon-plus" @click="addItem()" :disabled="importing || form.items.length >= maxItems">Add Item</el-button>
               </div>
            </div>
 
@@ -170,7 +170,7 @@
                 <button
                   type="button"
                   class="insert-here"
-                  :disabled="importing || form.items.length >= MAX_TRACKS"
+                  :disabled="importing || form.items.length >= maxItems"
                   @click="addItem(index)">
                   + Add item here
                 </button>
@@ -263,13 +263,13 @@
         <!-- ========== STORY MODE (grouped) ========== -->
         <div class="items-section" v-if="storyMode">
            <div class="items-header">
-              <span class="items-title">Stories (Max {{ MAX_TRACKS }} tracks each)</span>
+              <span class="items-title">Stories (Max {{ maxItems }} tracks each)</span>
               <div class="items-header-actions">
                 <el-button
                   size="mini"
                   icon="el-icon-folder-opened"
                   :loading="importing"
-                  :disabled="importing || !stories[selectedStory] || stories[selectedStory].items.length >= MAX_TRACKS"
+                  :disabled="importing || isSoundQuiz || !stories[selectedStory] || stories[selectedStory].items.length >= maxItems"
                   @click="pickFolder">
                   {{ importing ? `Uploading ${importDone}/${importTotal}` : 'Import Folder' }}
                 </el-button>
@@ -278,7 +278,7 @@
                   class="replace-btn"
                   title="Replace the selected story's tracks with a folder"
                   aria-label="Replace the selected story's tracks with a folder"
-                  :disabled="importing || !(stories[selectedStory] && stories[selectedStory].items.length)"
+                  :disabled="importing || isSoundQuiz || !(stories[selectedStory] && stories[selectedStory].items.length)"
                   @click="pickFolder('replace')">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
@@ -323,7 +323,7 @@
                         size="mini"
                         class="icon-btn"
                         aria-label="Upload a folder into this story"
-                        :disabled="importing || story.items.length >= MAX_TRACKS"
+                        :disabled="importing || isSoundQuiz || story.items.length >= maxItems"
                         @click="selectStory(sIndex); pickFolder()">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                           <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
@@ -337,7 +337,7 @@
                         size="mini"
                         class="icon-btn"
                         aria-label="Replace this story's tracks with a folder"
-                        :disabled="importing || story.items.length === 0"
+                        :disabled="importing || isSoundQuiz || story.items.length === 0"
                         @click="selectStory(sIndex); pickFolder('replace')">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                           <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
@@ -360,7 +360,7 @@
                       </el-button>
                     </span>
                   </el-tooltip>
-                  <el-button size="mini" type="primary" icon="el-icon-plus" @click="addStoryItem(sIndex)" :disabled="importing || story.items.length >= MAX_TRACKS" plain>Add Track</el-button>
+                  <el-button size="mini" type="primary" icon="el-icon-plus" @click="addStoryItem(sIndex)" :disabled="importing || story.items.length >= maxItems" plain>Add Track</el-button>
                   <el-button size="mini" type="danger" icon="el-icon-delete" @click="removeStory(sIndex)" plain circle></el-button>
                 </div>
               </div>
@@ -368,7 +368,7 @@
               <div class="story-items" :class="{ 'is-dragging': dragFrom !== null }">
                 <template v-for="(item, iIndex) in story.items">
                 <div :key="'insert-' + item._rowKey" class="insert-divider">
-                  <button type="button" class="insert-here" :disabled="importing || story.items.length >= MAX_TRACKS" @click="addStoryItem(sIndex, iIndex)">
+                  <button type="button" class="insert-here" :disabled="importing || story.items.length >= maxItems" @click="addStoryItem(sIndex, iIndex)">
                     + Add track here
                   </button>
                 </div>
@@ -616,8 +616,6 @@ export default {
   },
   computed: {
     CREATE_SENTINEL: () => CREATE_SENTINEL,
-    // The flat list, and each story in grouped mode, holds at most this many.
-    MAX_TRACKS: () => MAX_TRACKS,
 
     // Shipped types + every type already used by a saved pack + playlists
     // created from this dialog + whatever the form currently holds, so a
@@ -634,6 +632,12 @@ export default {
     // as-is, and the pack code becomes the SD folder (8.3).
     isSoundQuiz() {
       return this.normalizeContentType(this.form.contentType) === 'sound_quiz';
+    },
+
+    // A sound quiz is capped by the firmware's round limit (16), not the
+    // skills track limit.
+    maxItems() {
+      return this.isSoundQuiz ? 16 : MAX_TRACKS;
     },
 
     newPlaylistSlug() {
@@ -746,7 +750,7 @@ export default {
     },
     // `index` is the position to insert at; omitted, the item goes on the end.
     addItem(index = null) {
-        if (this.form.items.length >= MAX_TRACKS) return;
+        if (this.form.items.length >= this.maxItems) return;
         const item = {
             _rowKey: nextRowKey(),
             sequence: 0,
@@ -777,18 +781,24 @@ export default {
         this.resequence(this.form.items);
     },
     // ---- Sound quiz: wrong answers live in `description` as "A,B" ----
+    // Positional: slot 1 may be filled before slot 0, and clearing slot 0 must
+    // not slide slot 1 left, so empties are kept here and only dropped when
+    // validating.
+    distractorSlots(item) {
+      const slots = String(item.description || '').split(',').map(s => s.trim());
+      while (slots.length < 2) slots.push('');
+      return slots.slice(0, 2);
+    },
     distractorList(item) {
-      return String(item.description || '').split(',').map(s => s.trim()).filter(Boolean);
+      return this.distractorSlots(item).filter(Boolean);
     },
     distractorAt(item, idx) {
-      return this.distractorList(item)[idx] || '';
+      return this.distractorSlots(item)[idx] || '';
     },
     setDistractor(item, idx, value) {
-      const list = this.distractorList(item);
-      list[idx] = value || '';
-      // Keep both slots so slot 1 can be set before slot 0.
-      while (list.length < 2) list.push('');
-      this.$set(item, 'description', list.slice(0, 2).join(','));
+      const slots = this.distractorSlots(item);
+      slots[idx] = value || '';
+      this.$set(item, 'description', slots.join(','));
     },
     // Every other row's Sound name. A round cannot be its own wrong answer.
     distractorOptions(index) {
@@ -827,7 +837,7 @@ export default {
     // `iIndex` is the position to insert at; omitted, the track goes on the end.
     addStoryItem(sIndex, iIndex = null) {
       const items = this.stories[sIndex].items;
-      if (items.length >= MAX_TRACKS) return;
+      if (items.length >= this.maxItems) return;
       const track = {
         _rowKey: nextRowKey(), title: '', audioUrl: '', imageUrl: '', text: ''
       };
@@ -1204,6 +1214,7 @@ export default {
     // Set on every pick, so a cancelled picker cannot leave 'replace' behind.
     // `@click="pickFolder"` passes the click event, which reads as 'import'.
     pickFolder(action) {
+      if (this.isSoundQuiz) return;
       this.folderAction = action === 'replace' ? 'replace' : 'import';
       if (this.$refs.folderPicker) {
         this.$refs.folderPicker.click();
@@ -1686,6 +1697,15 @@ export default {
         this.importDone = 0;
         this.importTotal = 0;
         this.endRowDrag();
+      }
+    },
+    // Sound-quiz rounds are flat rows; a pack switched to that type while
+    // grouped would otherwise lock the disabled switch in the ON position and
+    // hide the editor.
+    isSoundQuiz(val) {
+      if (val && this.storyMode) {
+        this.storyMode = false;
+        this.selectedStory = null;
       }
     }
   }
