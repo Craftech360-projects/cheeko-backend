@@ -10,6 +10,7 @@ const deviceSettingsService = require('../services/deviceSettings.service');
 const deviceAnalyticsService = require('../services/deviceAnalytics.service');
 const uploadService = require('../services/upload.service');
 const customCardService = require('../services/customCard.service');
+const warrantyService = require('../services/warranty.service');
 const idempotencyService = require('../services/idempotency.service');
 const { success, badRequest } = require('../utils/response');
 const { ApiError } = require('../middleware/errorHandler');
@@ -44,6 +45,7 @@ const kidAvatarUpload = multer({
 // bytes decide in the service.
 const CUSTOM_CARD_MIMES = [
     'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav', 'audio/wave',
+    'audio/x-m4a', 'audio/mp4',
     'image/png', 'image/jpeg', 'image/jpg',
     'application/octet-stream',
 ];
@@ -55,7 +57,7 @@ const customCardUpload = multer({
         if (CUSTOM_CARD_MIMES.includes((file.mimetype || '').toLowerCase())) {
             cb(null, true);
         } else {
-            cb(new ApiError('Only MP3 or WAV recordings and PNG or JPEG pictures can be uploaded.', 400));
+            cb(new ApiError('Only MP3, WAV or M4A recordings and PNG or JPEG pictures can be uploaded.', 400));
         }
     },
 });
@@ -608,6 +610,19 @@ router.get('/devices', asyncHandler(async (req, res) => {
         ...result,
         list: result.list.map(formatMobileDevice),
     });
+}));
+
+// The warranty of every toy on this account, for the web onboarding page. Only
+// the caller's own devices, and only the coverage: see getWarrantiesForMacs for
+// why this returns less than the admin view of the same record.
+router.get('/devices/warranty', asyncHandler(async (req, res) => {
+    const { list } = await deviceService.listDevices(req.mobileUser.id, { page: 1, limit: 100 });
+    const warranties = await warrantyService.getWarrantiesForMacs(list.map(device => device.mac_address));
+    success(res, list.map((device, index) => ({
+        macAddress: device.mac_address,
+        deviceName: mobileDeviceDisplayName(device, index),
+        warranty: warranties[device.mac_address],
+    })));
 }));
 
 router.get('/devices/:mac/settings', asyncHandler(async (req, res) => {

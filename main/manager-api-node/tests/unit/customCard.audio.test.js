@@ -11,6 +11,8 @@
  */
 
 const { spawnSync } = require('child_process');
+const fs = require('fs');
+const path = require('path');
 
 // Conversion shells out to ffmpeg. The wiring tests below care about which bytes
 // and which numbers land on which item, not about encoding, so they run against
@@ -70,6 +72,15 @@ const wavUpload = (name = 'memo.wav', pad = 64) =>
     Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(4), Buffer.from('WAVE'), Buffer.alloc(pad)]),
     name
   );
+
+// A real recording in the shape the app's recorder writes: AAC-LC, mono,
+// 44.1 kHz, 128 kbps, two seconds, with the moov index *after* the audio.
+const M4A_FIXTURE = fs.readFileSync(path.join(__dirname, '../fixtures/recording.m4a'));
+// Spaces, and a dot before the extension — how the app names a recording.
+const RECORDED_NAME = 'Recording 2026-09-11 10.00.m4a';
+const ftypHeader = (brand, pad = 64) => Buffer.concat([
+  Buffer.from([0, 0, 0, 0x1c]), Buffer.from('ftyp'), Buffer.from(brand, 'ascii'), Buffer.alloc(pad)
+]);
 
 let rows = [];
 let writes = [];
@@ -141,6 +152,16 @@ describe('the bytes that reach S3', () => {
     expect(audioCall()[2]).toBe('recording.mp3');
     // The name the parent gave it is still what they see on the card.
     expect(lastWrite().items[0].title).toBe('grandma singing.wav');
+  });
+
+  it('stores an app recording as an MP3, keeping its name as the title', async () => {
+    await customCardService.addCustomCardContent(USER_ID, KID_ID, [asUpload(M4A_FIXTURE, RECORDED_NAME)], {});
+
+    expect(toDeviceMp3).toHaveBeenCalledWith(M4A_FIXTURE);
+    // The key is ours — a UUID plus `.mp3` — so the name's spaces never reach S3.
+    expect(audioCall()[2]).toBe('recording.mp3');
+    expect(audioCall()[3]).toBe('audio/mpeg');
+    expect(lastWrite().items[0].title).toBe(RECORDED_NAME);
   });
 
   it('converts every file in a batch before storing any of them', async () => {
@@ -256,10 +277,43 @@ describe('the input contract, which conversion does not relax', () => {
     expect(customCardService.validateAudioUpload(wavUpload())).toEqual({ ext: '.wav', mimeType: 'audio/wav' });
   });
 
+  it('accepts a recording made in the app, under every brand a phone writes', () => {
+    expect(customCardService.validateAudioUpload(asUpload(M4A_FIXTURE, RECORDED_NAME)))
+      .toEqual({ ext: '.m4a', mimeType: 'audio/mp4' });
+    for (const brand of ['M4A ', 'isom', 'mp42', 'mp41', 'iso2']) {
+      expect(customCardService.validateAudioUpload(asUpload(ftypHeader(brand), RECORDED_NAME)).ext).toBe('.m4a');
+    }
+  });
+
+  it('refuses an MPEG-4 file under a brand no recorder writes', () => {
+    // `qt  ` is a QuickTime movie: an ftyp box alone is not enough.
+    expect(() => customCardService.validateAudioUpload(asUpload(ftypHeader('qt  '), 'clip.m4a')))
+      .toThrow('That file does not look like a valid MP3, WAV or M4A recording.');
+  });
+
+  it('trusts the bytes, not the name, in both directions', () => {
+    expect(() => customCardService.validateAudioUpload(mp3Upload(RECORDED_NAME)))
+      .toThrow('The file contents do not match its .m4a extension.');
+    expect(() => customCardService.validateAudioUpload(asUpload(M4A_FIXTURE, 'song.mp3')))
+      .toThrow('The file contents do not match its .mp3 extension.');
+  });
+
+  it('names M4A when the extension is not one it takes', () => {
+    expect(() => customCardService.validateAudioUpload(asUpload(M4A_FIXTURE, 'memo.ogg')))
+      .toThrow('Only MP3, WAV and M4A recordings are supported.');
+  });
+
+  it('gives an oversized recording the size message, not a format one', () => {
+    const big = asUpload(ftypHeader('M4A ', 10 * 1024 * 1024), RECORDED_NAME);
+
+    expect(() => customCardService.validateAudioUpload(big))
+      .toThrow('That recording is larger than 10 MB. Please choose a shorter one.');
+  });
+
   it('still rejects anything that is neither, before spending an ffmpeg on it', async () => {
     await expect(customCardService.addCustomCardContent(
       USER_ID, KID_ID, [asUpload(Buffer.from('not audio at all'), 'x.mp3')], {}
-    )).rejects.toThrow('That file does not look like a valid MP3 or WAV recording.');
+    )).rejects.toThrow('That file does not look like a valid MP3, WAV or M4A recording.');
     expect(toDeviceMp3).not.toHaveBeenCalled();
   });
 
@@ -363,6 +417,26 @@ describeEncoder('toDeviceMp3, against real ffmpeg', () => {
     const { buffer } = await encode(source);
 
     expect(buffer.length).toBeLessThan(source.length / 5);
+  });
+
+  it('converts a phone recording whose index sits after the audio', async () => {
+    // Guard the fixture's layout, or regenerating it with +faststart would make
+    // this test pass vacuously. Off a pipe, this layout is undecodable.
+    const boxes = [];
+    for (let i = 0; i < M4A_FIXTURE.length; i += M4A_FIXTURE.readUInt32BE(i)) {
+      boxes.push(M4A_FIXTURE.toString('ascii', i + 4, i + 8));
+    }
+    expect(boxes.indexOf('moov')).toBeGreaterThan(boxes.indexOf('mdat'));
+
+    const { buffer, durationMs } = await encode(M4A_FIXTURE);
+    const out = probe(buffer);
+
+    expect(out.codec_name).toBe('mp3');
+    expect(Number(out.sample_rate)).toBe(TARGET_SAMPLE_RATE);
+    expect(out.channels).toBe(1);
+    expect(Number(out.bit_rate)).toBe(TARGET_BITRATE_KBPS * 1000);
+    expect(Math.abs(durationMs / 1000 - playedSeconds(buffer))).toBeLessThan(0.05);
+    expect(Math.abs(durationMs - 2000)).toBeLessThan(100);
   });
 
   it('reports a running time that matches the file it produced', async () => {

@@ -96,6 +96,57 @@ const getWarrantyByMac = async (mac) => {
 };
 
 /**
+ * What a parent may see of their own toys' warranties, for the web
+ * onboarding page. One query for the lot.
+ *
+ * Deliberately narrower than getWarrantyByMac: no firstUser, note, updatedBy
+ * or updateDate. A warranty survives an unbind and rebind, so firstUser can be
+ * a previous owner, whose name must not reach whoever owns the toy now; the
+ * note and editor are admin bookkeeping.
+ *
+ * Returns an object keyed by each MAC exactly as passed in, so the caller never
+ * has to agree with this module on normalisation.
+ */
+const getWarrantiesForMacs = async (macs = []) => {
+  const normalizedByInput = new Map();
+  macs.forEach((mac) => {
+    const normalized = normalizeMacAddress(mac);
+    if (normalized) normalizedByInput.set(mac, normalized);
+  });
+
+  const wanted = [...new Set(normalizedByInput.values())];
+  const rows = wanted.length
+    ? await prisma.device_warranty.findMany({ where: { mac_address: { in: wanted } } })
+    : [];
+  const rowByMac = new Map(rows.map(row => [row.mac_address, row]));
+
+  const now = Date.now();
+  return Object.fromEntries(macs.map((mac) => {
+    const row = rowByMac.get(normalizedByInput.get(mac));
+    if (!row) {
+      return [mac, {
+        registered: false,
+        status: 'not_registered',
+        warrantyStart: null,
+        warrantyEnd: null,
+        daysRemaining: null,
+        warrantyMonths: WARRANTY_MONTHS,
+      }];
+    }
+
+    const msLeft = new Date(row.warranty_end).getTime() - now;
+    return [mac, {
+      registered: true,
+      status: msLeft > 0 ? 'active' : 'expired',
+      warrantyStart: row.warranty_start,
+      warrantyEnd: row.warranty_end,
+      daysRemaining: msLeft > 0 ? Math.ceil(msLeft / DAY_MS) : 0,
+      warrantyMonths: WARRANTY_MONTHS,
+    }];
+  }));
+};
+
+/**
  * Admin correction. Creates the record when there is none, because a toy bound
  * before warranties were recorded has no other way to get one; such a record
  * has no activated_at. warrantyEnd defaults to start + 6 months.
@@ -133,6 +184,7 @@ module.exports = {
   addMonths,
   startWarrantyIfNew,
   getWarrantyByMac,
+  getWarrantiesForMacs,
   upsertWarranty,
   deleteWarranty,
 };

@@ -70,6 +70,10 @@ const CARD = `${BASE}/kids/${KID_ID}/custom-card`;
 
 const MP3 = Buffer.concat([Buffer.from('ID3'), Buffer.alloc(64)]);
 const PNG = Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), Buffer.alloc(64)]);
+// A real AAC-in-MP4 recording, and the part the app sends it as.
+const M4A = require('fs').readFileSync(require('path').join(__dirname, '../fixtures/recording.m4a'));
+const RECORDED = { filename: 'Recording 2026-09-11 10.00.m4a', contentType: 'audio/x-m4a' };
+const { toDeviceMp3 } = require('../../src/utils/audioTranscode');
 const RAW_FRAME = Buffer.alloc(RAW_FRAME_BYTES, 0x7e);
 const LVGL_FRAME = toDeviceFrame(Buffer.alloc(RAW_FRAME_BYTES, 0x3c));
 
@@ -232,6 +236,45 @@ describe('the multipart parts', () => {
     expect(res.status).toBe(200);
     expect(item().title).toBe('Bedtime story');
     expect(item().image_url).toBe(IMAGE_URL);
+  });
+
+  it('takes a recording made in the app, with the headers the app sends', async () => {
+    const res = await request(app)
+      .patch(`${CARD}/content/1`)
+      .set('If-Match', '"4"')
+      .set('Idempotency-Key', 'record-1')
+      .attach('audio', M4A, RECORDED);
+
+    expect(res.status).toBe(200);
+    expect(toDeviceMp3.mock.calls[0][0].equals(M4A)).toBe(true);
+    expect(mockUpload.uploadCustomCardAudio.mock.calls[0].slice(2, 4)).toEqual(['recording.mp3', 'audio/mpeg']);
+    expect(item().audio_url).toBe('https://cdn.test/customcard_kid42/audio-new.mp3');
+    expect(item().title).toBe('Bedtime story');
+    expect(res.headers.etag).toBe('"5"');
+  });
+
+  it('falls back to the recording\'s own name, spaces and dot intact, when the title is cleared', async () => {
+    const res = await request(app).patch(`${CARD}/content/1`).field('title', '').attach('audio', M4A, RECORDED);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.contentPack.items[0].title).toBe('Recording 2026-09-11 10.00.m4a');
+  });
+
+  it('still rejects a mislabelled recording by its bytes', async () => {
+    const res = await request(app).patch(`${CARD}/content/1`).attach('audio', MP3, RECORDED);
+
+    expect(res.status).toBe(400);
+    expect(res.body.msg).toBe('The file contents do not match its .m4a extension.');
+    expect(item().audio_url).toBe(AUDIO_URL);
+  });
+
+  it('answers an oversized recording with the size message, not the format one', async () => {
+    const res = await request(app)
+      .patch(`${CARD}/content/1`)
+      .attach('audio', Buffer.concat([M4A, Buffer.alloc(10 * 1024 * 1024)]), RECORDED);
+
+    expect(res.status).toBe(400);
+    expect(res.body.msg).toBe('That recording is larger than 10 MB. Please choose a shorter one.');
   });
 
   it('clears the picture to null, never an empty string', async () => {
