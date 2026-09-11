@@ -16,6 +16,7 @@ const mockUpdate = jest.fn();
 const mockFindMany = jest.fn();
 const mockBankFindMany = jest.fn();
 const mockSeenFindMany = jest.fn();
+const mockSeenUpdateMany = jest.fn();
 const mockMarkSeen = jest.fn();
 
 jest.mock('../../src/config/database', () => ({
@@ -29,7 +30,7 @@ jest.mock('../../src/config/database', () => ({
       findMany: (...a) => mockFindMany(...a),
     },
     wonder_bank: { findMany: (...a) => mockBankFindMany(...a) },
-    kid_content_seen: { findMany: (...a) => mockSeenFindMany(...a) },
+    kid_content_seen: { findMany: (...a) => mockSeenFindMany(...a), updateMany: (...a) => mockSeenUpdateMany(...a) },
   },
 }));
 
@@ -54,6 +55,7 @@ beforeEach(() => {
   mockFindMany.mockResolvedValue([]);
   mockBankFindMany.mockResolvedValue([]);
   mockSeenFindMany.mockResolvedValue([]);
+  mockSeenUpdateMany.mockResolvedValue({ count: 1 });
   mockMarkSeen.mockResolvedValue(1);
 });
 
@@ -282,6 +284,19 @@ describe('recordWonderQuestion with a bank code', () => {
       data: expect.objectContaining({ code: 'WQ-ANIMAL-04', answer_text: 'Bubbles' }),
     }));
     expect(mockMarkSeen).toHaveBeenCalledWith({ deviceMac: MAC, bank: 'wonder', codes: ['WQ-ANIMAL-04'] });
+  });
+
+  it('moves a re-asked question to the back of the second-pass queue', async () => {
+    // The ledger row already exists; markContentSeen leaves it alone, and the
+    // second pass sorts by seen_at - so the oldest would be served every day.
+    mockFindFirst.mockResolvedValue(null);
+
+    await quizService.recordWonderQuestion(MAC, BEE, 'Bubbles', 'WQ-ANIMAL-04');
+
+    expect(mockSeenUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ bank: 'wonder', code: 'WQ-ANIMAL-04' }),
+      data: { seen_at: expect.any(Date) },
+    }));
   });
 
   it('reported twice in one day is one row, and the answer can arrive on the second report', async () => {

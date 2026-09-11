@@ -584,6 +584,14 @@ const recordWonderQuestion = async (deviceMac, question, answer, code) => {
       select: { id: true, asked_at: true },
     });
     await markContentSeen({ deviceMac, bank: WONDER_BANK, codes: [bankCode] });
+    // markContentSeen is idempotent - a code already in the ledger keeps its
+    // original seen_at - and the second pass orders by seen_at, so without this
+    // a child who has heard the whole bank would get the SAME oldest question
+    // every day. Re-asking moves it to the back of the queue.
+    await prisma.kid_content_seen.updateMany({
+      where: { ...wonderScope(context), bank: WONDER_BANK, code: bankCode },
+      data: { seen_at: new Date() },
+    });
     return { id: String(row.id), question: text, code: bankCode, answered: answerText !== null, asked_at: row.asked_at };
   }
 
