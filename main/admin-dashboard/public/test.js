@@ -24,6 +24,15 @@ let audioCtx = null;
 let micAnalyser = null;
 let remoteAnalyser = null;
 
+// Join time, per-state durations and reply latency are computed by the same
+// tracker the GPT-Live tab uses (latency.js), so the numbers are comparable
+// across the two tabs even though this one's worker reports agent state over
+// a different transport — a `lk.agent.events` data stream instead of a
+// participant attribute — and the reply-latency clock still starts from PTT's
+// own turn-latency readout below, which measures something else (speech_end
+// -> first transcript, not last transcript -> speaking).
+const tLat = createLatencyTracker(tlog);
+
 // The ring runs whenever the tab is open — an empty box reads as broken, and
 // the idle animation is what shows the component is alive before a session.
 function startViz() {
@@ -201,8 +210,11 @@ function registerTextHandlers(r) {
       if (parsed?.segments?.length) out = parsed.segments.map((s) => s.text).join(' ').trim();
     } catch { /* plain text */ }
     const who = isAgent(info) ? 'cheeko' : 'kid';
-    // The child's own final transcript is what closes the latency window.
+    // The child's own final transcript is what closes the PTT turn-latency
+    // window (speech_end -> transcript); every kid chunk, interim or final,
+    // also feeds the shared reply-latency tracker (last transcript -> speaking).
     if (who === 'kid' && final) noteTurnLatency();
+    if (who === 'kid' && out) tLat.noteUserTranscript();
     turn(who, out, final);
   });
 
@@ -211,9 +223,11 @@ function registerTextHandlers(r) {
     try { event = JSON.parse(await reader.readAll()); } catch { return; }
     const type = event.type || event.data?.type;
     if (type === 'agent_state_changed' && event.data) {
-      const { old_state, new_state } = event.data;
+      const { new_state } = event.data;
       T('testState').textContent = new_state || 'live';
-      tlog(`agent: ${old_state} -> ${new_state}`);
+      // Timing (duration, reply latency) is computed from the tracker's own
+      // bookkeeping, not the worker-reported old_state — see latency.js.
+      if (new_state) tLat.noteStateChange(new_state);
       // Correction signal for the ring: the worker knows when it actually
       // started and stopped speaking. Never override an open turn — the
       // child's mic wins while they hold the floor.
@@ -309,6 +323,7 @@ async function startTest() {
   T('transcript').innerHTML = '';
   T('testLog').innerHTML = '';
   resetTurns();
+  tLat.reset();
 
   if (!window.isSecureContext) {
     tlog(`Microphone blocked: ${location.origin} is not a secure context.`, 'err');
@@ -368,7 +383,7 @@ async function startTest() {
   });
 
   room.on(LK.RoomEvent.ParticipantConnected, (p) => {
-    tlog(`Agent joined: ${p.identity}`, 'ok');
+    tLat.noteJoined(p.identity);
     T('testState').textContent = 'agent joined';
     sendGreetingTrigger();
   });
@@ -403,7 +418,7 @@ async function startTest() {
     // participants that were already there. Trigger the greeting for them too.
     if (room.remoteParticipants.size > 0) {
       const who = [...room.remoteParticipants.values()].map((p) => p.identity).join(', ');
-      tlog(`Agent already in room: ${who}`, 'ok');
+      tLat.noteJoined(who);
       T('testState').textContent = 'agent joined';
       await sendGreetingTrigger();
     } else {

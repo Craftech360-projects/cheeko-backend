@@ -16,11 +16,6 @@ let gLK = null;
 // GPT-Live, whose segments are not always closed with a final chunk.
 const gRows = new Map();
 
-// Timing, all client-side (performance.now()). GPT-Live reports no ttft, so
-// these are the numbers that matter for feel: how long after the child's
-// words the agent starts talking, and how long a backend delegation takes.
-const gT = { start: 0, lastUserText: 0, stateSince: 0, state: null, lastReply: null, lastDelegate: null, join: null };
-
 function glog(message, cls) {
   const line = document.createElement('div');
   line.className = 'logline' + (cls ? ' ' + cls : '');
@@ -29,7 +24,15 @@ function glog(message, cls) {
   G('gptLog').scrollTop = G('gptLog').scrollHeight;
 }
 
-const fmt = (ms) => (ms == null ? '—' : Math.round(ms) + ' ms');
+// Timing (join, agent state durations, reply latency) is computed by the
+// shared tracker in latency.js, so the numbers line up with the Test device
+// tab regardless of which worker (Python here, Go there) is behind the room.
+// GPT-Live reports no ttft, so these are the numbers that matter for feel:
+// how long after the child's words the agent starts talking, and how long a
+// backend delegation takes.
+const gLat = createLatencyTracker(glog);
+const gT = gLat.t;
+const fmt = gLat.fmt;
 function gMetrics() {
   G('gptMetrics').textContent = `join ${fmt(gT.join)} · reply ${fmt(gT.lastReply)} · delegate ${fmt(gT.lastDelegate)}`;
 }
@@ -50,22 +53,8 @@ function gTurn(segmentId, who, text, final) {
 }
 
 function gState(next) {
-  const now = performance.now();
-  const prev = gT.state;
-  const held = prev ? now - gT.stateSince : 0;
   G('gptState').textContent = next;
-  glog(`agent: ${prev || '—'} -> ${next}` + (prev ? ` (${prev} for ${fmt(held)})` : ''));
-  if (next === 'speaking' && gT.lastUserText) {
-    gT.lastReply = now - gT.lastUserText;            // last user transcript -> agent audio
-    gT.lastUserText = 0;
-    glog(`reply latency (last transcript -> speaking): ${fmt(gT.lastReply)}`, 'ok');
-  }
-  if (prev === 'thinking') {
-    gT.lastDelegate = held;                            // backend model + tool round trip
-    glog(`delegation took ${fmt(held)}`, 'ok');
-  }
-  gT.state = next;
-  gT.stateSince = now;
+  gLat.noteStateChange(next);
   gMetrics();
 }
 
@@ -85,7 +74,7 @@ async function gptStart() {
   G('gptTranscript').innerHTML = '';
   G('gptLog').innerHTML = '';
   gRows.clear();
-  Object.assign(gT, { start: performance.now(), lastUserText: 0, stateSince: 0, state: null, lastReply: null, lastDelegate: null, join: null });
+  gLat.reset();
   gMetrics();
 
   if (!window.isSecureContext) {
@@ -100,7 +89,8 @@ async function gptStart() {
     body: JSON.stringify({
       agentName: G('gptAgent').value.trim(),
       mac: G('gptMac').value.trim(),
-      gptlive: { voice: G('gptVoice').value, accent: G('gptAccent').value },
+      // rate: browser sessions run at 24 kHz; the Go worker reads this field.
+      gptlive: { voice: G('gptVoice').value, accent: G('gptAccent').value, rate: 24000 },
     }),
   });
   gSession = await res.json();
@@ -108,8 +98,7 @@ async function gptStart() {
   glog(`Room ${gSession.roomName} -> agent "${gSession.agentName}" (voice ${G('gptVoice').value}, accent ${G('gptAccent').value})`, 'ok');
 
   const onAgentJoined = (identity) => {
-    gT.join = performance.now() - gT.start;
-    glog(`Agent joined: ${identity} (${fmt(gT.join)} after Start)`, 'ok');
+    gLat.noteJoined(identity);
     G('gptState').textContent = 'agent joined';
     gMetrics();
   };
@@ -137,7 +126,7 @@ async function gptStart() {
     const final = String(attrs['lk.final']) === 'true';
     const text = (await reader.readAll() || '').trim();
     const who = String(info?.identity ?? '') === gRoom.localParticipant.identity ? 'kid' : 'cheeko';
-    if (who === 'kid' && text) gT.lastUserText = performance.now();
+    if (who === 'kid' && text) gLat.noteUserTranscript();
     gTurn(attrs['lk.segment_id'] || reader.info?.id, who, text, final);
   });
 
