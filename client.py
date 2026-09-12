@@ -25,7 +25,7 @@ import opuslib
 
 # --- Configuration ---
 
-SERVER_IP = os.getenv("TEST_SERVER_IP", "139.59.7.72")
+SERVER_IP = os.getenv("TEST_SERVER_IP", "64.227.170.31")
 OTA_PORT = 8002
 MQTT_BROKER_HOST = os.getenv("TEST_MQTT_BROKER_HOST", SERVER_IP)
 
@@ -604,8 +604,13 @@ class TestClient:
                 logger.info("[PLAY] %s OK (%d bytes)", path, len(data))
                 played += 1
 
-        if key is None:
+        if key is None and failed == 0:
             key_status = "none (plaintext, no key needed)"
+        elif key is None:
+            # Sealed pack, no key: skill_key() already said why (unset or
+            # malformed CONTENT_WRAP_SECRET, or a bad enc block). Do not call
+            # this "plaintext" -- that reading sent someone hunting the wrong bug.
+            key_status = "NONE, but the pack is sealed -- see the [PLAY] error above"
         elif failed == 0:
             key_status = "unwrapped, content decoded"
         elif played == 0:
