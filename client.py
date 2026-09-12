@@ -40,7 +40,7 @@ MQTT_BROKER_PORT = int(os.getenv("TEST_MQTT_BROKER_PORT", "1883"))
 MANAGER_API_BASE = os.getenv("TEST_MANAGER_API_BASE", "http://139.59.7.72:8001/toy")
 MQTT_SIGNATURE_KEY = os.getenv("TEST_MQTT_SIGNATURE_KEY", "test-signature-key-12345")
 # Content encryption v1: one wrap secret for the whole fleet. On a real toy this
-# is a firmware build constant (CHEEKO_CONTENT_WRAP_SECRET_HEX); here it is an
+# is a firmware build constant (CONFIG_CHEEKO_CONTENT_WRAP_SECRET_HEX); here it is an
 # env var. It must be byte-identical to the server's CONTENT_WRAP_SECRET or every
 # sealed file decodes to noise, with nothing to say why -- CTR has no integrity
 # check. There is no per-device secret and no registration in v1.

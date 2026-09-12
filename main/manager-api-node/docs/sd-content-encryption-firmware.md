@@ -35,7 +35,7 @@ the folder to a laptop and sharing it.
 
 The firmware work is:
 
-1. Hold the 32-byte fleet wrap secret as a build constant, `CHEEKO_CONTENT_WRAP_SECRET_HEX`, with `#error` in release builds if it is missing.
+1. Hold the 32-byte fleet wrap secret as a build constant, `CONFIG_CHEEKO_CONTENT_WRAP_SECRET_HEX`, with `#error` in release builds if it is missing.
 2. Read an `encryption` block from `card_content`, and store the wrapped key next to the pack on the SD card.
 3. At playback, unwrap the pack key using that constant, then decrypt MP3 and LVGL `.bin` files as they are read.
 4. Fail loudly and safely when a key is wrong or missing.
@@ -112,7 +112,7 @@ offset  size  field
 
 | Name | Size | Where it lives |
 |---|---|---|
-| wrap secret | 32 bytes | Firmware build constant `CHEEKO_CONTENT_WRAP_SECRET_HEX`, and `CONTENT_WRAP_SECRET` in the server env. Never logged, never on SD, never on the wire. |
+| wrap secret | 32 bytes | Firmware build constant `CONFIG_CHEEKO_CONTENT_WRAP_SECRET_HEX`, and `CONTENT_WRAP_SECRET` in the server env. Never logged, never on SD, never on the wire. |
 | K, pack key | 16 bytes | Server only. On the toy it exists only in RAM during playback, then is wiped. |
 | wrapped K | 16 bytes | `manifest.jsn` on SD, as 32 hex characters |
 | nonce_w | 8 bytes | `manifest.jsn` on SD, as 16 hex characters |
@@ -506,7 +506,7 @@ Do not use the `tests/host/cjson_stub`: its `cJSON_Parse` always returns NULL. K
 
 > **Skip this task.** It is the version 2 design, kept for whenever version 2 is
 > revisited. Version 1 has no device secret: use the build constant
-> `CHEEKO_CONTENT_WRAP_SECRET_HEX` wherever the text below says S, and create no NVS keys
+> `CONFIG_CHEEKO_CONTENT_WRAP_SECRET_HEX` wherever the text below says S, and create no NVS keys
 > and no `secret.fp`.
 
 **Files:** create `main/boards/common/device_secret.h` and `device_secret.cc`, and add them to `SOURCES`.

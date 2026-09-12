@@ -56,7 +56,7 @@ text{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
 <rect class="sec" x="30" y="300" width="900" height="130" rx="6"/>
 <text class="h" x="44" y="322">2. The wrap secret: 32 bytes, one for the whole fleet, generated once</text>
 <g class="key"><rect x="50" y="350" width="230" height="60" rx="4"/><text class="t" x="165" y="370" text-anchor="middle">Wrap secret (32 bytes)</text><text class="s" x="165" y="386" text-anchor="middle">generated once, never rotated</text><text class="s" x="165" y="400" text-anchor="middle">kept where the master key is kept</text></g>
-<g class="toy"><rect x="330" y="350" width="230" height="60" rx="4"/><text class="t" x="445" y="370" text-anchor="middle">Firmware build constant</text><text class="m" x="445" y="387" text-anchor="middle" fill="#085041">CHEEKO_CONTENT_WRAP_SECRET_HEX</text><text class="s" x="445" y="401" text-anchor="middle">no registration, no first contact</text></g>
+<g class="toy"><rect x="330" y="350" width="230" height="60" rx="4"/><text class="t" x="445" y="370" text-anchor="middle">Firmware build constant</text><text class="m" x="445" y="387" text-anchor="middle" fill="#085041">CONFIG_CHEEKO_CONTENT_WRAP_SECRET_HEX</text><text class="s" x="445" y="401" text-anchor="middle">no registration, no first contact</text></g>
 <g class="srv"><rect x="610" y="350" width="230" height="60" rx="4"/><text class="t" x="725" y="370" text-anchor="middle">Server environment</text><text class="m" x="725" y="387" text-anchor="middle" fill="#3C3489">CONTENT_WRAP_SECRET</text><text class="s" x="725" y="401" text-anchor="middle">64 hex chars, same 32 bytes</text></g>
 <line class="arr" x1="280" y1="374" x2="322" y2="374"/>
 <line class="arr" x1="280" y1="392" x2="602" y2="392"/>
