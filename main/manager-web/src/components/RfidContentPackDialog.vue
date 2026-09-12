@@ -1549,7 +1549,11 @@ export default {
     loadBinPreview(url) {
       // Marked in flight first, so the re-renders meanwhile do not queue it again.
       this.$set(this.binPreviews, url, null);
-      loadLvglBinAsDataUrl(url).then(dataUrl => {
+      // packCode is what makes this the DECRYPT-aware route. Without it a sealed
+      // item .bin comes back as CKE1 bytes, the LVGL decoder rejects the magic,
+      // and the cell silently reads "No preview". Empty on a not-yet-saved pack,
+      // which is correct: there is nothing sealed to unseal yet.
+      loadLvglBinAsDataUrl(url, this.form.packCode).then(dataUrl => {
         if (dataUrl) this.$set(this.binPreviews, url, dataUrl);
         else this.markPreviewFailed(url);
       });
