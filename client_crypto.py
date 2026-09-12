@@ -6,6 +6,8 @@ imports, so the format can be tested without MQTT, audio or a server.
 
 Format (docs/sd-content-encryption.md section 3):
     "CKE1" | version(1) | zero(3) | nonce(8) | AES-128-CTR body
+Version 1: the wrap secret is one shared value, held by the firmware as a build
+constant. Nothing here is per-device.
 Counter block is nonce || 64-bit big-endian counter from 0, which is exactly
 what CTR mode with iv = nonce + 8 zero bytes produces.
 """
@@ -33,7 +35,7 @@ def parse_header(head: bytes):
     return head[4], bytes(head[8:16])
 
 
-def seal(plain: bytes, key: bytes, version: int = 2, nonce: bytes = None) -> bytes:
+def seal(plain: bytes, key: bytes, version: int = 1, nonce: bytes = None) -> bytes:
     nonce = nonce or os.urandom(8)
     header = MAGIC + bytes([version]) + b"\x00\x00\x00" + nonce
     enc = _ctr(key, nonce).encryptor()

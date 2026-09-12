@@ -13,11 +13,11 @@ const mockPrisma = {
 jest.mock('../../src/config/database', () => ({ prisma: mockPrisma }));
 
 const K = crypto.randomBytes(16);
-const S = crypto.randomBytes(32);
+const S = crypto.randomBytes(32);   // the fleet-wide wrap secret, v1
 const mockKeys = {
   isEnabled: jest.fn(() => true),
+  getWrapSecret: jest.fn(() => S),
   getPackKey: jest.fn(async () => K),
-  getDeviceSecret: jest.fn(async () => S),
 };
 jest.mock('../../src/services/contentKeys.service', () => mockKeys);
 
@@ -32,13 +32,30 @@ beforeEach(() => {
   mockPrisma.rfid_content_pack.findFirst.mockResolvedValue(PACK);
 });
 
-test('content pack lookup carries a wrapped key the device secret can unwrap', async () => {
-  const res = await rfid.lookupCardByUid('04A1B2C3', 'AA:BB:CC:DD:EE:FF');
-  expect(res.encryption.v).toBe(2);
+const unwrap = (encryption) => {
   const wrapKey = crypto.createHmac('sha256', S).update(cc.WRAP_INFO).digest().subarray(0, 16);
-  const iv = Buffer.concat([Buffer.from(res.encryption.nonce, 'hex'), Buffer.alloc(8, 0)]);
-  expect(crypto.createDecipheriv('aes-128-ctr', wrapKey, iv).update(Buffer.from(res.encryption.key, 'hex'))).toEqual(K);
-  expect(mockKeys.getDeviceSecret).toHaveBeenCalledWith('AA:BB:CC:DD:EE:FF');
+  const iv = Buffer.concat([Buffer.from(encryption.nonce, 'hex'), Buffer.alloc(8, 0)]);
+  return crypto.createDecipheriv('aes-128-ctr', wrapKey, iv).update(Buffer.from(encryption.key, 'hex'));
+};
+
+test('content pack lookup carries a wrapped key the shared secret can unwrap', async () => {
+  const res = await rfid.lookupCardByUid('04A1B2C3', 'AA:BB:CC:DD:EE:FF');
+  expect(res.encryption.v).toBe(1);
+  expect(unwrap(res.encryption)).toEqual(K);
+});
+
+// The whole point of v1: the key no longer depends on the device being known,
+// so a first-ever tap, an unregistered toy and a swapped mainboard all play.
+test('an unknown device still gets an encryption block', async () => {
+  const res = await rfid.lookupCardByUid('04A1B2C3', '00:00:00:00:00:01');
+  expect(res.encryption.v).toBe(1);
+  expect(unwrap(res.encryption)).toEqual(K);
+});
+
+test('a lookup with no mac at all still gets an encryption block', async () => {
+  const res = await rfid.lookupCardByUid('04A1B2C3', undefined);
+  expect(res.encryption.v).toBe(1);
+  expect(unwrap(res.encryption)).toEqual(K);
 });
 
 test('no field when the pack has no key', async () => {
@@ -47,28 +64,21 @@ test('no field when the pack has no key', async () => {
   expect(res.encryption).toBeUndefined();
 });
 
-test('no field, and no error, when the device has no secret (unknown mac or mainboard swap)', async () => {
-  mockKeys.getDeviceSecret.mockResolvedValueOnce(null);
+test('no field, and no error, when CONTENT_WRAP_SECRET is missing or malformed', async () => {
+  mockKeys.getWrapSecret.mockReturnValueOnce(null);
   const res = await rfid.lookupCardByUid('04A1B2C3', 'AA:BB:CC:DD:EE:FF');
   expect(res.encryption).toBeUndefined();
   expect(res.packCode).toBe('STORY01');
 });
 
-test('no field when no mac was supplied', async () => {
-  const res = await rfid.lookupCardByUid('04A1B2C3', undefined);
-  expect(res.encryption).toBeUndefined();
-});
-
-test('download manifest carries a wrapped key the device secret can unwrap', async () => {
+test('download manifest carries a wrapped key the shared secret can unwrap', async () => {
   const res = await rfid.getContentDownloadManifest('04A1B2C3', 'AA:BB:CC:DD:EE:FF');
-  expect(res.encryption.v).toBe(2);
-  const wrapKey = crypto.createHmac('sha256', S).update(cc.WRAP_INFO).digest().subarray(0, 16);
-  const iv = Buffer.concat([Buffer.from(res.encryption.nonce, 'hex'), Buffer.alloc(8, 0)]);
-  expect(crypto.createDecipheriv('aes-128-ctr', wrapKey, iv).update(Buffer.from(res.encryption.key, 'hex'))).toEqual(K);
+  expect(res.encryption.v).toBe(1);
+  expect(unwrap(res.encryption)).toEqual(K);
 });
 
-test('download manifest has no encryption field when the device has no secret', async () => {
-  mockKeys.getDeviceSecret.mockResolvedValueOnce(null);
+test('download manifest has no encryption field without a wrap secret', async () => {
+  mockKeys.getWrapSecret.mockReturnValueOnce(null);
   const res = await rfid.getContentDownloadManifest('04A1B2C3', 'AA:BB:CC:DD:EE:FF');
   expect(res.encryption).toBeUndefined();
   expect(res.packCode).toBe('STORY01');

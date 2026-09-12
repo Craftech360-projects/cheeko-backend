@@ -1,10 +1,13 @@
 # SD content encryption
 
-Downloaded content on the toy's SD card is stored in the clear today. Pull the card, put it in a laptop, and every purchased MP3 is an ordinary file. The same files are also reachable as public CloudFront URLs through the unauthenticated card lookup, so anyone who reads a card's UID with a phone can fetch them without a toy. This document describes how to seal that content, in two versions that share one file format.
+Downloaded content on the toy's SD card is stored in the clear today. Pull the card, put it in a laptop, and every purchased MP3 is an ordinary file. The same files are also reachable as public CloudFront URLs through the unauthenticated card lookup, so anyone who reads a card's UID with a phone can fetch them without a toy. This document describes how that content is sealed.
 
-![Version 2 overview: upload sealing, device secret, key delivery, offline playback, dashboard preview and key locations](sd-content-encryption.svg)
+**Status, 2026-09-12: version 1 is what ships.** Settled 2026-09-10 at a scale of
+~100 customers, and implemented. Version 2 is designed, deferred, and described in
+section 6 for whenever it is revisited. Everything outside sections 5, 6 and 11 applies
+to both.
 
-The diagram shows version 2. Version 1 is the same picture with the per-pack key replaced by one global key compiled into firmware, and without section 2.
+![Version 1 overview: upload sealing, the shared wrap secret, key delivery, offline playback, dashboard preview and key locations](sd-content-encryption.svg)
 
 **Scope.** Downloaded content only: pack audio, pack item images, custom-card recordings. Built-in UI art, themes, character sprites, `cardmap.jsn` and logs stay plaintext. Character sprites were in scope until 2026-09-10, when they were ruled out. Pack thumbnails stay plaintext because the dashboard shows them in an `<img>`.
 
@@ -31,7 +34,7 @@ Also verified: there is no per-device secret anywhere today. The MQTT password i
 
 ## 2. Threat model
 
-| Attack | Version 1 | Version 2 |
+| Attack | Version 1 (shipped) | Version 2 (deferred) |
 |---|---|---|
 | Parent copies the SD card and shares the folder | stopped | stopped |
 | Anyone fetches the CloudFront URLs from the public lookup | stopped | stopped |
@@ -50,7 +53,7 @@ ESP32 flash encryption is what closes the flash-dump rows. It protects the firmw
 ```
 offset  size  field
 0       4     magic "CKE1"
-4       1     version: 1 = global key K, 2 = per-pack K delivered wrapped
+4       1     version: 1 = K wrapped under the shared secret, 2 = under a per-device secret
 5       3     reserved, zero
 8       8     nonce, random per file
 16      ..    AES-128-CTR ciphertext of the original file
@@ -59,7 +62,7 @@ offset  size  field
 - Counter block is `nonce(8) || counter(8, big-endian, from 0)`, incremented per 16-byte block.
 - No padding. File length is original + 16.
 - CTR is a stream cipher, so any 16-byte block decrypts independently. The toy decrypts each 2 KB chunk in place as it is read.
-- A file without the magic is plaintext and is read exactly as today. This is what makes rollout safe and removes the need to re-encrypt anything when moving from version 1 to version 2.
+- A file without the magic is plaintext and is read exactly as today. This is what makes rollout safe. Moving from version 1 to version 2 re-encrypts nothing either: only the version byte and the source of the wrap secret change.
 - CTR provides confidentiality only, no integrity tag. Bit flips decrypt to garbage rather than failing. For this threat that is fine. If tamper detection is ever needed, add a hash to the download manifest rather than switching modes.
 - Filenames do not change. 8.3 only (`CONFIG_FATFS_LFN_NONE=y`).
 
@@ -93,74 +96,123 @@ const result = await uploadService.uploadContentFile(body, artwork.filename, 'rf
 
 - Sealing happens in memory on the server. Multer never touches disk. Only sealed bytes reach S3.
 - Apply the same `seal` at the other S3 writers whose output lands on an SD card: custom-card audio and image. Everything else stays plaintext, including character art (ruled out 2026-09-10).
-- Gate on `CONTENT_ENC_KEY` (version 1) or `CONTENT_MASTER_KEY` (version 2) being set, so local and test environments keep working and production rollout is an env flip.
+- Gate on `CONTENT_MASTER_KEY` being set, so local and test environments keep working and production rollout is an env flip.
 - S3 keys, CloudFront URLs, `Cache-Control`, and the `content_item` row are unchanged. Nothing downstream knows encryption happened.
 - The MCP's `upload_pack_file` posts through the same route and gets sealed automatically. No MCP change.
 
 ---
 
-## 5. Version 1: one global key
+## 5. Version 1, as shipped
 
-**Key K.** 16 bytes. Backend: `CONTENT_ENC_KEY` env var, hex. Firmware: build-time define `-DCHEEKO_CONTENT_KEY=<32 hex>`, with `#error` in release builds if missing. K never travels over the network and is never written to the SD card.
+Note what version 1 turned out to be. The original sketch was one global key compiled
+into firmware. What shipped keeps the **per-pack key** of version 2 and changes only
+where the *wrapping* secret comes from: one shared secret instead of one per device.
+Per-pack keys cost nothing extra and keep the blast radius of a leaked pack key to one
+pack, so there was no reason to give them up.
 
-**Backend.** `seal` at upload, the preview proxy in section 8, and the backfill in section 9. No schema change. No gateway change. Lookup, tap handshake and `card_content` are untouched.
+**Pack key K.** 16 random bytes per pack, generated on first upload for that pack.
+`rfid_content_pack.content_key`, encrypted at rest under `CONTENT_MASTER_KEY`. The
+upload dialog sends `packCode` with each file so the server can
+`getOrCreatePackKey(packCode)` before the pack row exists.
 
-**Firmware.**
-
-- `main/boards/common/content_crypto.{h,cc}`: `IsEncrypted(head16)` plus a thin wrapper over `mbedtls_aes_setkey_enc` and `mbedtls_aes_crypt_ctr` holding key, nonce counter, `nc_off` and `stream_block`. These are the same calls `mqtt_protocol.cc` already uses for UDP audio, so no new dependency and the hardware AES block is used automatically. mbedtls carries the partial keystream block across calls, so unaligned chunk boundaries need no extra code.
-- `mp3_player.cc`: after `fopen`, read 16 bytes. If magic, keep the nonce and decrypt every `fread` chunk in place before the decoder. If not, `fseek(0)` and proceed as today. No new allocation.
-- `cheeko_sd_image_loader.cc`: after the whole-file read into PSRAM, decrypt in place before the existing LVGL header check. The 12 KB internal-heap guard is untouched.
-- Failure is loud: bad magic version or a decrypt that yields a non-MP3 or non-LVGL header refuses playback, logs a telemetry marker with the pack id, and shows an on-screen message. Never fall through to the decoder with ciphertext.
-
-**Rule.** K must never change across firmware releases, or every pack on every SD card in the field stops playing after the OTA.
-
----
-
-## 6. Version 2: per-pack key, per-device secret
-
-Adds two keys and one registration step on top of version 1. Files, `seal`, the readers and the preview proxy are identical.
-
-**Pack key K.** 16 random bytes per pack, generated on first upload for that pack. The upload dialog sends `packCode` with each file so the server can `getOrCreatePackKey(packCode)` before the pack row exists.
-
-**Device secret S.** 32 random bytes the toy generates itself on first boot and stores in NVS flash, namespace `cheeko`, key `dev_secret`. It registers S once with the backend by including it in the OTA check the toy already makes. No factory step. NVS survives restarts and power loss.
+**Wrap secret.** 32 bytes, one for the whole fleet. Backend: `CONTENT_WRAP_SECRET`
+env var, 64 hex chars. Firmware: build-time constant
+`CONFIG_CHEEKO_CONTENT_WRAP_SECRET_HEX`. The two must be byte-identical. Nothing tells
+you when they are not — CTR has no integrity check, so a mismatch just produces garbage
+that fails at the MP3 decoder — so both sides assert the section 10 vectors in their own
+test suite.
 
 **Schema.**
 
 ```sql
 ALTER TABLE rfid_content_pack ADD COLUMN content_key BYTEA;      -- K, encrypted at rest
-ALTER TABLE ai_device          ADD COLUMN content_secret BYTEA;   -- S, encrypted at rest
 ```
 
-Both columns are encrypted under one server master key, `CONTENT_MASTER_KEY`, from the environment or KMS, never a literal in the repo. Decide where it lives before the first K is written, because retrofitting means re-wrapping every stored key. Normalise the MAC on write and on read; the codebase already has two RFID UID normalisations that disagree.
+`ai_device.content_secret` exists from the version 2 migration and is unused. Dropping
+it buys nothing and the rollback is worse, so it stays.
 
-**Key delivery at lookup.** In `lookupCardByUid`, content-pack branch:
+**Key delivery at lookup.** In `lookupCardByUid`, content-pack branch, and in the
+download manifest:
 
 ```
-wrap_key = HMAC-SHA256(S, "cheeko-wrap-v1")[0:16]
+wrap_key = HMAC-SHA256(wrap_secret, "cheeko-wrap-v1")[0:16]
 wrapped  = AES-128-CTR(wrap_key, nonce_w, K)        nonce_w random per response
 ```
 
-The lookup response gains `encryption: { v: 2, key: <wrapped hex>, nonce: <nonce_w hex> }`. Omit the field for unencrypted packs. If the device is unknown or has no S, for example after a mainboard swap, return the pack unencrypted rather than failing the tap.
+The response gains `encryption: { v: 1, key: <wrapped hex>, nonce: <nonce_w hex> }`.
+Omitted for unencrypted packs, and omitted — never faked — when either the pack key or
+the wrap secret is missing.
 
-The lookup stays public. The wrapped key is useless without S, so it is safe to hand to anyone.
+**No MAC is involved.** `encryptionFieldFor(packCode)` does not take one and does not
+read the device table. A first-ever tap, an unregistered toy and a swapped mainboard all
+get a working key. This is the single biggest practical difference from version 2, where
+an unknown device had no safe answer: the S3 object is sealed and there is no plaintext
+copy, so "return it unencrypted" would have meant sealed files with no key.
 
-**Gateway.** `fetchRfidContentFromManagerApi` in `mqtt-gateway.js` returns an explicit field whitelist. Add `encryption` to it and to the `card_content` payload it publishes. `virtual-connection.js` spreads `...cardData` and carries the field automatically, so the two senders differ until the whitelist is updated. Test both paths. This exact trap hid character artwork for weeks.
+The lookup stays public. The wrapped key is useless without the fleet secret, which only
+firmware and the server hold.
 
-**Firmware, on top of version 1.** The step-by-step implementation guide, with current firmware anchors and pinned test vectors, is [sd-content-encryption-firmware.md](sd-content-encryption-firmware.md). It refines two points below. The secret is generated only after Wi-Fi is up, because the RNG is not truly random before the RF starts. On rotation, only the manifests of sealed packs are invalidated rather than wiping `skills/`: the files are sealed under K, not S, so the existing files are reused and only a fresh wrapped key is fetched.
+**Gateway.** `fetchRfidContentFromManagerApi` in `mqtt-gateway.js` returns an explicit
+field whitelist, so `encryption` had to be added to it *and* to the `card_content`
+payload it publishes. `virtual-connection.js` spreads `...cardData` and carries the field
+automatically, so the two senders differ until the whitelist is updated. Both paths are
+covered by `tests/card-content-encryption.test.js`. This exact trap hid character artwork
+for weeks.
 
-- First boot: if `dev_secret` is absent, generate with `esp_random`, store, mark for registration. Include S in the next OTA check.
+**Firmware.** Implementation guide with current anchors and pinned vectors:
+[sd-content-encryption-firmware.md](sd-content-encryption-firmware.md).
+
+- `main/boards/common/content_crypto.{h,cc}`: `IsEncrypted(head16)` plus a thin wrapper over `mbedtls_aes_setkey_enc` and `mbedtls_aes_crypt_ctr` holding key, nonce counter, `nc_off` and `stream_block`. These are the same calls `mqtt_protocol.cc` already uses for UDP audio, so no new dependency and the hardware AES block is used automatically. mbedtls carries the partial keystream block across calls, so unaligned chunk boundaries need no extra code.
 - `HandleServerResponse`: parse `encryption` from `card_content` and `card_ai`, write `wrapped` and `nonce_w` into `manifest.jsn`. Never write plain K to SD.
-- Playback start: read S from NVS, compute the same HMAC, unwrap K in RAM, hand it to the decryptor. Drop K when playback ends.
-- If NVS is erased, the toy generates a new S and every wrapped key on the SD card is dead. Detect this by keeping a fingerprint of S on the card -- `sdcard/cheeko/secret.fp`, the first 8 hex chars of SHA-256(S), never S itself -- and comparing it against the current secret on startup or, at the latest, before the first playback or download. No fingerprint on the card (an existing card from before this check, or a genuine first run) is not evidence of a rotation: record the current fingerprint and do not wipe. A mismatch means "new S": wipe `cardmap.jsn` and `skills/` wholesale (not just sealed packs -- simpler, and a plaintext pack re-download only costs bandwidth) and record the new fingerprint, so the next tap re-downloads cleanly instead of failing to decrypt. Log the wipe with the old and new fingerprint.
-- The wipe alone does not make the card playable again. The server wraps a pack's key under whatever S it currently has on file for this device, computed at lookup/response time -- so if the toy re-downloads before telling the server about the new S, the fresh pack comes back wrapped under the *old* S and is exactly as undecryptable as the one just wiped. The new S must be **registered with the server before the next download is attempted**. Track this as a pending-registration flag alongside the fingerprint (persisted, so a reboot between the rotation and the registration doesn't lose it) and clear it only once the server has confirmed the new S -- not merely because a registration was attempted or a download was tried.
+- Playback start: compute the HMAC from the build-time secret, unwrap K in RAM, hand it to the decryptor. Drop K when playback ends.
+- `mp3_player.cc`: after `fopen`, read 16 bytes. If magic, keep the nonce and decrypt every `fread` chunk in place before the decoder. If not, `fseek(0)` and proceed as today. No new allocation.
+- `cheeko_sd_image_loader.cc`: after the whole-file read into PSRAM, decrypt in place before the existing LVGL header check. The 12 KB internal-heap guard is untouched.
+- Failure is loud: an unknown version byte, or a decrypt that yields a non-MP3 or non-LVGL header, refuses playback, logs a telemetry marker with the pack id, and shows an on-screen message. Never fall through to the decoder with ciphertext.
 
-**Why HMAC then AES rather than encrypting with S directly.** S can later move into the ESP32-S3 HMAC peripheral, where the key is eFuse-backed and never readable even by firmware, without changing the file format or re-encrypting anything. Only the derivation of `wrap_key` moves.
+**No rotation story.** The secret never changes in normal operation, so there is no
+NVS-erase recovery, no fingerprint file on the card and no pending-registration flag —
+all of that was version 2 machinery. Changing the secret is a breaking change: it means
+re-encrypting all content **and** an OTA to every device. Treat it as one.
+
+**Where the secret lives.** Wherever `CONTENT_MASTER_KEY` lives. Not Slack, not email,
+not a commit. Generate it once.
+
+---
+
+## 6. Version 2: per-device secret (deferred)
+
+Version 2 changes exactly one thing: the wrap secret becomes per-device instead of
+shared. Files, `seal`, K, the readers, the gateway and the preview proxy are identical,
+and moving to it re-encrypts nothing — only the version byte and the source of the
+secret change.
+
+**What it buys.** A copied SD card stops playing in another Cheeko. That is the only
+row of the section 2 table that moves.
+
+**Device secret S.** 32 random bytes the toy generates itself on first boot after Wi-Fi
+is up (the RNG is not truly random before the RF starts) and stores in NVS, namespace
+`cheeko`, key `dev_secret`. It registers S once by including it in the OTA check the toy
+already makes, into `ai_device.content_secret`, encrypted at rest. No factory step.
+
+**Why it was deferred, 2026-09-10.**
+
+- Without flash encryption the secret is readable off any unit either way, so version 2 is version 1 with more moving parts. Flash encryption was ruled out at this volume: it burns eFuses irreversibly and ends USB flashing on production stock.
+- A toy must reach the server **once** before any purchased pack plays. An NVS erase kills every card until re-registration. A replacement mainboard is a new MAC with no secret, and there is no safe answer for it — see section 5.
+- Recovery needs a fingerprint file on the card, a persisted pending-registration flag, and a wipe-and-re-download path, none of which version 1 needs. The detail is in this file's history if it is ever revived.
+
+**The trigger to revisit.** The shared secret leaks, or content is found posted
+publicly.
+
+**Why HMAC then AES rather than encrypting with the secret directly.** A per-device S
+can later move into the ESP32-S3 HMAC peripheral, where the key is eFuse-backed and
+never readable even by firmware, without changing the file format or re-encrypting
+anything. Only the derivation of `wrap_key` moves.
 
 ---
 
 ## 7. Offline playback
 
-Works in both versions, because nothing needed at playback time comes from the network: sealed files and the wrapped key are on the SD card, S is in NVS, K is in firmware (v1) or unwrapped in RAM (v2). `OnCardTapped` plays a known card immediately and does not wait for the `card_lookup` reply. The 10-second timeout only applies to cards the toy has never seen.
+Nothing needed at playback time comes from the network: the sealed files and the wrapped key are on the SD card, the wrap secret is in firmware, and K is unwrapped into RAM. `OnCardTapped` plays a known card immediately and does not wait for the `card_lookup` reply. The 10-second timeout only applies to cards the toy has never seen.
 
 Offline does not work for a card that was never downloaded, exactly as today.
 
@@ -192,7 +244,7 @@ router.get('/content-pack/preview', requireAdmin, asyncHandler(async (req, res) 
   // that redirect — CloudFront serves no Access-Control-Allow-Origin, so the cross-origin
   // fetch fails and every legacy preview breaks. We already hold the bytes; just send them.
   if (!header) return res.send(bytes);
-  if (header.version !== 2) return badRequest(res, 'Unsupported seal version');
+  if (header.version !== 1) return badRequest(res, 'Unsupported seal version');
 
   const key = await getPackKey(packCode);
   if (!key) return notFound(res, 'No content key for this pack');
@@ -227,7 +279,7 @@ keeps using the plain content proxy and needs no key.
 
 1. Ship firmware that understands `CKE1` but tolerates plaintext. Old firmware given a sealed file would feed ciphertext to the decoder, so this order is not optional.
 2. Wait for fleet adoption. `rfid_card_tap_log.client_version` already records firmware versions per device.
-3. Set the env key in production. New uploads are sealed from that moment.
+3. Set `CONTENT_MASTER_KEY` and `CONTENT_WRAP_SECRET` in production, the latter byte-identical to the shipped firmware build. New uploads are sealed from that moment.
 4. Backfill: for each `content_item` audio or image URL on CloudFront, download, seal, upload under a new UUID-suffixed key with the existing helper, update the row. New keys sidestep the one-year edge cache. In-field SD cards keep their plaintext and keep playing. Those files already left the building. What the backfill closes is the public URLs.
 
 **Known bug, independent of this work.** `ContentFileAlreadyDownloaded` in `content_manager.cc` skips any existing non-empty file, so a version bump rewrites the manifest and leaves old bytes. It does not block this rollout, because in-field cards are not asked to re-download. Fix it when a version bump next needs to refresh bytes, by writing a target-version marker at download start and skipping existing files only when the marker matches.
@@ -238,39 +290,67 @@ keeps using the plain content proxy and needs no key.
 
 - Host test on the firmware side: known key, nonce and plaintext produce the expected ciphertext; round trip; a 2048-byte chunk boundary that is not 16-byte aligned. Wire into the CircleCI host-tests job.
 - Jest test on the Node side producing the same expected bytes from the same vector, so both implementations are checked against one another.
-- Version 2 adds: HMAC derivation vector, wrap and unwrap round trip, gateway test that `encryption` survives both the router path and the virtual-connection path.
+- Wrap: the HMAC derivation vector, and a wrap/unwrap round trip.
+- Gateway: `encryption` survives both the router path and the virtual-connection path.
+- Lookup: **an unknown MAC still gets an `encryption` block.** This is the regression that would silently undo the main benefit of version 1.
+
+Both sides assert these bytes literally. They are the only thing that catches a
+mismatched secret or a wrong version byte before hardware does.
+
+```
+K         = 000102030405060708090a0b0c0d0e0f
+nonce     = 1011121314151617
+plaintext = "cheeko content encryption test!!"   (32 ASCII bytes)
+
+sealed    = 434b4531 01 000000 1011121314151617
+            ee8ebda5b634ecfbb0284eaf8e810a10f157b1d9994c6ed0d18d36af05616b0a
+
+wrap_secret = a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf
+nonce_w     = 0909090909090909
+wrap_key    = 94e5bea4747beb214b0cb91b3f8825d3
+wrapped K   = 99cf47ac63e20dd29d679e9854465f87
+```
 
 ---
 
 ## 11. Version 1 versus version 2
 
-| | Version 1 | Version 2 |
+| | Version 1 (shipped) | Version 2 (deferred) |
 |---|---|---|
-| Key K | one global, firmware and env | one per pack, in DB |
-| Device secret | none | S in NVS, self-generated |
+| Key K | one per pack, in DB | one per pack, in DB |
+| Wrap secret | one for the fleet, firmware build constant + env | S per device, self-generated in NVS |
+| Device must be known to the server | no | yes, before any sealed pack plays |
 | Stops SD copying and URL fetching | yes | yes |
 | Copied SD works in another toy with the card | yes | no |
-| Blast radius of one leaked key | everything | one pack or one toy |
-| Revoke or rotate | re-encrypt everything | per pack or per toy |
-| Schema changes | none | two columns, encrypted at rest |
-| Backend touch points | upload, preview, backfill | plus lookup, device registration, master key |
-| Gateway change | none | whitelist one field, both senders |
-| Firmware work | decrypt in two readers | plus NVS secret, registration, HMAC unwrap, manifest field |
+| Blast radius of the leaked wrap secret | every pack, every toy | one toy |
+| Revoke or rotate | re-encrypt everything, OTA every device | per toy |
+| Schema | `content_key` | plus `content_secret` |
+| Backend touch points | upload, lookup, preview, backfill | plus device registration |
+| Gateway change | whitelist one field, both senders | same |
+| Firmware work | decrypt in two readers, HMAC unwrap, manifest field | plus NVS secret, registration, rotation recovery |
 | Flash encryption | optional, same benefit either way | required for the design to hold |
-| Rough effort | about a week | about three weeks, plus flash encryption rollout |
+| Mainboard swap / NVS erase | nothing to do | every card dead until re-registration |
 
-**Recommendation.** Go to version 2 directly only with flash encryption in the same release. Without it, S is readable off every unit and version 2 is version 1 with more moving parts. If the production line cannot absorb flash encryption this quarter, ship version 1 now. The file format is identical and the header's version byte selects the key path, so version 2 can follow without re-encrypting a single file.
+Moving to version 2 later re-encrypts nothing: only the version byte and the source of
+the wrap secret change.
 
 ---
 
-## 12. Decisions to make
+## 12. Decisions, settled
 
-1. Version 1 now, or version 2 with flash encryption?
-2. Keep the dashboard audio preview via the proxy, or drop preview?
-3. Are parent-recorded custom-card files in scope? Included above since they also land on SD.
-4. Which firmware version is the cut-off before enabling sealing in production?
-5. Version 2: where does `CONTENT_MASTER_KEY` live, env or KMS?
-6. Version 2: mainboard swap gives a new MAC and no S. Confirm the fallback is "deliver unencrypted" rather than "fail".
+1. **Version 1 now, version 2 not yet.** 2026-09-10, at ~100 customers. Trigger to revisit: the shared secret leaks, or content is found posted publicly.
+2. **Keep the dashboard preview** via the server-side proxy (section 8).
+3. **Parent-recorded custom-card files are in scope.** They also land on SD.
+4. **Firmware ships before the key is turned on.** `rfid_card_tap_log.client_version` tracks adoption; see section 9, where the order is not optional.
+5. **`CONTENT_MASTER_KEY` and `CONTENT_WRAP_SECRET` live in the environment**, in the same place as the rest of the deployment's secrets. Not KMS, not a commit.
+6. **A mainboard swap is a non-event in version 1.** No MAC is consulted at lookup, so there is nothing to fall back from. This was the deciding argument.
+
+**Still open, and it belongs to the firmware side.** A version bump never re-fetches
+existing files (`ContentFileAlreadyDownloaded`, section 9). The staged-download branch
+that fixes it must land **before any re-encryption backfill**, or migrated packs show as
+updated while still holding plaintext bytes behind a new manifest.
+
+---
 
 ## MCP impact
 

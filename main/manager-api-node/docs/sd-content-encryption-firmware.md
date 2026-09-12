@@ -2,7 +2,21 @@
 
 This guide is for the developer or AI agent who implements content decryption in the ESP32 firmware at `cheeko-os-v2`.
 
-**Status.** The backend, gateway and a Python device mimic are done and verified end to end against live services. The firmware is the remaining piece. Nothing in the firmware has been changed yet.
+**Status, 2026-09-12: this guide is for version 1.** It was first written for version 2
+(a per-device secret). Version 2 was deferred on 2026-09-10 — see section 6 of
+[sd-content-encryption.md](sd-content-encryption.md) — and the backend now ships version 1:
+the same per-pack key K, wrapped under **one secret shared by the whole fleet** that is a
+firmware build constant instead of a per-device value in NVS.
+
+**What that removes.** Tasks 2, 3 and 5 in section 6 — secret generation, OTA
+registration, the `secret.fp` fingerprint, the pending flag and rotation recovery — are
+**not part of version 1**. They are left in place, marked, because version 2 is a
+possible future and they are the design for it. Everything else stands: the file format,
+the wrap derivation, the manifest field, both decrypt paths and the fail-closed rule are
+unchanged, and only the version byte and where the secret comes from differ.
+
+The backend, gateway and a Python device mimic are done and verified end to end against
+live services. The firmware is the remaining piece.
 
 **Anchors.** Firmware file and line references are current as of firmware HEAD `270a9a9`. Backend references are to branch `feat/sd-content-encryption` in `cheeko-backend`. If lines have moved, search for the function name given alongside.
 
@@ -12,16 +26,23 @@ This guide is for the developer or AI agent who implements content decryption in
 
 ## 1. What you are building
 
-Pack audio and images on the toy's SD card are now stored **sealed**: encrypted with AES-128-CTR under a per-pack key. The server never sends that key in the clear. It sends the key **wrapped** under a secret that only this toy knows. The toy keeps the wrapped key on the SD card and unwraps it in RAM only while playing.
+Pack audio and images on the toy's SD card are now stored **sealed**: encrypted with AES-128-CTR under a per-pack key. The server never sends that key in the clear. It sends the key **wrapped** under a secret the firmware already holds. The toy keeps the wrapped key on the SD card and unwraps it in RAM only while playing.
 
-So a copied SD card, or one opened on a PC through USB Drive Mode, holds only ciphertext. A second toy cannot play a card copied from the first, because its secret is different.
+So a copied SD card, or one opened on a PC through USB Drive Mode, holds only ciphertext.
+A second toy **can** play a card copied from the first: the secret is the same across the
+fleet. That is version 1's known, accepted limit. The piracy it stops is a parent copying
+the folder to a laptop and sharing it.
 
 The firmware work is:
 
-1. Generate a 32-byte device secret once, keep it in NVS, and send it to the server on the OTA check.
+1. Hold the 32-byte fleet wrap secret as a build constant, `CHEEKO_CONTENT_WRAP_SECRET_HEX`, with `#error` in release builds if it is missing.
 2. Read an `encryption` block from `card_content`, and store the wrapped key next to the pack on the SD card.
-3. At playback, unwrap the pack key using the NVS secret, then decrypt MP3 and LVGL `.bin` files as they are read.
-4. Recover cleanly when the secret changes (an NVS erase), and fail loudly and safely when a key is wrong or missing.
+3. At playback, unwrap the pack key using that constant, then decrypt MP3 and LVGL `.bin` files as they are read.
+4. Fail loudly and safely when a key is wrong or missing.
+
+There is no first-boot step, no registration, no NVS state and no rotation recovery. A
+toy that has never reached the server plays a purchased pack the moment it downloads
+one.
 
 **Do not change:**
 
@@ -38,12 +59,12 @@ The firmware work is:
 
 ## 2. How it works, end to end
 
-1. **First OTA check after Wi-Fi is up.** The toy generates secret **S** (32 random bytes) if NVS has none. It stores S as 64 lowercase hex characters in NVS and marks it "registration pending". The OTA POST body carries `"content_secret": "<64 hex>"`. The server stores S encrypted at rest, keyed by MAC. On HTTP 200 the toy clears "pending".
+1. **Build time.** The 32-byte wrap secret is compiled into the firmware. The same 32 bytes are set as `CONTENT_WRAP_SECRET` in the server environment. Nothing happens at first boot.
 2. **Upload (server side, already done).** Every pack file is sealed under that pack's key **K** before it reaches S3. The URLs do not change.
-3. **Card tap.** The toy sends `card_lookup` as today. The server looks up K and this MAC's S. It computes `wrap_key = HMAC-SHA256(S, "cheeko-wrap-v1")[0:16]`, and `wrapped = AES-128-CTR(wrap_key, nonce_w, K)` with a fresh random `nonce_w`. The gateway forwards `encryption: {v: 2, key: <wrapped hex>, nonce: <nonce_w hex>}` inside `card_content`.
+3. **Card tap.** The toy sends `card_lookup` as today. The server looks up K for the pack — it does **not** look at the MAC. It computes `wrap_key = HMAC-SHA256(secret, "cheeko-wrap-v1")[0:16]`, and `wrapped = AES-128-CTR(wrap_key, nonce_w, K)` with a fresh random `nonce_w`. The gateway forwards `encryption: {v: 1, key: <wrapped hex>, nonce: <nonce_w hex>}` inside `card_content`.
 4. **Download.** Files are written to SD exactly as served, still sealed. `manifest.jsn` gains an `enc` block holding the **wrapped** key and `nonce_w`. The plain key K is never written anywhere.
-5. **Playback, fully offline.** The toy reads S from NVS, recomputes `wrap_key`, and unwraps K in RAM. It then decrypts each file chunk as it is read, and wipes K when playback ends.
-6. **NVS erased.** A new S is generated, so every wrapped key on the card is now useless. The files themselves are still fine, because they are sealed under K, not S. The toy detects the change from a fingerprint file on the card and invalidates the manifests of sealed packs. It re-registers the new S **before** the next lookup. The next tap then fetches a fresh wrapped key, and the existing files are reused.
+5. **Playback, fully offline.** The toy recomputes `wrap_key` from the build constant and unwraps K in RAM. It then decrypts each file chunk as it is read, and wipes K when playback ends.
+6. **There is no case 6.** The secret never changes, so there is nothing to recover from. Changing it is a breaking change: re-encrypt all content and OTA every device.
 
 ---
 
@@ -55,8 +76,8 @@ The firmware work is:
    | File | What it shows |
    |---|---|
    | `client_crypto.py` | header parse, seal/unseal, streaming decrypt, key unwrap |
-   | `client_storage.py` | NVS stand-in, SD layout, fingerprint, reconcile-on-rotation |
-   | `client.py` → `download_card_content`, `skill_key`, `read_skill_file`, `play_skill`, `_ensure_secret_registered`, `run_rfid_test` | the device behaviour: store sealed, unwrap at play, fail closed, register before lookup |
+   | `client_storage.py` | SD layout stand-in (its NVS/fingerprint helpers are version 2 leftovers) |
+   | `client.py` → `download_card_content`, `skill_key`, `read_skill_file`, `play_skill`, `run_rfid_test` | the device behaviour: store sealed, unwrap at play, fail closed |
    | `test_client_*.py` | runnable checks, including the shared vectors |
 
 3. **The design spec**, `main/manager-api-node/docs/sd-content-encryption.md`.
@@ -75,7 +96,7 @@ Where the firmware should **deliberately differ** from the Python mimic:
 ```
 offset  size  field
 0       4     magic, ASCII "CKE1"  (0x43 0x4B 0x45 0x31)
-4       1     version = 2
+4       1     version = 1
 5       3     reserved, zero
 8       8     nonce, random per file
 16      n     AES-128-CTR ciphertext of the original file
@@ -84,39 +105,33 @@ offset  size  field
 - **Counter block.** It is `nonce (8 bytes) || 64-bit big-endian block counter starting at 0`. In mbedTLS terms, `nonce_counter` starts as the nonce followed by 8 zero bytes, and `mbedtls_aes_crypt_ctr` increments it. That behaves identically for any file under 2^64 blocks.
 - **Size and padding.** There is no padding. A sealed file is exactly 16 bytes longer than the original.
 - **Plaintext files.** A file **without** the magic is plaintext and must be read exactly as today. Old packs, custom-card recordings (not sealed yet, see §9) and every non-pack file take this path.
-- **Unknown versions.** Only version 2 exists. Treat any other version as a hard failure, not as plaintext.
+- **Unknown versions.** Only version 1 exists. Treat any other version — including a version 2 file left over from testing — as a hard failure, not as plaintext.
 - **Filenames.** They are unchanged: `audio/01.mp3`, `images/01.bin`, `s01/audio/01.mp3`. The card is mounted without long filenames (`CONFIG_FATFS_LFN_NONE=y`), so every new file you create must be 8.3.
 
 ### 4.2 Keys and derivations
 
 | Name | Size | Where it lives |
 |---|---|---|
-| S, device secret | 32 bytes | NVS only. Sent once per OTA check. Never logged, never on SD. |
+| wrap secret | 32 bytes | Firmware build constant `CHEEKO_CONTENT_WRAP_SECRET_HEX`, and `CONTENT_WRAP_SECRET` in the server env. Never logged, never on SD, never on the wire. |
 | K, pack key | 16 bytes | Server only. On the toy it exists only in RAM during playback, then is wiped. |
 | wrapped K | 16 bytes | `manifest.jsn` on SD, as 32 hex characters |
 | nonce_w | 8 bytes | `manifest.jsn` on SD, as 16 hex characters |
 
 ```
-wrap_key    = HMAC-SHA256(key = S, message = ASCII "cheeko-wrap-v1")[0:16]
+wrap_key    = HMAC-SHA256(key = wrap_secret, message = ASCII "cheeko-wrap-v1")[0:16]
 K           = AES-128-CTR(key = wrap_key, counter = nonce_w || 0x00*8, data = wrapped)
-fingerprint = lowercase hex of SHA-256(S)[0:4]          -> 8 characters
 ```
 
 - The message is exactly the 14 ASCII bytes `cheeko-wrap-v1`, with no terminator.
 - CTR is symmetric, so unwrapping uses the same operation as wrapping.
 - Hex from the server is lowercase. Parse it case-insensitively.
+- **The build constant and the server env var must be byte-identical.** Nothing reports a mismatch: CTR has no integrity check, so the failure surfaces as an MP3 decoder error. Assert the 4.5 vectors in the host test — that is what catches it.
 
 ### 4.3 Wire messages
 
-**OTA check request body** (`POST <ota_url>`). Add one top-level field and change nothing else:
-
-```json
-{ "content_secret": "a0a1a2...bf", "version": 2, "mac_address": "..." }
-```
-
-- The server stores S and never returns it.
-- A missing or malformed value is ignored and never fails the OTA check.
-- The server redacts the value in its logs.
+**OTA check request body.** Unchanged. Version 1 sends no `content_secret`, and the
+server no longer stores one. (The server still redacts the field from its logs, so a unit
+running older firmware that keeps sending it leaks nothing.)
 
 **`card_content`.** The `encryption` field is optional:
 
@@ -129,31 +144,26 @@ fingerprint = lowercase hex of SHA-256(S)[0:4]          -> 8 characters
   "audio":  [ { "index": 1, "url": "https://.../01-fdcc897e.MP3" } ],
   "images": [ { "index": 1, "url": "https://.../01-263ff30a.BIN" } ],
   "update_required": true,
-  "encryption": { "v": 2, "key": "925e848d895bea93b0699115da8708fa", "nonce": "42e34e07b5b1aeb7" }
+  "encryption": { "v": 1, "key": "925e848d895bea93b0699115da8708fa", "nonce": "42e34e07b5b1aeb7" }
 }
 ```
 
 - Grouped packs carry `stories[]` in place of `audio` and `images`, and the same `encryption` block.
-- `encryption` is **absent** when the pack is plaintext, the feature is off, or the server has no S for this MAC. Treat absent and `null` the same way.
-- A block that is present but malformed must be treated as absent, with a warning. "Malformed" means `v` is not 2, `key` is not 32 hex characters, or `nonce` is not 16 hex characters.
+- `encryption` is **absent** when the pack is plaintext or the feature is off. It is *not* absent for an unknown device: version 1 has no per-device path, so a first-ever tap gets a key like any other. Treat absent and `null` the same way.
+- A block that is present but malformed must be treated as absent, with a warning. "Malformed" means `v` is not 1, `key` is not 32 hex characters, or `nonce` is not 16 hex characters.
 
 **`card_ai`.** Character art is never sealed (ruled out 2026-09-10), so the `character` object carries no `encryption` block. Leave the character-art path unchanged.
 
 ### 4.4 On-device storage
 
-**NVS**, namespace `cheeko`, which already exists:
-
-| Key | Type | Meaning |
-|---|---|---|
-| `dev_secret` | string, 64 lowercase hex | S. Created once, never rewritten except after an NVS erase. |
-| `dev_sec_pend` | bool | `true` from the moment S is created until the server returns HTTP 200 for an OTA check that carried it. Clear it with `SetBool(false)`, never with `EraseKey` (see §5, fact 9). |
+**NVS.** Nothing. Version 1 stores no key material on the device outside the firmware
+image. (`dev_secret`, `dev_sec_pend` and `secret.fp` were version 2; do not create them.)
 
 **SD card**, under `/sdcard/cheeko`:
 
 | Path | Content |
 |---|---|
-| `secret.fp` | 8 lowercase hex characters, no newline: the fingerprint of the S that the card's wrapped keys were made for |
-| `skills/<skill_id>/manifest.jsn` | existing fields, plus `"enc": {"v": 2, "key": "<32 hex>", "nonce": "<16 hex>"}` for sealed packs only |
+| `skills/<skill_id>/manifest.jsn` | existing fields, plus `"enc": {"v": 1, "key": "<32 hex>", "nonce": "<16 hex>"}` for sealed packs only |
 
 ### 4.5 Test vectors
 
@@ -166,21 +176,27 @@ These were checked against both the Node server code and the Python reference. A
 - plaintext = the 32 ASCII bytes `cheeko content encryption test!!`
 
 ```
-sealed file = 434b4531 02 000000 1011121314151617
+sealed file = 434b4531 01 000000 1011121314151617
               ee8ebda5b634ecfbb0284eaf8e810a10f157b1d9994c6ed0d18d36af05616b0a
 ```
 
+The version byte is not part of the CTR input, so the ciphertext is unchanged from the
+version 2 vector. Only byte 4 moves.
+
 **Wrap vector:**
 
-- S = `a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf`
+- wrap_secret = `a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf`
 - nonce_w = `0909090909090909`
 - K as above
 
 ```
 wrap_key    = 94e5bea4747beb214b0cb91b3f8825d3
 wrapped K   = 99cf47ac63e20dd29d679e9854465f87
-fingerprint = 00e98867
 ```
+
+The maths does not care whether the secret is per-device or shared, so this vector is
+also unchanged. `main/manager-api-node/tests/unit/contentCrypto.test.js` asserts exactly
+these bytes on the server side.
 
 ---
 
@@ -273,7 +289,7 @@ The module is pure mbedTLS, with no ESP-IDF headers, so the same file compiles o
 // Pure mbedTLS so it builds in the host test too.
 namespace ContentCrypto {
 constexpr size_t kHeaderBytes = 16;
-constexpr uint8_t kSealVersion = 2;
+constexpr uint8_t kSealVersion = 1;
 
 struct Header {
   uint8_t version;
@@ -486,7 +502,12 @@ Do not use the `tests/host/cjson_stub`: its `cJSON_Parse` always returns NULL. K
 
 ---
 
-### Task 2: Device secret, fingerprint and the pending flag
+### Task 2: Device secret, fingerprint and the pending flag — NOT IN VERSION 1
+
+> **Skip this task.** It is the version 2 design, kept for whenever version 2 is
+> revisited. Version 1 has no device secret: use the build constant
+> `CHEEKO_CONTENT_WRAP_SECRET_HEX` wherever the text below says S, and create no NVS keys
+> and no `secret.fp`.
 
 **Files:** create `main/boards/common/device_secret.h` and `device_secret.cc`, and add them to `SOURCES`.
 
@@ -522,7 +543,10 @@ void SetRegistrationPending(bool pending);  // uses SetBool; never EraseKey
 
 ---
 
-### Task 3: Send S on the OTA check, and re-register when needed
+### Task 3: Send S on the OTA check, and re-register when needed — NOT IN VERSION 1
+
+> **Skip this task.** The OTA body is unchanged in version 1 and the server ignores
+> `content_secret`. Version 2 only.
 
 **File:** `main/ota.cc`, in `Ota::CheckVersion` (`:92-126`).
 
@@ -577,14 +601,20 @@ void SetRegistrationPending(bool pending);  // uses SetBool; never EraseKey
    struct WrappedKey { std::string key_hex, nonce_hex; bool present() const { return !key_hex.empty(); } };
    ```
 
-2. **Parse `card_content`** (`HandleServerResponse`, fields at `:673-681`). Read `encryption`. Accept it only when `v == 2`, `key` is 32 hex characters and `nonce` is 16 hex characters. Anything else becomes "absent", with an `ESP_LOGW`.
+2. **Parse `card_content`** (`HandleServerResponse`, fields at `:673-681`). Read `encryption`. Accept it only when `v == 1`, `key` is 32 hex characters and `nonce` is 16 hex characters. Anything else becomes "absent", with an `ESP_LOGW`.
 
-3. **The pending gate.** This is the most important ordering rule in the whole design. Place it at the top of the `card_content` branch, before any download decision (`:728`):
-   - If `DeviceSecret::RegistrationPending()` is true, the reply you are holding was wrapped for whatever secret the server had, and that may be the old one. **Do not download it.**
-   - Run the Task 3 re-registration on this `card_dl` task.
-   - On success, clear pending and discard this reply. Then re-send the lookup through `Application::SendCardLookup(uid, BuildCardLookupPayload(uid))`, so that the reply you use is wrapped under the current secret.
-   - On failure, keep pending, show "Can't reach Cheeko right now — try again" once, and return.
-   - Why "register before the lookup" and not "before the download": the server bakes the wrap into the lookup response itself. The Python reference hit exactly this bug before the gate moved.
+3. **The pending gate — NOT IN VERSION 1.** Skip it. There is no registration to be
+   pending on, and the wrap never depends on server-side per-device state, so a reply is
+   always usable. Kept below for version 2.
+
+   > If `DeviceSecret::RegistrationPending()` is true, the reply you are holding was
+   > wrapped for whatever secret the server had, and that may be the old one. Do not
+   > download it. Run the Task 3 re-registration on this `card_dl` task. On success,
+   > clear pending and discard this reply, then re-send the lookup through
+   > `Application::SendCardLookup(uid, BuildCardLookupPayload(uid))`. On failure, keep
+   > pending, show "Can't reach Cheeko right now — try again" once, and return. Register
+   > before the *lookup*, not before the download: the server bakes the wrap into the
+   > lookup response itself.
 
 4. **Manifest writers.**
    - In the flat writer (`:1675-1735`) and the grouped writer (`:1991-2061`), when `wk.present()`, add `enc` with `cJSON_AddObjectToObject(manifest, "enc")` and the three fields `v`, `key` and `nonce`.
@@ -608,7 +638,10 @@ void SetRegistrationPending(bool pending);  // uses SetBool; never EraseKey
 
 ---
 
-### Task 5: Boot-time reconcile and targeted invalidation
+### Task 5: Boot-time reconcile and targeted invalidation — NOT IN VERSION 1
+
+> **Skip this task.** Nothing rotates in version 1, so there is nothing to reconcile.
+> Version 2 only.
 
 **File:** `content_manager.cc`. Add `ReconcileSecret()` and call it in `ContentManager::Initialize` right after `ScanDownloadedSkills()` (`:91`). Call it again at the start of the `card_content` branch, before the pending gate. It is cheap and idempotent: one tiny file read and one SHA-256.
 
@@ -650,7 +683,7 @@ The card map is left alone. An invalidated skill makes `OnCardTapped` take the "
    enum class KeyStatus { kPlaintext, kOk, kNoSecret, kMalformed, kUnwrapFailed };
    ```
 
-   It reads the metadata `enc`, converts it with `HexToBytes`, calls `DeviceSecret::Peek`, then `UnwrapPackKey`, and wipes S. `kPlaintext` means the pack needs no key. It unwraps on every call and caches nothing.
+   It reads the metadata `enc`, converts it with `HexToBytes`, and calls `UnwrapPackKey` with the build-time wrap secret. (In version 2 the secret came from `DeviceSecret::Peek` and had to be wiped afterwards; in version 1 it is a constant.) `kPlaintext` means the pack needs no key. It unwraps on every call and caches nothing. `kNoSecret` can no longer happen — keep the enum value, treat it as an internal error.
 
 2. **No character key helper.** Character art is never sealed (ruled out 2026-09-10), so sprites need no key.
 
@@ -728,9 +761,9 @@ The card map is left alone. An invalidated skill makes `OnCardTapped` take the "
    - stop the playlist;
    - show "This card needs an update — tap again while connected" once, using `ShowCardFeedback`;
    - call `ContentManager::InvalidateSkill(skill_id)`, so the next tap does a lookup instead of replaying the broken copy;
-   - if the reason was "wrong key", also call `DeviceSecret::SetRegistrationPending(true)`, so the next download re-registers first.
+   - a "wrong key" in version 1 means the build constant does not match the server's `CONTENT_WRAP_SECRET`. There is no self-heal for that: log it with the pack id and leave the skill invalidated. (Version 2 called `DeviceSecret::SetRegistrationPending(true)` here.)
 
-   This closes a loop that would otherwise stick forever. A known card with a dead or missing key plays locally on every tap, and a lookup for it would only return `card_up_to_date`, so it would never be repaired.
+   Invalidating closes a loop that would otherwise stick forever. A known card with a dead or missing key plays locally on every tap, and a lookup for it would only return `card_up_to_date`, so it would never be repaired.
 
 7. **Logging.** Use one stable tag, for example `ESP_LOGE("CONTENT-CRYPTO", "skill=%s file=%s reason=%s", ...)`. Never log key material.
 
@@ -773,10 +806,10 @@ The card map is left alone. An invalidated skill makes `OnCardTapped` take the "
 |---|---|
 | Sealed pack, correct key | Plays normally. Online and offline behave the same. |
 | Plaintext pack | Plays exactly as today |
-| Sealed file with no usable key: no S yet, no `enc`, or unwrap failed | No audio. Message: "This card needs an update — tap again while connected". The skill is invalidated. |
-| Unwrap succeeded but content is not MP3 or LVGL (wrong key) | As above, and additionally sets registration pending |
-| Registration pending and server unreachable | No download. Message: "Can't reach Cheeko right now — try again" |
-| SD card moved from another toy | Reconcile invalidates its sealed packs at boot. Once connected, the next tap fetches this toy's keys and reuses the files. |
+| Sealed file with no usable key: no `enc`, or unwrap failed | No audio. Message: "This card needs an update — tap again while connected". The skill is invalidated. |
+| Unwrap succeeded but content is not MP3 or LVGL | The build constant does not match the server's `CONTENT_WRAP_SECRET`. As above. The toy cannot fix this by itself — it is a build or deployment error, so log it loudly with the pack id. |
+| Server unreachable on a first tap | No download. Message: "Can't reach Cheeko right now — try again" |
+| SD card moved from another toy | Plays. The secret is fleet-wide. Version 2 would refuse here. |
 
 The wording of these messages belongs to the product team. The behaviour does not.
 
@@ -790,14 +823,14 @@ This is Task 1. It is also the only automated guard on the byte format, so keep 
 
 ### 7.2 Server setup for device testing
 
-- **Backend.** Run `cheeko-backend` branch `feat/sd-content-encryption` (manager-api-node and mqtt-gateway) on a machine the toy can reach, with `CONTENT_MASTER_KEY` set in the API's `.env`. Point the toy's OTA URL at it.
-  - If you use a plain-HTTP preset, remember the secret crosses the network in the clear.
-- **Device binding.** The toy's MAC must be bound to a user, so that it has an `ai_device` row. Without one the server drops the secret.
-- **Test packs.** These already exist in the shared test database:
+- **Backend.** Run `cheeko-backend` `main` (manager-api-node and mqtt-gateway) on a machine the toy can reach, with **both** `CONTENT_MASTER_KEY` and `CONTENT_WRAP_SECRET` set in the API's `.env`. `CONTENT_WRAP_SECRET` must be the same 32 bytes as the firmware build constant. Point the toy's OTA URL at it.
+- **Device binding.** Not required for key delivery any more. Version 1 hands a key to an unknown MAC, which is one of the things to test.
+- **Test packs.** In the shared test database:
 
   | Pack | Id | Contents |
   |---|---|---|
-  | `ENCTEST-20260909-1046` | 72 | sealed: 10 MP3 and 10 LVGL `.bin` |
+  | `WASHHAND-V1-20260912` | see the dashboard | sealed **version 1**: 10 MP3 and 10 LVGL `.bin` |
+  | `ENCTEST-20260909-1046` | 72 | sealed **version 2** — stale. v1 firmware must refuse it, loudly. Useful as a negative test, useless as a positive one. |
   | `ENCTEST-LEGACY-20260909-1046` | 73 | plaintext control |
 
 - **Card binding.** The card UIDs used in software tests are synthetic, so bind **real** RC522 cards to those packs. Use the dashboard's RFID page, or an admin call:
@@ -812,16 +845,16 @@ This is Task 1. It is also the only automated guard on the byte format, so keep 
 
 | # | Step | Expected |
 |---|---|---|
-| 1 | Erase NVS, boot, connect Wi-Fi | "generated device content secret" appears once. The server's `ai_device.content_secret` is non-null. |
+| 1 | Boot a toy the server has never seen, connect Wi-Fi | Nothing crypto-related happens. No NVS writes, no registration. |
 | 2 | Tap the sealed card | Downloads. `manifest.jsn` has `enc`. All 10 tracks play and all 10 images show. |
 | 3 | USB Drive Mode, then open `skills/enctest-20260909-1046/audio/01.mp3` on a PC | Starts with `CKE1`. It is not playable. |
 | 4 | Disconnect Wi-Fi and tap the sealed card again | Plays fully offline |
 | 5 | Tap the plaintext card | Plays. No crypto logs. |
-| 6 | Move the SD card to a second toy that has its own secret, and tap offline | No audio. One message. No track skipping. Radio still works. |
-| 7 | Second toy, connected, tap again | Re-registers if needed, re-fetches only the manifest (no file downloads), and plays |
-| 8 | Erase NVS on the first toy and reboot | Reconcile logs the invalidation with both fingerprints |
-| 9 | Tap while the server is unreachable | "Can't reach Cheeko" message, no download, pending stays set |
-| 10 | Server reachable, tap | Registration first, then a fresh wrapped key, then it plays. Files are not re-downloaded. |
+| 6 | Move the SD card to a second toy and tap offline | Plays. Same fleet secret. This is version 1's accepted limit, not a bug. |
+| 7 | Tap a **version 2** sealed pack (id 72) | Refuses, loudly, with the unsupported-version log. Never plays noise. |
+| 8 | Erase NVS and reboot | Nothing to do with content. Packs still play. |
+| 9 | Tap an unknown card while the server is unreachable | "Can't reach Cheeko" message, no download |
+| 10 | Server reachable, tap again | Wrapped key arrives, files download, it plays |
 | 11 | Flip one hex digit of `enc.key` in `manifest.jsn` on a PC, then tap | One message, no noise, the skill is invalidated, and the next connected tap repairs it |
 | 12 | Character card | All four faces render, unchanged (character art is plaintext) |
 | 13 | Regression: game sounds, radio, TTS and AI speech, the boot SD-root playlist, app cards | All unchanged |
@@ -831,15 +864,15 @@ This is Task 1. It is also the only automated guard on the byte format, so keep 
 
 ## 8. Acceptance criteria
 
-- [ ] The host test passes in CI with the §4.5 vectors asserted literally.
-- [ ] S is generated only after Wi-Fi is up, only once, stored as 64 hex characters in NVS `cheeko/dev_secret`, and never logged.
-- [ ] S appears only in the OTA POST body, never in `GetSystemInfoJson`.
-- [ ] `dev_sec_pend` is set on generation, cleared on an OTA HTTP 200, and set again after a wrong-key failure.
-- [ ] No download happens while registration is pending. A pending state triggers re-registration and then a fresh lookup.
+- [ ] The host test passes in CI with the §4.5 vectors asserted literally. This is the only thing that catches a wrap secret that does not match the server's.
+- [ ] The wrap secret is a build constant, never logged, never written to SD, never sent over the wire, and a release build without it fails to compile.
+- [ ] The OTA body is unchanged: no `content_secret`.
+- [ ] No NVS keys and no `secret.fp` are created.
+- [ ] A toy the server has never seen plays a sealed pack on its first tap.
+- [ ] A version byte other than 1 is refused, loudly, and never treated as plaintext.
 - [ ] Sealed packs store their files as served, plus `enc` in `manifest.jsn`. The plain key is never written.
 - [ ] MP3 and LVGL decryption are in place, with no new internal-RAM allocations, and the decryptor never sits on the 4 KB decode stack.
 - [ ] A sealed file never reaches the decoder or the image decoder undecrypted. A wrong key produces one message, no autoplay cascade, no leaked audio ownership, and an invalidated skill.
-- [ ] Boot reconcile covers the five cases in Task 5, with targeted invalidation only. Nothing is deleted except manifests.
 - [ ] All plaintext paths behave exactly as before.
 - [ ] Every new file name is 8.3.
 - [ ] The device checklist in §7.3 passes.
@@ -851,14 +884,16 @@ This is Task 1. It is also the only automated guard on the byte format, so keep 
 - **Order matters.**
   1. Ship this firmware first. It plays plaintext exactly as before, so it is safe to release before any content is sealed.
   2. Wait for the fleet to adopt it. The server's tap log records `client_version` per device.
-  3. Only then set `CONTENT_MASTER_KEY` in production.
+  3. Only then set `CONTENT_MASTER_KEY` and `CONTENT_WRAP_SECRET` in production.
+  4. Then backfill existing packs.
 
   Turning the flag on early makes every newly uploaded pack unplayable on older firmware. Sealing is a property of the single S3 object, so there is no plaintext copy to fall back to.
-- **Backend dependency that is not yet built.** The OTA response does not acknowledge the secret. The recommended addition is `content_secret_fp` in the OTA response: the fingerprint of the secret the server now holds. The toy could then clear `dev_sec_pend` only on an exact match. Until that exists, HTTP 200 is the signal (Task 3).
+- **Handing over the secret.** The 32 bytes have to get from the firmware build to the server environment without going through Slack, email or a commit. Wherever `CONTENT_MASTER_KEY` lives is the right home.
+- **A version bump never re-fetches existing files** (§10, item 1). The staged-download fix must land **before any re-encryption backfill**, or migrated packs show as updated while still holding plaintext bytes behind a new manifest.
 - **Custom-card recordings are not sealed yet.** The server deliberately skips them, because the parent app cannot decrypt. When that changes, they arrive through the same `card_content.encryption` path and need no extra firmware work.
 - **Hardware AES stays off**, as described in §5, fact 1.
-- **Flash encryption, NVS encryption and Secure Boot are all off** (`sdkconfig:494-495`, `:2472`). S is therefore readable from a flash dump. This design stops casual copying of SD cards, including through USB Drive Mode. It does not stop someone with a flash reader. Plan flash encryption as a separate project, starting in development mode, because release mode is one-way per chip.
-- **Unauthenticated registration (a backend concern, noted for completeness).** Anyone can post a different secret for a MAC. The toy then sees "unwrap succeeded, content does not decode", shows the message and sets pending. It heals itself at the next OTA check, because the toy re-sends its real secret every time.
+- **Flash encryption, NVS encryption and Secure Boot are all off** (`sdkconfig:494-495`, `:2472`). The wrap secret is therefore readable from a flash dump of any unit, which is exactly why version 2 was judged not to be worth its cost yet: without flash encryption it is version 1 with more moving parts. This design stops casual copying of SD cards, including through USB Drive Mode. It does not stop someone with a flash reader.
+- **Rotating the wrap secret is a breaking change.** New secret means re-encrypting all content and an OTA to every device. There is no partial rollout.
 
 ---
 
@@ -866,7 +901,7 @@ This is Task 1. It is also the only automated guard on the byte format, so keep 
 
 None of these are caused by this work, but several interact with it. They are worth fixing or ticketing.
 
-1. **A pack update never re-fetches files that already exist.** The resume-skip combined with the disabled `CleanSkillFolder` means a new version keeps the old files and writes a new manifest over them (`content_manager.cc:1227-1233`, `:1241-1244`). Rotation recovery in Task 5 relies on this. Real content updates are broken by it.
+1. **A pack update never re-fetches files that already exist.** The resume-skip combined with the disabled `CleanSkillFolder` means a new version keeps the old files and writes a new manifest over them (`content_manager.cc:1227-1233`, `:1241-1244`). Real content updates are broken by it, and it must be fixed before any re-encryption backfill (§9).
 2. **`card_up_to_date` updates metadata in memory only** (`:619-627`). Until the next reboot, the lookup reports a local version newer than what is on disk.
 3. **`HasLocalContent` does not lowercase the skill id** (`:177-181`), while `OnCardTapped` does (`:135-138`).
 4. **`char.jsn` is written without a temp file and rename** (`EnsureCharacterArt`, `:428-434`). A power cut can leave it half-written.
@@ -899,7 +934,6 @@ The `key` shown is a *wrapped* key, which is useless without that toy's S. It is
 | Sealed | A file carrying the 16-byte `CKE1` header followed by AES-128-CTR ciphertext |
 | S | The per-device 32-byte secret, kept in NVS |
 | K | The per-pack 16-byte content key, which lives on the server |
-| Wrapped key | K encrypted under a key derived from S. It is safe to store on SD and to send over the network. |
-| Fingerprint | The first 4 bytes of SHA-256(S) as 8 hex characters. It identifies which S a card was written for, without revealing S. |
-| Registration pending | The toy has an S the server may not have yet. No downloads are allowed until it is re-registered. |
-| Reconcile | The boot check comparing the card's fingerprint with the current S, and invalidating sealed content on a mismatch |
+| Wrapped key | K encrypted under a key derived from the wrap secret. It is safe to store on SD and to send over the network. |
+| Wrap secret | The 32 bytes shared by the whole fleet: a firmware build constant, and `CONTENT_WRAP_SECRET` on the server. Version 1's replacement for S. |
+| Fingerprint, registration pending, reconcile | Version 2 concepts. None of them exist in version 1. |

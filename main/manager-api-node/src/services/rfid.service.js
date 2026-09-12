@@ -770,22 +770,23 @@ const resolveCustomCardPack = async (normalizedUid, mac) => {
 };
 
 /**
- * Spec §6 key delivery. Returns the `encryption` field for a pack, or
+ * Version 1 key delivery. Returns the `encryption` field for a pack, or
  * undefined when either side of the wrap is missing. Never throws: a missing
- * secret (unknown mac, mainboard swap, feature off) must degrade to the
- * plaintext response, not fail the tap.
+ * key or secret (feature off, unsealed pack) must degrade to the plaintext
+ * response, not fail the tap.
+ *
+ * No mac: the wrap secret is shared by the fleet, so an unknown device, a
+ * swapped mainboard and a first-ever tap all get a working key.
  */
-const encryptionFieldFor = async (packCode, mac) => {
-  if (!mac || !contentKeys.isEnabled()) return undefined;
+const encryptionFieldFor = async (packCode) => {
+  if (!contentKeys.isEnabled()) return undefined;
   try {
-    const [packKey, secret] = await Promise.all([
-      contentKeys.getPackKey(packCode),
-      contentKeys.getDeviceSecret(mac),
-    ]);
-    if (!packKey || !secret) return undefined;
-    return { v: 2, ...wrapKeyForDevice(secret, packKey) };
+    const wrapSecret = contentKeys.getWrapSecret();
+    const packKey = await contentKeys.getPackKey(packCode);
+    if (!packKey || !wrapSecret) return undefined;
+    return { v: 1, ...wrapKeyForDevice(wrapSecret, packKey) };
   } catch (err) {
-    logger.warn(`[RFID-LOOKUP] key wrap failed for pack=${packCode} mac=${mac}: ${err.message}`);
+    logger.warn(`[RFID-LOOKUP] key wrap failed for pack=${packCode}: ${err.message}`);
     return undefined;
   }
 };
@@ -797,10 +798,9 @@ const encryptionFieldFor = async (packCode, mac) => {
  * can never drift into different response shapes.
  * @param {Object} pack - rfid_content_pack row
  * @param {string} normalizedUid - UID to echo back
- * @param {string} [mac] - MAC of the tapping device, for key delivery (spec §6)
  * @returns {Promise<Object>} lookup response
  */
-const buildContentPackResponse = async (pack, normalizedUid, mac) => {
+const buildContentPackResponse = async (pack, normalizedUid) => {
   let items = [];
   try {
     items = await listContentItemsCompat(pack.id);
@@ -886,7 +886,7 @@ const buildContentPackResponse = async (pack, normalizedUid, mac) => {
       thumbnailUrl: pack.thumbnail_url || null,
       version: pack.version,
       stories: stories,
-      encryption: await encryptionFieldFor(pack.pack_code, mac),
+      encryption: await encryptionFieldFor(pack.pack_code),
     };
   }
 
@@ -911,7 +911,7 @@ const buildContentPackResponse = async (pack, normalizedUid, mac) => {
     thumbnailUrl: pack.thumbnail_url || null,
     version: pack.version,
     items: mappedItems,
-    encryption: await encryptionFieldFor(pack.pack_code, mac),
+    encryption: await encryptionFieldFor(pack.pack_code),
   };
 };
 
@@ -1075,7 +1075,7 @@ const lookupCardByUid = async (rfidUid, mac) => {
       if (pack) {
         // packCode carries the child the toy is paired to: CK<kidId padded to 6>.
         logger.info(`[RFID-LOOKUP] Custom card resolved: uid=${normalizedUid}, mac=${mac}, packCode=${pack.pack_code}`);
-        return buildContentPackResponse(pack, normalizedUid, mac);
+        return buildContentPackResponse(pack, normalizedUid);
       }
 
       // Issued but nothing recorded yet, or the toy has no child: null, so the
@@ -1108,7 +1108,7 @@ const lookupCardByUid = async (rfidUid, mac) => {
     }
 
     if (pack) {
-      return buildContentPackResponse(pack, normalizedUid, mac);
+      return buildContentPackResponse(pack, normalizedUid);
     } else {
       logger.warn(`[RFID-LOOKUP] Content pack id=${mapping.content_pack_id} not found in rfid_content_pack table`);
     }
@@ -3681,7 +3681,7 @@ const getContentDownloadManifest = async (rfidUid, mac) => {
     // issued-UID allowlist to the tapping device's own pack.
     const customPack = await resolveCustomCardPack(normalizedUid, mac);
     if (customPack) {
-      return getContentDownloadManifestByPackId(customPack.id, normalizedUid, mac);
+      return getContentDownloadManifestByPackId(customPack.id, normalizedUid);
     }
 
     logger.info('No RFID mapping found for UID:', { rfidUid: normalizedUid });
@@ -3693,19 +3693,16 @@ const getContentDownloadManifest = async (rfidUid, mac) => {
     return null;
   }
 
-  return getContentDownloadManifestByPackId(mapping.content_pack_id, normalizedUid, mac);
+  return getContentDownloadManifestByPackId(mapping.content_pack_id, normalizedUid);
 };
 
 /**
  * Get content download manifest by pack ID (matches Java getContentDownloadManifestByPackId)
  * @param {number|BigInt} contentPackId - Content pack ID
  * @param {string} rfidUid - RFID UID for response
- * @param {string} [mac] - MAC of the tapping device, for key delivery (spec §6).
- *   Optional: callers that cannot supply one (e.g. no mac on hand) simply get
- *   no `encryption` field back, same as an unencrypted pack.
  * @returns {Promise<Object|null>} ContentDownloadDTO or null
  */
-const getContentDownloadManifestByPackId = async (contentPackId, rfidUid, mac) => {
+const getContentDownloadManifestByPackId = async (contentPackId, rfidUid) => {
   // Get content pack
   let contentPack = null;
   try {
@@ -3740,7 +3737,7 @@ const getContentDownloadManifestByPackId = async (contentPackId, rfidUid, mac) =
     totalItems: contentPack.total_items || items.length,
     language: contentPack.language,
     thumbnailUrl: contentPack.thumbnail_url || null,
-    encryption: await encryptionFieldFor(contentPack.pack_code, mac),
+    encryption: await encryptionFieldFor(contentPack.pack_code),
   };
 
   if (hasStories) {

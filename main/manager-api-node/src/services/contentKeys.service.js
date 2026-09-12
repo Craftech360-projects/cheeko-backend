@@ -1,19 +1,27 @@
 'use strict';
 /**
- * Pack keys (K) and device secrets (S) for content encryption. Spec §6.
+ * Pack keys (K) for content encryption, version 1.
  *
- * Both live in Postgres encrypted under CONTENT_MASTER_KEY. When that env var
- * is unset the whole feature is off: every getter answers null and callers
- * fall back to today's plaintext behaviour.
+ * K lives in Postgres encrypted under CONTENT_MASTER_KEY. When that env var is
+ * unset the whole feature is off: every getter answers null and callers fall
+ * back to today's plaintext behaviour.
+ *
+ * The wrap secret is shared by the whole fleet and must be byte-identical to
+ * the firmware build constant CONFIG_CHEEKO_CONTENT_WRAP_SECRET_HEX. A
+ * mismatch is silent — CTR has no integrity check — so pin it with the §6
+ * test vectors, not by trying it on hardware.
  */
 const crypto = require('crypto');
 const { prisma } = require('../config/database');
-const { normalizeMacAddress } = require('../utils/helpers');
 const cc = require('../utils/contentCrypto');
-const logger = require('../utils/logger');
 
 const masterKey = () => {
   const hex = process.env.CONTENT_MASTER_KEY || '';
+  return /^[0-9a-f]{64}$/i.test(hex) ? Buffer.from(hex, 'hex') : null;
+};
+
+const getWrapSecret = () => {
+  const hex = process.env.CONTENT_WRAP_SECRET || '';
   return /^[0-9a-f]{64}$/i.test(hex) ? Buffer.from(hex, 'hex') : null;
 };
 
@@ -50,35 +58,9 @@ const getOrCreatePackKey = async (packCode) => {
   return cc.decryptAtRest(Buffer.from(again.content_key), mk);
 };
 
-const registerDeviceSecret = async (mac, secretHex) => {
-  const mk = masterKey();
-  if (!mk) return;
-  if (!/^[0-9a-f]{64}$/i.test(secretHex || '')) throw new Error('content_secret must be 64 hex chars');
-  const normalizedMac = normalizeMacAddress(mac);
-  if (!normalizedMac) throw new Error('Invalid MAC address format');
-  const res = await prisma.ai_device.updateMany({
-    where: { mac_address: normalizedMac },
-    data: { content_secret: cc.encryptAtRest(Buffer.from(secretHex, 'hex'), mk) },
-  });
-  if (res.count === 0) logger.warn(`[CONTENT-KEYS] content_secret for unknown device ${normalizedMac} ignored`);
-};
-
-const getDeviceSecret = async (mac) => {
-  const mk = masterKey();
-  const normalizedMac = normalizeMacAddress(mac);
-  if (!mk || !normalizedMac) return null;
-  const row = await prisma.ai_device.findFirst({
-    where: { mac_address: normalizedMac },
-    select: { content_secret: true },
-  });
-  if (!row || !row.content_secret) return null;
-  return cc.decryptAtRest(Buffer.from(row.content_secret), mk);
-};
-
 module.exports = {
   isEnabled,
+  getWrapSecret,
   getPackKey,
   getOrCreatePackKey,
-  registerDeviceSecret,
-  getDeviceSecret,
 };

@@ -147,8 +147,7 @@ router.post('/',
         chipInfo: req.body.chip_info,
         application: req.body.application,
         board: req.body.board,
-        ota: req.body.ota,
-        contentSecret: req.body.content_secret || null
+        ota: req.body.ota
       };
 
       const result = await deviceService.checkOtaVersion(mac, clientId, deviceReport);
@@ -244,8 +243,7 @@ router.post('/activate',
           chipInfo: req.body.chip_info,
           application: req.body.application,
           board: req.body.board,
-          ota: req.body.ota,
-          contentSecret: req.body.content_secret || null
+          ota: req.body.ota
         };
 
         const result = await deviceService.checkOtaVersion(mac, clientId || mac, deviceReport);

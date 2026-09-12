@@ -20,7 +20,7 @@ function ctrIv(nonce) {
   return Buffer.concat([nonce, Buffer.alloc(8, 0)]);
 }
 
-function seal(plain, key, version = 2, nonce = crypto.randomBytes(8)) {
+function seal(plain, key, version = 1, nonce = crypto.randomBytes(8)) {
   const header = Buffer.alloc(HEADER_BYTES);
   MAGIC.copy(header, 0);
   header[4] = version;

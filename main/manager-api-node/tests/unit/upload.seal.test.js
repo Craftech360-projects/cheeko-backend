@@ -28,7 +28,7 @@ describe('upload sealing', () => {
   test('uploadContentFile seals the body when sealKey is given, and the URL is unchanged in shape', async () => {
     const r = await upload.uploadContentFile(MP3, 'tiger.mp3', 'rfidcontent', 'audio', 'audio/mpeg', { sealKey: K });
     const body = sent[0].Body;
-    expect(cc.parseHeader(body)).not.toBeNull();
+    expect(cc.parseHeader(body)).toMatchObject({ version: 1 });
     expect(cc.unseal(body, K)).toEqual(MP3);
     expect(sent[0].ContentType).toBe('audio/mpeg');
     expect(r.url).toMatch(/^https:\/\/.+\/rfidcontent\/audio\/tiger-[0-9a-f]{8}\.mp3$/);

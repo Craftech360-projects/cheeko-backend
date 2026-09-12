@@ -2,15 +2,21 @@
 
 A plain-language walkthrough of how pack content is protected, from admin upload to playback on the toy. For the full design see [sd-content-encryption.md](sd-content-encryption.md), for the firmware tasks see [sd-content-encryption-firmware.md](sd-content-encryption-firmware.md), and for a picture see [sd-content-encryption.svg](sd-content-encryption.svg).
 
+This describes **version 1**, which is what ships. Version 2 gives every toy its own
+secret; it is designed but deferred, and section 6 of the design doc explains why.
+
 ## The three keys
 
 The system uses three keys. Each one locks something, and each lives in exactly one place.
 
 | Key | What it is | Where it lives | What it locks |
 |---|---|---|---|
-| **Master key** | One secret for the whole server | Server `.env` (`CONTENT_MASTER_KEY`) | The other keys, when they're stored in the database |
+| **Master key** | One secret for the whole server | Server `.env` (`CONTENT_MASTER_KEY`) | The pack keys, while they sit in the database |
 | **Pack key** | 16 random bytes, one per pack | Database (`rfid_content_pack.content_key`), locked by the master key | The pack's audio and image files |
-| **Device secret** | 32 random bytes, one per toy | The toy's NVS memory, plus a locked copy in the database (`ai_device.content_secret`) | The pack key, on its way to that one toy |
+| **Wrap secret** | 32 random bytes, one for the whole fleet | Server `.env` (`CONTENT_WRAP_SECRET`) and, as the same 32 bytes, built into the firmware | The pack key, on its way to any toy |
+
+The master key never leaves the server. The wrap secret is the only one that exists in
+two places, and the two copies must be byte-for-byte identical.
 
 ## Step by step
 
@@ -21,18 +27,15 @@ The system uses three keys. Each one locks something, and each lives in exactly 
 - So S3 and the CDN only ever hold scrambled files. Anyone who grabs a CDN link just gets garbage.
 
 **2. The toy starts up.**
-- The toy connects to Wi-Fi and makes its usual OTA check.
-- On its very first check it generates its own random **device secret** and saves it in NVS memory.
-- It sends that secret in the OTA request, and it does so on every boot.
-- The server saves it against the toy's MAC address, locked with the master key.
-- The server never sends the secret back.
+- Nothing to do. The toy already has the wrap secret — it was compiled into its firmware — so there is no registration step and no first-contact requirement.
 
 **3. A child taps a card.**
 - The toy sends the card's UID to the gateway over MQTT, and the gateway asks the API.
-- The API finds the pack and unlocks two things with the master key: the pack key and this toy's device secret.
-- It **wraps** (encrypts) the pack key using that toy's device secret.
-- It replies with the file links and the wrapped key: `encryption: { key, nonce }`.
+- The API finds the pack and unlocks its pack key with the master key.
+- It **wraps** (encrypts) that pack key using the fleet wrap secret, with a fresh random nonce each time.
+- It replies with the file links and the wrapped key: `encryption: { v: 1, key, nonce }`.
 - The gateway passes this straight on to the toy. The gateway never sees an unwrapped key.
+- The server does not look at the toy's MAC address for any of this. A brand-new toy, one that has never talked to the server, and one with a replacement mainboard all get a working key.
 
 **4. The toy downloads the pack.**
 - It downloads the files exactly as they are, still scrambled, onto the SD card.
@@ -40,22 +43,24 @@ The system uses three keys. Each one locks something, and each lives in exactly 
 - The plain pack key is **never** written to the SD card.
 
 **5. The toy plays the pack.**
-- It reads its device secret from NVS and uses it to unwrap the pack key, in RAM only.
+- It uses the wrap secret from its firmware to unwrap the pack key, in RAM only.
 - It decrypts each file in small pieces as it plays.
 - When playback ends, it throws the key away.
-- If a file decrypts to garbage, the key was wrong. The toy refuses to play it and re-registers its secret before the next tap.
+- If a file decrypts to garbage, the wrap secret on the toy and the one on the server do not match. That is a build or deployment mistake, not something the toy can recover from on its own.
 
 ## Why this is safe
 
-- **Someone copies the SD card:** they get scrambled files and a wrapped key, which is useless without that toy's device secret.
+- **Someone copies the SD card:** they get scrambled files and a wrapped key. Useless on a laptop. It *will* play in another Cheeko — that is the known, accepted limit of version 1, and it is what version 2 would close.
 - **Someone leaks a CDN link:** they get a scrambled file.
-- **Someone steals a database dump:** every key in it is locked with the master key, which isn't in the database.
-- **Two toys tap the same card:** each gets the same pack key, wrapped differently for its own secret.
+- **Someone steals a database dump:** every pack key in it is locked with the master key, which isn't in the database.
+- **Someone dumps a toy's firmware:** they get the wrap secret, and with it every pack. This is the trade version 1 makes, and it is why the trigger to move to version 2 is "the secret leaks, or content turns up posted publicly".
 
 ## Things to know
 
-- **Resetting a toy's memory (NVS erase)** creates a new device secret, so the wrapped keys on its SD card stop working. The toy notices this through a fingerprint file, `secret.fp`, and wipes its downloaded content. It registers the new secret, and the next tap downloads everything again.
-- **Toys on old firmware can't play encrypted packs.** They never send a secret and don't know how to decrypt. That's why the firmware has to ship before encryption is switched on for real devices.
+- **The wrap secret must match the firmware exactly.** If the server's `CONTENT_WRAP_SECRET` and the firmware's build constant differ by one byte, every file plays as noise and *nothing reports an error* — this style of encryption has no built-in way to notice. Both sides check the same known test vectors in their test suites to catch it before hardware does.
+- **Changing the wrap secret is a breaking change.** It means re-encrypting all content *and* an OTA to every toy. Generate it once and keep it wherever the master key lives.
+- **Toys on old firmware can't play encrypted packs.** They don't know how to decrypt. That's why the firmware has to ship before encryption is switched on for real devices.
 - **The master key is the one thing you must never lose.** Without it, every encrypted pack is unreadable for good. Removing it from `.env` also doesn't un-encrypt anything already encrypted.
 - **Character art is never encrypted.** That was a decision (2026-09-10): character pictures go to S3 as-is, and the dashboard shows them without any key.
-- **Not encrypted yet:** recordings parents make in the app (custom cards), because the app can't decrypt them yet.
+- **Not encrypted yet:** recordings parents make in the app (custom cards), because the parent app can't decrypt them and the toy has no firmware for that path yet.
+- **`ai_device.content_secret` is a leftover column** from the version 2 design. Nothing writes it any more. It stays because dropping it buys nothing.

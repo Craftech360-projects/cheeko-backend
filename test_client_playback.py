@@ -6,6 +6,11 @@ import os
 import shutil
 import tempfile
 
+# The mimic reads its wrap secret from the environment at import time, standing
+# in for the firmware build constant. Set it before importing client.
+SECRET_HEX = "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf"
+os.environ["CONTENT_WRAP_SECRET"] = SECRET_HEX
+
 import client_crypto
 from client_storage import DeviceStore
 
@@ -25,9 +30,11 @@ def _client_with_pack(tmp, sealed=True, wrong_secret=False):
     manifest = {"skill_id": "story01", "skill_name": "Jungle", "version": 2}
     if sealed:
         nonce_w = os.urandom(8)
-        secret = os.urandom(32) if wrong_secret else c.store.secret()
+        # wrong_secret = the server sealed under a different fleet secret than
+        # this build carries, i.e. a firmware/server mismatch.
+        secret = os.urandom(32) if wrong_secret else bytes.fromhex(SECRET_HEX)
         wrapped = client_crypto.wrap_pack_key(secret, K, nonce_w)
-        manifest["enc"] = {"v": 2, "key": wrapped.hex(), "nonce": nonce_w.hex()}
+        manifest["enc"] = {"v": 1, "key": wrapped.hex(), "nonce": nonce_w.hex()}
         audio, image = client_crypto.seal(MP3, K), client_crypto.seal(LVGL, K)
     else:
         audio, image = MP3, LVGL
@@ -64,14 +71,31 @@ def test_plaintext_pack_plays_with_no_key():
 
 
 def test_wrong_secret_fails_loudly_and_never_returns_ciphertext():
+    """A server whose CONTENT_WRAP_SECRET differs from this build's constant.
+    Every file must fail closed; nothing may be counted as played."""
     tmp = tempfile.mkdtemp()
     try:
         c = _client_with_pack(tmp, wrong_secret=True)
-        assert not c.store.registration_pending()
         result = c.play_skill("story01")
         assert result["played"] == 0 and result["failed"] == 2
-        # Firmware guide section 8: a wrong key sets pending, so the next tap re-registers first.
-        assert c.store.registration_pending()
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_a_v2_sealed_file_is_refused_not_played_as_noise():
+    """Packs sealed before the v1 switch carry version byte 2. They must be a
+    hard failure, never fed to the decoder."""
+    tmp = tempfile.mkdtemp()
+    try:
+        c = _client_with_pack(tmp)
+        path = os.path.join(c.store.skill_dir("story01"), "audio", "01.mp3")
+        with open(path, "wb") as fh:
+            fh.write(client_crypto.seal(MP3, K, 2))
+        try:
+            c.read_skill_file(path, K)
+            assert False, "expected RuntimeError"
+        except RuntimeError as exc:
+            assert "unsupported seal version 2" in str(exc)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -100,34 +124,6 @@ def test_unknown_extension_fails_closed_instead_of_playing_unchecked():
         open(os.path.join(skill, "audio", "01.dat"), "wb").write(b"not audio, not lvgl")
         result = c.play_skill("story01")
         assert result == {"played": 2, "failed": 1}
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
-
-
-def test_rotating_the_secret_wipes_the_pack_so_the_next_tap_redownloads():
-    """An NVS erase (mimicked by rotate_secret) must not brick the pack: the
-    toy is supposed to notice its secret changed, wipe the now-undecryptable
-    content, and let the next tap re-download cleanly -- see
-    docs/sd-content-encryption.md section 7."""
-    tmp = tempfile.mkdtemp()
-    try:
-        c = _client_with_pack(tmp)
-        skill_dir = c.store.skill_dir("story01")
-        manifest_path = os.path.join(skill_dir, "manifest.jsn")
-
-        # First playback records the SD mimic's secret fingerprint (no prior
-        # fingerprint existed, so nothing is wiped) and plays fine.
-        assert c.play_skill("story01") == {"played": 2, "failed": 0}
-        assert os.path.exists(manifest_path)
-
-        c.store.rotate_secret()
-
-        # The next playback attempt notices the fingerprint no longer matches
-        # and wipes the pack instead of failing to decrypt it.
-        result = c.play_skill("story01")
-        assert result == {"played": 0, "failed": 0}
-        assert not os.path.exists(manifest_path)
-        assert os.listdir(skill_dir) == []  # empty and ready for a re-download
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

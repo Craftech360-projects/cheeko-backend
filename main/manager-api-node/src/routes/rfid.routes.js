@@ -4153,7 +4153,7 @@ router.get('/content-pack/preview',
       res.set('X-Content-Type-Options', 'nosniff');
       return res.send(bytes);
     }
-    if (header.version !== 2) return badRequest(res, 'unsupported content encryption version');
+    if (header.version !== 1) return badRequest(res, 'unsupported content encryption version');
 
     const key = await contentKeys.getPackKey(packCode);
     if (!key) return notFound(res, 'No content key for this pack');

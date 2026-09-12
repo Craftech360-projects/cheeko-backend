@@ -33,6 +33,19 @@ MQTT_BROKER_HOST = os.getenv("TEST_MQTT_BROKER_HOST", SERVER_IP)
 MQTT_BROKER_PORT = int(os.getenv("TEST_MQTT_BROKER_PORT", "1883"))
 MANAGER_API_BASE = os.getenv("TEST_MANAGER_API_BASE", "http://139.59.7.72:8001/toy")
 MQTT_SIGNATURE_KEY = os.getenv("TEST_MQTT_SIGNATURE_KEY", "test-signature-key-12345")
+# Content encryption v1: one wrap secret for the whole fleet. On a real toy this
+# is a firmware build constant (CHEEKO_CONTENT_WRAP_SECRET_HEX); here it is an
+# env var. It must be byte-identical to the server's CONTENT_WRAP_SECRET or every
+# sealed file decodes to noise, with nothing to say why -- CTR has no integrity
+# check. There is no per-device secret and no registration in v1.
+CONTENT_WRAP_SECRET = os.getenv("CONTENT_WRAP_SECRET", "")
+
+
+def wrap_secret() -> Optional[bytes]:
+    """The 32-byte fleet secret, or None when it is unset or malformed."""
+    if not re.fullmatch(r"[0-9a-fA-F]{64}", CONTENT_WRAP_SECRET or ""):
+        return None
+    return bytes.fromhex(CONTENT_WRAP_SECRET)
 # DEVICE_MAC is now dynamically generated for uniqueness
 # Minimum frames to have in buffer to continue playback
 PLAYBACK_BUFFER_MIN_FRAMES = 1
@@ -338,82 +351,21 @@ class TestClient:
         except (json.JSONDecodeError, Exception) as e:
             logger.error(f"Error processing MQTT message: {e}")
 
-    def _ensure_secret_registered(self, context: str) -> bool:
-        """If reconcile_secret() flagged a rotation whose new secret the
-        server hasn't confirmed yet, register it now via the existing OTA
-        call (register_content_secret).
-
-        The server wraps every pack key under whatever secret it currently
-        holds for this MAC, so proceeding while a registration is pending
-        would hand back a pack wrapped under the OLD secret -- exactly the
-        bug this closes. Returns False if a pending registration exists and
-        could not be resolved; callers must not download in that case.
-        """
-        if not self.store.registration_pending():
-            return True
-        logger.warning(
-            "[SECRET] %s: registration is PENDING (secret rotated, or the server "
-            "held a different one) -- registering now, before the lookup.", context)
-        if self.register_content_secret():
-            self.store.mark_registration_complete()
-            logger.info("[SECRET] %s: registered, pending cleared.", context)
-            return True
-        logger.error(
-            "[SECRET] %s: registration failed -- the server may still hold "
-            "another secret, so anything it wraps right now could be "
-            "undecryptable by this device. Not downloading; retry once the "
-            "server is reachable.", context)
-        return False
-
-    def boot_register_secret(self) -> bool:
-        """Mimic the toy's boot OTA check, which carries content_secret EVERY
-        time (firmware guide Task 3). Local mode builds MQTT credentials
-        itself and skips the rest of OTA, but not this: re-sending on every
-        boot is what lets the server converge on this device's real secret.
-        """
-        self.store.reconcile_secret()
-        logger.info("[BOOT] OTA check with content_secret for %s (secret fingerprint %s)",
-                    self.device_mac_formatted, self.store.secret_fingerprint())
-        if self.register_content_secret():
-            self.store.mark_registration_complete()
-            logger.info("[BOOT] OTA answered 200: the server now wraps pack keys for this "
-                        "secret (if this MAC is a known device). Registration not pending.")
-            return True
-        logger.warning("[BOOT] OTA check failed; the server may hold another secret. A "
-                       "wrong-key playback will mark registration pending for the next tap.")
-        return False
-
-    def _on_wrong_key(self, context: str) -> None:
-        """Firmware guide section 8: a key that unwraps but content that does not
-        decode means the server wrapped it for a different secret (e.g. another
-        client registered one for this MAC). Mark registration pending so the
-        next tap re-registers BEFORE its lookup and gets a key wrapped for us."""
-        if self.store.registration_pending():
-            return
-        self.store.mark_registration_pending()
-        logger.warning("[SECRET] %s: key unwrapped but content does not decode -- the server "
-                       "holds a different secret for %s. Registration marked PENDING; the next "
-                       "tap re-registers before its lookup.", context, self.device_mac_formatted)
-
     def download_card_content(self, card_content: Dict) -> Dict:
         """Mimic ContentManager::HandleServerResponse for a card_content payload.
 
         Files are stored EXACTLY as the CDN serves them — sealed stays sealed.
         Decryption happens at playback (see play_skill), which is what the toy
-        does and what keeps a copied card useless.
+        does and what keeps a copied card useless on a laptop.
         """
-        self.store.reconcile_secret()
         skill_id = (card_content.get("skill_id") or "").lower()
         if not skill_id:
             raise ValueError("card_content has no skill_id")
 
-        if not self._ensure_secret_registered("skill '%s' download" % skill_id):
-            return {"skill_id": skill_id, "files": [], "sealed": False, "skipped": True}
-
         skill_dir = self.store.skill_dir(skill_id)
 
         enc = card_content.get("encryption") or None
-        if enc and not (enc.get("v") == 2 and len(enc.get("key", "")) == 32
+        if enc and not (enc.get("v") == 1 and len(enc.get("key", "")) == 32
                         and len(enc.get("nonce", "")) == 16):
             logger.warning("[PACK] encryption block malformed; treating pack as plaintext")
             enc = None
@@ -453,9 +405,9 @@ class TestClient:
             "content_type": card_content.get("content_type") or "",
         }
         if enc:
-            # The WRAPPED key. Unwrapping needs the NVS secret, so this file on
-            # its own gets an attacker nothing.
-            manifest["enc"] = {"v": 2, "key": enc["key"], "nonce": enc["nonce"]}
+            # The WRAPPED key. Unwrapping needs the fleet secret, which lives in
+            # the firmware image, so this file on its own gets a PC nothing.
+            manifest["enc"] = {"v": 1, "key": enc["key"], "nonce": enc["nonce"]}
         with open(os.path.join(skill_dir, "manifest.jsn"), "w", encoding="utf-8") as fh:
             json.dump(manifest, fh, indent=2)
 
@@ -547,7 +499,7 @@ class TestClient:
         return problems
 
     def skill_key(self, skill_id: str):
-        """Unwrap this skill's pack key with the NVS secret. None = plaintext pack.
+        """Unwrap this skill's pack key with the fleet secret. None = plaintext pack.
 
         Mimics ContentManager::GetSkillKey. The key exists only for the duration
         of playback; nothing caches it and nothing writes it down.
@@ -563,9 +515,15 @@ class TestClient:
         enc = manifest.get("enc")
         if not enc:
             return None
+        secret = wrap_secret()
+        if secret is None:
+            logger.error("[PLAY] skill '%s' is sealed but CONTENT_WRAP_SECRET is unset or "
+                         "not 64 hex chars. A real toy has this compiled in and cannot hit "
+                         "this case.", skill_id)
+            return None
         try:
             return client_crypto.unwrap_pack_key(
-                self.store.secret(),
+                secret,
                 bytes.fromhex(enc["key"]),
                 bytes.fromhex(enc["nonce"]),
             )
@@ -595,7 +553,7 @@ class TestClient:
             version, nonce = parsed
             if key is None:
                 raise RuntimeError(f"sealed file with no key: {path}")
-            if version != 2:
+            if version != 1:
                 raise RuntimeError(f"unsupported seal version {version}: {path}")
 
             dec = client_crypto.decrypt_stream(key, nonce)
@@ -614,7 +572,6 @@ class TestClient:
         fails is counted and logged, never handed onward as audio — playing
         ciphertext is the one outcome the firmware must also refuse.
         """
-        self.store.reconcile_secret()
         key = self.skill_key(skill_id)
         skill_dir = self.store.skill_dir(skill_id)
         played = failed = 0
@@ -641,8 +598,6 @@ class TestClient:
                     if not ok:
                         logger.error("[PLAY] %s decrypted to garbage — wrong key. "
                                      "Refusing to play. First bytes: %s", path, data[:8].hex())
-                        if key is not None:
-                            self._on_wrong_key("skill '%s'" % skill_id)
                         failed += 1
                         continue
 
@@ -655,11 +610,9 @@ class TestClient:
             key_status = "unwrapped, content decoded"
         elif played == 0:
             key_status = (
-                "unwrapped but EVERY file failed to decode -- this usually means "
-                "the server wrapped this pack under a DIFFERENT secret than the "
-                "one this device now holds (a rotation, or another client registered "
-                "a secret for this MAC). Registration is now pending, so the next tap "
-                "re-registers and re-downloads."
+                "unwrapped but EVERY file failed to decode -- CONTENT_WRAP_SECRET "
+                "here does not match the server's. On a toy that is a firmware/server "
+                "build mismatch, and nothing on the device can fix it."
             )
         else:
             key_status = "unwrapped, %d of %d file(s) failed to decode" % (failed, played + failed)
@@ -981,10 +934,6 @@ class TestClient:
                     "type": "doit-ai-01-kit"
                 },
                 "client_id": session_client_id,
-                # Spec section 6: the toy registers its content secret on the
-                # OTA call it already makes. Write-only — the server never
-                # returns it.
-                "content_secret": self.store.secret_hex(),
             }
             response = requests.post(
                 f"http://{SERVER_IP}:{OTA_PORT}/toy/ota/", headers=headers, json=data, timeout=5)
@@ -1062,34 +1011,6 @@ class TestClient:
             return True
         except requests.exceptions.RequestException as e:
             logger.error(f"[ERROR] Failed to get OTA config: {e}")
-            return False
-
-    def register_content_secret(self) -> bool:
-        """POST the content secret to the OTA endpoint without the full handshake.
-
-        RFID mode configures MQTT locally and never calls OTA, so a fresh MAC has
-        no secret on the server and every lookup comes back unencrypted. This is
-        the one call that fixes that.
-        """
-        url = f"http://{SERVER_IP}:{OTA_PORT}/toy/ota/"
-        body = {
-            "application": {"version": "1.7.6", "name": "cheeko-client-mimic"},
-            "board": {"type": "doit-ai-01-kit"},
-            "mac_address": self.device_mac_formatted,
-            "content_secret": self.store.secret_hex(),
-        }
-        try:
-            resp = requests.post(url, headers={"device-id": self.device_mac_formatted},
-                                 json=body, timeout=10)
-            logger.info("[SECRET] Registered content secret for %s: HTTP %s",
-                        self.device_mac_formatted, resp.status_code)
-            body_text = resp.text or ""
-            if self.store.secret_hex() in body_text:
-                logger.error("[SECRET] SERVER ECHOED THE SECRET BACK — that is a leak, report it")
-                return False
-            return resp.ok
-        except requests.exceptions.RequestException as exc:
-            logger.error("[SECRET] Failed to register content secret: %s", exc)
             return False
 
     def connect_mqtt(self) -> bool:
@@ -1610,17 +1531,10 @@ class TestClient:
         """Run a focused RFID tap/version test against local services."""
         self.auto_download_packs = download_pack
         self.setup_local_test_config()
-        self.boot_register_secret()
-
-        if download_pack:
-            # The server wraps a pack's key under whatever secret it holds
-            # for this MAC AT LOOKUP TIME -- that's baked into the
-            # card_content response, before download_card_content() ever
-            # runs. So a registration still pending (boot check failed, or a
-            # wrong-key playback) must be resolved here, before the tap
-            # below, not merely before the download.
-            self.store.reconcile_secret()
-            self._ensure_secret_registered("RFID tap for %s" % rfid_uid)
+        if wrap_secret() is None:
+            logger.warning("[RFID-TEST] CONTENT_WRAP_SECRET is unset or malformed. A sealed "
+                           "pack will download but will not play. Export the same 64 hex "
+                           "chars the server has.")
 
         if not self.connect_mqtt():
             return
@@ -1803,7 +1717,7 @@ def run_ui(client: TestClient, default_uid: str) -> None:
     pygame.mixer.init()
     client.auto_download_packs = True
     client.setup_local_test_config()
-    registered = client.boot_register_secret()
+    have_secret = wrap_secret() is not None
     connected = client.connect_mqtt()
 
     root = tk.Tk()
@@ -1812,7 +1726,7 @@ def run_ui(client: TestClient, default_uid: str) -> None:
     state = {"skill": None, "key": None, "tracks": [], "playing": None}
     uid_var = tk.StringVar(value=default_uid)
     status = tk.StringVar(value=("MQTT connected" if connected else "MQTT connect FAILED (offline playback only)")
-                          + (" | secret registered" if registered else " | secret NOT registered"))
+                          + (" | wrap secret loaded" if have_secret else " | NO CONTENT_WRAP_SECRET: sealed packs will not play"))
 
     def say(msg, level=logging.INFO):
         """Window status line, mirrored to the console log."""
@@ -1823,7 +1737,6 @@ def run_ui(client: TestClient, default_uid: str) -> None:
         threading.Thread(target=fn, daemon=True).start()
 
     def load_skill(skill_id):
-        client.store.reconcile_secret()
         d = client.store.skill_dir(skill_id)
         state.update(skill=skill_id, key=client.skill_key(skill_id), playing=None,
                      tracks=sorted(glob.glob(os.path.join(d, "**", "audio", "*.mp3"), recursive=True)))
@@ -1849,10 +1762,8 @@ def run_ui(client: TestClient, default_uid: str) -> None:
             say(f"{name}: {exc}", logging.ERROR)
             return
         if not looks_decoded(path, data):
-            if state["key"] is not None:
-                client._on_wrong_key(f"track {name}")
-            say(f"{name} decrypted to garbage (wrong key) - refusing to play. "
-                "Tap the card again: it re-registers the secret first.", logging.ERROR)
+            say(f"{name} decrypted to garbage - refusing to play. CONTENT_WRAP_SECRET "
+                "does not match the server's.", logging.ERROR)
             return
         pygame.mixer.music.load(io.BytesIO(data), "mp3")
         pygame.mixer.music.play()
@@ -1894,11 +1805,6 @@ def run_ui(client: TestClient, default_uid: str) -> None:
             ui_jobs.put(apply)
 
         def work():
-            # Register BEFORE the lookup: the server bakes the key wrap into
-            # the card_content reply (see run_rfid_test).
-            client.store.reconcile_secret()
-            if not client._ensure_secret_registered(f"RFID tap for {uid}"):
-                return done("Secret registration is pending and failed (is the API on :8002 up?)")
             resp = client.send_rfid_card_lookup(uid)
             kind = (resp or {}).get("type")
             if kind != "card_content":
@@ -1907,18 +1813,6 @@ def run_ui(client: TestClient, default_uid: str) -> None:
             if not card_pack_download_done.wait(timeout=120):
                 return done("Download did not finish within 120s")
             done(None, (resp.get("skill_id") or "").lower())
-
-        background(work)
-
-    def register():
-        say("Registering content secret...")
-
-        def work():
-            ok = client.register_content_secret()
-            if ok:
-                client.store.mark_registration_complete()
-            ui_jobs.put(lambda: say("Secret registered" if ok else "Secret registration FAILED",
-                                    logging.INFO if ok else logging.ERROR))
 
         background(work)
 
@@ -1936,7 +1830,6 @@ def run_ui(client: TestClient, default_uid: str) -> None:
     ttk.Entry(top, textvariable=uid_var, width=16).pack(side="left", padx=4)
     tap_btn = ttk.Button(top, text="Tap card", command=tap)
     tap_btn.pack(side="left")
-    ttk.Button(top, text="Register secret", command=register).pack(side="left", padx=4)
     ttk.Button(top, text="Open folder", command=open_folder).pack(side="left")
     ttk.Label(root, textvariable=status, padding=(8, 0)).pack(fill="x")
 
@@ -2054,8 +1947,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--register-secret",
         action="store_true",
-        help="No longer needed: rfid and ui modes send the secret on startup, "
-             "like the toy's boot OTA check. Kept so old commands still parse.",
+        help="No-op. Content encryption v1 has no per-device secret to register. "
+             "Kept so old commands still parse.",
     )
     args = parser.parse_args()
     if args.mode is None:

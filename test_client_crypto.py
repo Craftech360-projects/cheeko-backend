@@ -24,22 +24,25 @@ EXPECTED_HEX = "ee8ebda5b634ecfbb0284eaf8e810a10f157b1d9994c6ed0d18d36af05616b0a
 
 
 def test_seal_layout():
-    sealed = seal(PLAIN, K, 2, NONCE)
+    sealed = seal(PLAIN, K, 1, NONCE)
     assert len(sealed) == len(PLAIN) + HEADER_BYTES
     assert sealed[:4] == b"CKE1"
-    assert sealed[4] == 2
+    assert sealed[4] == 1
     assert sealed[5:8] == b"\x00\x00\x00"
     assert sealed[8:16] == NONCE
 
 
 def test_matches_the_shared_vector():
-    sealed = seal(PLAIN, K, 2, NONCE)
+    sealed = seal(PLAIN, K, 1, NONCE)
     assert sealed[HEADER_BYTES:].hex() == EXPECTED_HEX
+    # The version byte is not part of the CTR input, so only byte 4 differs
+    # from the old v2 vector. Pin the whole file, header included.
+    assert sealed.hex() == "434b453101000000" + NONCE.hex() + EXPECTED_HEX
 
 
 def test_parse_header_and_round_trip():
     sealed = seal(PLAIN, K)
-    assert parse_header(sealed) == (2, sealed[8:16])
+    assert parse_header(sealed) == (1, sealed[8:16])
     assert unseal(sealed, K) == PLAIN
 
 
@@ -74,6 +77,16 @@ def test_unwrap_matches_the_server_derivation():
     wrap_key = hmac.new(secret, WRAP_INFO, hashlib.sha256).digest()[:16]
     c = Cipher(algorithms.AES(wrap_key), modes.CTR(nonce_w + b"\x00" * 8)).decryptor()
     assert c.update(wrapped) + c.finalize() == K
+
+
+def test_shared_wrap_vector():
+    """The §6 handover vector, asserted literally on both sides."""
+    secret = bytes.fromhex("a0a1a2a3a4a5a6a7a8a9aaabacadaeaf"
+                           "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf")
+    nonce_w = bytes.fromhex("0909090909090909")
+    wrap_key = hmac.new(secret, WRAP_INFO, hashlib.sha256).digest()[:16]
+    assert wrap_key.hex() == "94e5bea4747beb214b0cb91b3f8825d3"
+    assert wrap_pack_key(secret, K, nonce_w).hex() == "99cf47ac63e20dd29d679e9854465f87"
 
 
 def test_wrap_info_literal_is_pinned():

@@ -3,7 +3,6 @@ const crypto = require('crypto');
 
 const mockPrisma = {
   rfid_content_pack: { findFirst: jest.fn(), updateMany: jest.fn() },
-  ai_device: { findFirst: jest.fn(), updateMany: jest.fn() },
 };
 jest.mock('../../src/config/database', () => ({ prisma: mockPrisma }));
 
@@ -15,7 +14,10 @@ describe('contentKeys.service', () => {
     jest.clearAllMocks();
     process.env.CONTENT_MASTER_KEY = MASTER;
   });
-  afterEach(() => { delete process.env.CONTENT_MASTER_KEY; });
+  afterEach(() => {
+    delete process.env.CONTENT_MASTER_KEY;
+    delete process.env.CONTENT_WRAP_SECRET;
+  });
 
   test('isEnabled is false without CONTENT_MASTER_KEY and every getter returns null', async () => {
     delete process.env.CONTENT_MASTER_KEY;
@@ -23,12 +25,30 @@ describe('contentKeys.service', () => {
     expect(svc.isEnabled()).toBe(false);
     expect(await svc.getOrCreatePackKey('STORY01')).toBeNull();
     expect(await svc.getPackKey('STORY01')).toBeNull();
-    expect(await svc.getDeviceSecret('AA:BB:CC:DD:EE:FF')).toBeNull();
-    await svc.registerDeviceSecret('AA:BB:CC:DD:EE:FF', crypto.randomBytes(32).toString('hex'));
     expect(mockPrisma.rfid_content_pack.findFirst).not.toHaveBeenCalled();
     expect(mockPrisma.rfid_content_pack.updateMany).not.toHaveBeenCalled();
-    expect(mockPrisma.ai_device.findFirst).not.toHaveBeenCalled();
-    expect(mockPrisma.ai_device.updateMany).not.toHaveBeenCalled();
+  });
+
+  // A wrong-length or non-hex secret must read as "no secret", not as a short
+  // key: silently wrapping under a truncated secret is unrecoverable in the
+  // field, because CTR gives the toy no way to notice.
+  test('getWrapSecret accepts exactly 64 hex chars and rejects everything else', async () => {
+    const svc = require('../../src/services/contentKeys.service');
+    const secret = crypto.randomBytes(32).toString('hex');
+
+    process.env.CONTENT_WRAP_SECRET = secret;
+    expect(svc.getWrapSecret()).toEqual(Buffer.from(secret, 'hex'));
+    expect(svc.getWrapSecret().length).toBe(32);
+
+    process.env.CONTENT_WRAP_SECRET = secret.toUpperCase();
+    expect(svc.getWrapSecret()).toEqual(Buffer.from(secret, 'hex'));
+
+    for (const bad of ['', 'short', secret.slice(0, 62), secret + 'ab', 'z'.repeat(64)]) {
+      process.env.CONTENT_WRAP_SECRET = bad;
+      expect(svc.getWrapSecret()).toBeNull();
+    }
+    delete process.env.CONTENT_WRAP_SECRET;
+    expect(svc.getWrapSecret()).toBeNull();
   });
 
   test('getOrCreatePackKey creates a 16-byte key once and returns the same key after', async () => {
@@ -84,30 +104,5 @@ describe('contentKeys.service', () => {
     const svc = require('../../src/services/contentKeys.service');
     mockPrisma.rfid_content_pack.findFirst.mockResolvedValue(null);
     expect(await svc.getOrCreatePackKey('NOPE')).toBeNull();
-  });
-
-  test('registerDeviceSecret stores encrypted, normalises the mac, and rejects bad input', async () => {
-    const svc = require('../../src/services/contentKeys.service');
-    const cc = require('../../src/utils/contentCrypto');
-    const secret = crypto.randomBytes(32).toString('hex');
-    mockPrisma.ai_device.updateMany.mockResolvedValue({ count: 1 });
-
-    await svc.registerDeviceSecret('aa-bb-cc-dd-ee-ff', secret);
-    const call = mockPrisma.ai_device.updateMany.mock.calls[0][0];
-    expect(call.where.mac_address).toBe('AA:BB:CC:DD:EE:FF');
-    expect(cc.decryptAtRest(call.data.content_secret, Buffer.from(MASTER, 'hex')).toString('hex')).toBe(secret);
-
-    await expect(svc.registerDeviceSecret('AA:BB:CC:DD:EE:FF', 'short')).rejects.toThrow('content_secret must be 64 hex chars');
-  });
-
-  test('getDeviceSecret decrypts, and returns null when the column is empty', async () => {
-    const svc = require('../../src/services/contentKeys.service');
-    const cc = require('../../src/utils/contentCrypto');
-    const s = crypto.randomBytes(32);
-    mockPrisma.ai_device.findFirst.mockResolvedValue({ content_secret: cc.encryptAtRest(s, Buffer.from(MASTER, 'hex')) });
-    expect(await svc.getDeviceSecret('AA:BB:CC:DD:EE:FF')).toEqual(s);
-
-    mockPrisma.ai_device.findFirst.mockResolvedValue({ content_secret: null });
-    expect(await svc.getDeviceSecret('AA:BB:CC:DD:EE:FF')).toBeNull();
   });
 });

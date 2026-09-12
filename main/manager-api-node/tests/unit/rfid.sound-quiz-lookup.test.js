@@ -19,7 +19,7 @@ const mockPrisma = {
 jest.mock('../../src/config/database', () => ({ prisma: mockPrisma }));
 jest.mock('../../src/services/integrations/qdrant.service', () => ({}));
 jest.mock('../../src/services/upload.service', () => ({}));
-const mockContentKeys = { isEnabled: () => false, getPackKey: jest.fn(), getDeviceSecret: jest.fn() };
+const mockContentKeys = { isEnabled: () => false, getPackKey: jest.fn(), getWrapSecret: jest.fn() };
 jest.mock('../../src/services/contentKeys.service', () => mockContentKeys);
 
 const rfidService = require('../../src/services/rfid.service');

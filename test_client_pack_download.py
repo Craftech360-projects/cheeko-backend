@@ -11,6 +11,10 @@ import tempfile
 import threading
 from unittest import mock
 
+# Stands in for the firmware build constant; must be set before client imports.
+SECRET_HEX = "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf"
+os.environ["CONTENT_WRAP_SECRET"] = SECRET_HEX
+
 import client_crypto
 from client_storage import DeviceStore
 
@@ -38,13 +42,13 @@ def test_sealed_pack_is_stored_as_ciphertext_with_a_wrapped_key():
     try:
         c = _client(tmp)
         nonce_w = os.urandom(8)
-        wrapped = client_crypto.wrap_pack_key(c.store.secret(), K, nonce_w)
+        wrapped = client_crypto.wrap_pack_key(bytes.fromhex(SECRET_HEX), K, nonce_w)
         payload = {
             "type": "card_content", "rfid_uid": "AABBCCDD",
             "skill_id": "story01", "skill_name": "Jungle", "version": 2,
             "audio": [{"index": 1, "url": "https://cdn/a.mp3"}],
             "images": [{"index": 1, "url": "https://cdn/a.bin"}],
-            "encryption": {"v": 2, "key": wrapped.hex(), "nonce": nonce_w.hex()},
+            "encryption": {"v": 1, "key": wrapped.hex(), "nonce": nonce_w.hex()},
         }
         with mock.patch("client.requests.get", _fake_get(client_crypto.seal(MP3, K))):
             result = c.download_card_content(payload)
@@ -56,7 +60,7 @@ def test_sealed_pack_is_stored_as_ciphertext_with_a_wrapped_key():
         assert client_crypto.unseal(on_disk, K) == MP3
 
         manifest = json.load(open(os.path.join(skill, "manifest.jsn")))
-        assert manifest["enc"] == {"v": 2, "key": wrapped.hex(), "nonce": nonce_w.hex()}
+        assert manifest["enc"] == {"v": 1, "key": wrapped.hex(), "nonce": nonce_w.hex()}
         assert K.hex() not in json.dumps(manifest)                  # plain key never on disk
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
@@ -178,45 +182,27 @@ def test_on_mqtt_message_queues_card_content_before_download_finishes():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def test_download_skips_until_pending_secret_registration_succeeds():
-    """After a rotation, a download must not proceed until the new secret is
-    registered with the server -- the server wraps under whatever secret it
-    currently holds, so downloading first would just produce another
-    undecryptable pack. A failed registration must skip the download outright
-    rather than burning bandwidth on a pack that can never play.
-    """
+def test_an_unknown_device_still_gets_a_usable_pack():
+    """v1 has no registration step and no per-device state: a client the server
+    has never seen downloads and plays a sealed pack on its first tap. This is
+    the regression that would silently undo the whole point of v1."""
     tmp = tempfile.mkdtemp()
     try:
         c = _client(tmp)
-        c.store.reconcile_secret()  # records the baseline fingerprint
-        c.store.rotate_secret()
-
+        nonce_w = os.urandom(8)
+        wrapped = client_crypto.wrap_pack_key(bytes.fromhex(SECRET_HEX), K, nonce_w)
         payload = {
             "type": "card_content", "rfid_uid": "AABBCCDD",
-            "skill_id": "rot01", "skill_name": "Rotated", "version": 1,
+            "skill_id": "new01", "skill_name": "First tap", "version": 1,
             "audio": [{"index": 1, "url": "https://cdn/a.mp3"}], "images": [],
+            "encryption": {"v": 1, "key": wrapped.hex(), "nonce": nonce_w.hex()},
         }
-        manifest_path = os.path.join(c.store.skill_dir("rot01"), "manifest.jsn")
-
-        # Registration fails -> must not touch the network for the pack at all.
-        with mock.patch.object(c, "register_content_secret", return_value=False), \
-             mock.patch("client.requests.get") as get_mock:
+        with mock.patch("client.requests.get", _fake_get(client_crypto.seal(MP3, K))):
             result = c.download_card_content(payload)
-        get_mock.assert_not_called()
-        assert result["files"] == []
-        assert result.get("skipped") is True
-        assert c.store.registration_pending() is True
-        assert not os.path.exists(manifest_path)
 
-        # Registration succeeds -> download proceeds and the flag clears.
-        fake_get = _fake_get(MP3)
-        with mock.patch.object(c, "register_content_secret", return_value=True), \
-             mock.patch("client.requests.get", fake_get):
-            result = c.download_card_content(payload)
-        assert fake_get.called
-        assert result["files"]
-        assert c.store.registration_pending() is False
-        assert os.path.exists(manifest_path)
+        assert result["sealed"] is True and result["files"]
+        assert c.skill_key("new01") == K
+        assert c.play_skill("new01") == {"played": 1, "failed": 0}
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

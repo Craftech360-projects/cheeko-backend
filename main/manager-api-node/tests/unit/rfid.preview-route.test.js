@@ -144,8 +144,8 @@ test('404 when the pack has no key', async () => {
   expect(res.status).toBe(404);
 });
 
-test('rejects a sealed object whose header version is not 2', async () => {
-  const oldVersionSealed = cc.seal(MP3, K, 1);
+test('rejects a sealed object whose header version is not 1', async () => {
+  const oldVersionSealed = cc.seal(MP3, K, 2);
   global.fetch.mockImplementationOnce(async () => ({
     ok: true,
     status: 200,
