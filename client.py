@@ -22,6 +22,12 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
 from queue import Queue, Empty
 import opuslib
+from dotenv import load_dotenv
+
+# Pinned to this file's own directory, not the cwd, so the mimic picks up the
+# same .env whichever folder you run it from. It does not override anything
+# already exported, so a one-off `set VAR=...` still wins.
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
 # --- Configuration ---
 
