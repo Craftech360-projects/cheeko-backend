@@ -16,9 +16,12 @@ def test_wants_quiz_matches_the_three_placeholders():
 def test_quiz_block_lists_questions_with_ids_and_answers():
     block = quiz_block(BATCH)
     assert "## Today's Quiz Questions (Level 1, ages 6-8)" in block
-    assert "(id=11) How many legs does a spider have? — Answer: eight (also accept: 8)" in block
-    assert "(id=12) What colour is the sky? — Answer: blue" in block
-    assert "answered 2 already today" in block
+    # numbered from answered_today + 1 like picoclaw: a list restarting at 1 made the model say "question one" mid-day
+    assert "\n3. (id=11) How many legs does a spider have? — Answer: eight (also accept: 8)" in block
+    assert "\n4. (id=12) What colour is the sky? — Answer: blue" in block
+    assert "STATUS: today's Daily Ten is NOT complete - 2 of 10 scored so far today" in block
+    assert "Ask ONLY these questions, in order, one per turn. Never invent a question." in block
+    assert "IS complete (10 scored today)" in quiz_block({**BATCH, "answered_today": 10, "day_complete": True})
     assert "Wonder Question (code W7): Why is the sky blue?" in block
     assert "question bank is unavailable" in quiz_block(None)
 

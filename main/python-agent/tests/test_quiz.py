@@ -38,7 +38,7 @@ async def test_correct_writes_memo_reports_and_moves_on(tmp_path: Path):
     mgr = FakeManager()
     t = tracker(tmp_path, mgr)
     directive = await t.score("11", "correct", "eight")
-    assert "Ask question 12 plainly" in directive
+    assert "Ask question 12 plainly" in directive and "Next is question 4 of today's Daily Ten" in directive
     memo = (tmp_path / "memory" / "state" / "daily_quiz.md").read_text(encoding="utf-8")
     assert memo.startswith("MEMO: type=daily_quiz | date=2026-09-13 | scored_q=11 | scored_text=How many legs does a spider have? | result=correct | answered=3")
     assert mgr.answers == [("11", "correct", "quiz", [{"verdict": "correct", "transcript": "eight"}])]
@@ -57,7 +57,7 @@ async def test_misses_walk_the_ladder_then_reveal(tmp_path: Path):
     final = await t.score("11", "miss", "twelve")
     assert "all three tries" in final and "Ask question 12 plainly" in final
     assert mgr.answers[0][1] == "revealed" and len(mgr.answers[0][3]) == 3
-    assert "pending question id=12" in t.status() and len(pushed) == 3
+    assert "pending question 4 id=12" in t.status() and len(pushed) == 3
 
 
 @pytest.mark.asyncio
@@ -66,8 +66,26 @@ async def test_correct_at_door_three_is_revealed(tmp_path: Path):
     t = tracker(tmp_path, mgr)
     await t.score("11", "miss", "six")
     await t.score("11", "miss", "ten")
-    await t.score("11", "correct", "eight")
+    directive = await t.score("11", "correct", "eight")
     assert mgr.answers[0][1] == "revealed"
+    # seen live 2026-09-13: the Door 3 "explain and ask again" text here contradicted "move on"
+    assert "again" not in directive.split("## This Question")[0] and "Do NOT say the answer" not in directive
+    assert "got it right" in directive and "Ask question 12 plainly" in directive
+
+
+@pytest.mark.asyncio
+async def test_revealed_on_request_tells_the_answer_and_moves_on(tmp_path: Path):
+    t = tracker(tmp_path, FakeManager())
+    directive = await t.score("11", "revealed", "tell me")
+    assert "tell them the answer" in directive.lower() and "ask the question again" not in directive.lower()
+
+
+@pytest.mark.asyncio
+async def test_daily_ten_stops_at_ten_scored(tmp_path: Path):
+    t = QuizTracker({**BATCH, "answered_today": 9}, tmp_path, "daily_quiz", FakeManager(), "68:EE:8F:60:BA:AC")
+    directive = await t.score("11", "correct", "eight")
+    assert "Daily Ten is complete" in directive and "Ask question 12" not in directive
+    assert "Daily Ten complete" in t.status()
 
 
 @pytest.mark.asyncio

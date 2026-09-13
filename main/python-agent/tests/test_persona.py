@@ -23,6 +23,7 @@ def test_speech_rules_come_last_and_override_picoclaw_text_rules():
 def test_backend_instructions_carry_bank_and_memos():
     b = backend_instructions("## Today's Quiz Questions", ["MEMO: type=daily_quiz | date=2026-09-12 | answered=3"], True)
     assert "quiz_score_answer" in b and "## Today's Quiz Questions" in b and "MEMO: type=daily_quiz" in b
+    assert "meaning" in b  # "rain" for "water" was scored a miss for a 4-year-old
     assert "quiz_score_answer" not in backend_instructions("", [], False)
 
 

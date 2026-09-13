@@ -40,6 +40,19 @@ from agent.tools import tools_for  # noqa: E402
 from agent.workspace import build_system_prompt, hydrate_workspace, persona_from_manager, remove_workspace  # noqa: E402
 
 logger = logging.getLogger("cheeko-gptlive")
+
+
+class _ShowGPTLiveError(logging.Filter):
+    """The plugin puts the error body in the lk.pii.error extra, which the log formatter drops; surface it."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        body = getattr(record, "lk.pii.error", None)
+        if body is not None and "gpt-live returned an error" in str(record.msg):
+            record.msg = f"{record.msg}: {body}"
+        return True
+
+
+logging.getLogger("livekit.plugins.openai").addFilter(_ShowGPTLiveError())
 # Same name as picoclaw-livekit, so the manager's character routing reaches this worker. Run only one of the
 # two under a name: LiveKit spreads dispatches across every worker registered with it. GPTLIVE_AGENT_NAME=cheeko-gptlive for side by side.
 AGENT_NAME = os.getenv("GPTLIVE_AGENT_NAME", "cheeko-agent")

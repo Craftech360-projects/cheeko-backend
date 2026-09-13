@@ -80,7 +80,9 @@ def backend_instructions(bank_block: str, memos: list[str], has_quiz: bool, memo
             "Reply with one or two short, friendly, child-safe sentences the voice model can read out.")
     if has_quiz:
         text += (" For quiz answers, compare the child's words with the bank answer and accepted answers, then call "
-                 "quiz_score_answer with result=correct or result=miss; call quiz_status if unsure which question is pending.")
+                 "quiz_score_answer with result=correct or result=miss; call quiz_status if unsure which question is pending."
+                 " Judge the meaning, not the exact words: a young child's synonym, a close paraphrase, or an answer a kind "
+                 "teacher would accept (\"rain\" for \"water\" falling from the sky) is correct.")
     if bank_block.strip():
         text += "\n\n" + bank_block.strip()
     if memos:

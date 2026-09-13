@@ -9,6 +9,7 @@ from typing import Callable
 from livekit.agents import function_tool
 
 from .doors import DOOR_GUIDED, door_directive_text, door_for, ladder_exhausted
+from .placeholders import DAILY_TEN
 
 logger = logging.getLogger("cheeko-gptlive.quiz")
 
@@ -41,15 +42,24 @@ class QuizTracker:
     def pending(self) -> dict | None:
         return next((q for q in self.questions if str(q.get("id")) not in self.reported), None)
 
+    def answered(self) -> int:
+        return int(self.batch.get("answered_today") or 0) + len(self.reported)
+
+    def number_of(self, q: dict) -> int:
+        """The label quiz_block gives this question: position in the batch after today's answered count."""
+        return int(self.batch.get("answered_today") or 0) + self.questions.index(q) + 1
+
     def status(self) -> str:
-        answered = int(self.batch.get("answered_today") or 0) + len(self.reported)
-        total = int(self.batch.get("answered_today") or 0) + len(self.questions)
+        answered = self.answered()
+        total = min(int(self.batch.get("answered_today") or 0) + len(self.questions), DAILY_TEN)
+        if answered >= DAILY_TEN:
+            return f"STATUS: answered={answered} today | Daily Ten complete, no more scored questions today"
         q = self.pending()
         if q is None:
             return f"STATUS: answered={answered} of {total} today | all questions done"
         qid = str(q.get("id"))
         tries = self.tries.get(qid, 0)
-        return (f"STATUS: answered={answered} of {total} today | pending question id={qid} "
+        return (f"STATUS: answered={answered} of {total} today | pending question {self.number_of(q)} id={qid} "
                 f"(door {door_for(q, tries)}, tries {tries}): {q.get('question_text')}")
 
     async def score(self, question_id: str, result: str, transcript: str) -> str:
@@ -65,17 +75,21 @@ class QuizTracker:
             self.attempts.setdefault(qid, []).append({"verdict": "wrong", "transcript": transcript})
             if not ladder_exhausted(q, self.tries[qid]):
                 return self._next_directive(q)
-            return await self._record(q, "revealed")
+            return await self._record(q, "revealed", door_directive_text(q, self.tries[qid]))
         if result == "correct":
             self.attempts.setdefault(qid, []).append({"verdict": "correct", "transcript": transcript})
-            verdict = "revealed" if door_for(q, self.tries.get(qid, 0)) == DOOR_GUIDED else "correct"  # ADR-0009 mastery rule
-            return await self._record(q, verdict)
+            if door_for(q, self.tries.get(qid, 0)) == DOOR_GUIDED:  # ADR-0009 mastery rule: recorded as revealed
+                return await self._record(q, "revealed", "The child got it right after the explanation. Praise them warmly "
+                                                         "for working it out, in one short line.")
+            return await self._record(q, "correct", "")
         if result == "revealed":
             self.attempts.setdefault(qid, []).append({"verdict": "revealed", "transcript": transcript})
-            return await self._record(q, "revealed")
+            return await self._record(q, "revealed", "Kindly tell them the answer in one short sentence, say one warm line, "
+                                                     "and move on.")
         raise ValueError('result must be "correct", "miss" or "revealed"')
 
-    async def _record(self, q: dict, verdict: str) -> str:
+    async def _record(self, q: dict, verdict: str, closing: str) -> str:
+        """closing: what to say about THIS question before the next one (never a re-ask: it is scored now)."""
         qid = str(q.get("id"))
         self.reported.add(qid)
         answered = int(self.batch.get("answered_today") or 0) + len(self.reported)
@@ -86,10 +100,15 @@ class QuizTracker:
         state_dir.mkdir(parents=True, exist_ok=True)
         (state_dir / f"{self.memo_type}.md").write_text(memo + "\n", encoding="utf-8")
         await self.manager.post_quiz_answer(self.device_mac, qid, verdict, str(self.batch.get("bank") or ""), list(self.attempts.get(qid, [])))
-        terminal = door_directive_text(q, self.tries.get(qid, 0)) if verdict == "revealed" and self.tries.get(qid, 0) > 0 else ""
         nxt = self.pending()
-        tail = self._next_directive(nxt) if nxt else "All of today's questions are done. Celebrate briefly and move on to free play."
-        return (terminal + "\n\n" + tail).strip()
+        if answered >= DAILY_TEN:
+            tail = ("Today's Daily Ten is complete. Celebrate warmly and offer one unscored Bonus Buzz or free play. "
+                    "Do not ask another scored question today.")
+        elif nxt:
+            tail = f"Next is question {self.number_of(nxt)} of today's Daily Ten.\n{self._next_directive(nxt)}"
+        else:
+            tail = "All of today's questions are done. Celebrate briefly and move on to free play."
+        return (closing + "\n\n" + tail).strip()
 
     def _next_directive(self, q: dict) -> str:
         d = door_directive_text(q, self.tries.get(str(q.get("id")), 0)) or \
