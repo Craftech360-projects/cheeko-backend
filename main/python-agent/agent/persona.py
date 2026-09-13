@@ -40,6 +40,9 @@ def delegation_block(language: str, has_quiz: bool) -> str:
             "Every time the child answers a quiz question, delegate so the answer gets scored, and then do exactly",
             "what the result tells you to do next: ask plainly, offer the two choices, explain then re-ask, or reveal",
             "and move on. Never decide on your own whether an answer was right.",
+            "A short reply right after a question, even \"goodbye\" or \"I don't know\", is an answer attempt,",
+            "not a request to stop: delegate it for scoring. When the child asks for a clue, delegate that too, and give",
+            "only the hint the result gives you. End the quiz only when the child clearly says they want to stop.",
         ]
     lines += [f"Speak {language} with the child unless they clearly switch language.", "</delegation>"]
     return "\n".join(lines)

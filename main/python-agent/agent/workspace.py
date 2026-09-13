@@ -134,6 +134,21 @@ def _section(ws: Path, name: str) -> str:
     return f"## {name}\n\n{body}" if body else ""
 
 
+PROMPT_SESSION_SUMMARY_CAP = 10  # picoclaw pkg/agent/memory.go promptSessionSummaryCap
+
+
+def cap_summaries(text: str, keep: int = PROMPT_SESSION_SUMMARY_CAP) -> str:
+    """Keep only the newest `keep` bullets of a "## Session Summaries" section; the file on disk is never cut."""
+    lines = text.split("\n")
+    start = next((i for i, l in enumerate(lines) if l.strip() == "## Session Summaries"), None)
+    if start is None:
+        return text
+    end = next((i for i in range(start + 1, len(lines)) if lines[i].strip().startswith("## ")), len(lines))
+    bullets = [i for i in range(start + 1, end) if lines[i].strip().startswith("- ")]
+    drop = set(bullets[:-keep] if len(bullets) > keep else [])
+    return "\n".join(l for i, l in enumerate(lines) if i not in drop)
+
+
 def trim_memory(text: str, limit: int) -> str:
     """Fit MEMORY.md into limit chars: every non-summary line, then the newest session summaries (they are oldest first)."""
     if len(text) <= limit:
@@ -159,7 +174,7 @@ def build_system_prompt(workspace: Path, memory_chars: int | None = None) -> str
     """memory_chars: None for all of memory/MEMORY.md, otherwise at most that many chars of it (0 leaves it out)."""
     parts = [IDENTITY] + [s for s in (_section(workspace, n) for n in ("AGENT.md", "SOUL.md", "USER.md")) if s]
     memory_path = workspace / "memory" / "MEMORY.md"
-    memory = memory_path.read_text(encoding="utf-8").strip() if memory_path.exists() else ""
+    memory = cap_summaries(memory_path.read_text(encoding="utf-8")).strip() if memory_path.exists() else ""
     if memory and memory != "# Memory" and memory_chars != 0:
         memory = memory if memory_chars is None else trim_memory(memory, max(memory_chars, 0)).strip()
         if memory:

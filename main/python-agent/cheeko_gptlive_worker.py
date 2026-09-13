@@ -37,7 +37,7 @@ from agent.persona import backend_instructions, greeting_instruction, session_st
 from agent.placeholders import quiz_block, render_placeholders, wants_quiz  # noqa: E402
 from agent.quiz import QuizTracker, memo_type_for  # noqa: E402
 from agent.tools import tools_for  # noqa: E402
-from agent.workspace import build_system_prompt, hydrate_workspace, persona_from_manager, remove_workspace  # noqa: E402
+from agent.workspace import build_system_prompt, cap_summaries, hydrate_workspace, persona_from_manager, remove_workspace  # noqa: E402
 
 logger = logging.getLogger("cheeko-gptlive")
 
@@ -126,7 +126,8 @@ async def assemble_session(room_name: str, metadata: str | None, manager: Manage
         meta=meta, workspace=workspace,
         voice=choose_voice(meta.voice, persona.voice, realtime.get("voice")), realtime=realtime,
         voice_instructions=instructions,
-        backend_instructions=backend_instructions(bank, memos, has_quiz, memory_path.read_text(encoding="utf-8")),
+        # capped: every delegation re-sends this, and the account's backend TPM limit is 60k
+        backend_instructions=backend_instructions(bank, memos, has_quiz, cap_summaries(memory_path.read_text(encoding="utf-8"))),
         greeting=greeting_instruction(meta.character, has_session_start=bool(session_start)),
         tools=tools_for(meta.character, workspace, tracker),
         quiz_tracker=tracker, has_quiz=has_quiz, room_name=room_name,

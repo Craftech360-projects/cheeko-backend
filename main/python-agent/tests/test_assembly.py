@@ -52,7 +52,8 @@ async def test_assemble_quizzy_session(tmp_path: Path):
     assert "[happy]" not in (plan.workspace / "SOUL.md").read_text(encoding="utf-8")
     # memory restored from the manager: the backend gets all of it, the voice model the newest that fit its cap
     assert "Has a dog named Harry" in plan.voice_instructions and "session 12 " in plan.voice_instructions
-    assert "session 1 " in plan.backend_instructions and "session 12 " in plan.backend_instructions
+    # backend memory is capped at the newest 10 summaries (picoclaw promptSessionSummaryCap): every delegation pays for it
+    assert "session 2 " not in plan.backend_instructions and "session 3 " in plan.backend_instructions and "session 12 " in plan.backend_instructions
     assert "Learning goals: counting" in plan.voice_instructions
 
 
@@ -66,8 +67,8 @@ async def test_voice_memory_is_trimmed_to_the_instruction_cap(tmp_path: Path, mo
     plan = await assemble_session(ROOM, META, mc, tmp_path, now=lambda: datetime(2026, 9, 13, 9))
     voice = plan.voice_instructions
     assert len(voice) <= cap
-    assert "Has a dog named Harry" in voice and "session 12 " in voice and "session 1 " not in voice  # oldest dropped first
-    assert "session 1 " in plan.backend_instructions
+    assert "Has a dog named Harry" in voice and "session 12 " in voice and "session 3 " not in voice  # oldest dropped first
+    assert "session 3 " in plan.backend_instructions
     assert [t.info.name for t in plan.tools] == ["get_time_date", "remember_child_fact", "quiz_status", "quiz_score_answer", "quiz_record_wonder"]
 
 

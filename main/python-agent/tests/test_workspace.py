@@ -70,6 +70,15 @@ def test_memory_section_keeps_stable_facts_and_newest_summaries_within_the_limit
     assert "## memory/MEMORY.md" not in build_system_prompt(ws, memory_chars=0)
 
 
+def test_cap_summaries_keeps_the_newest_like_picoclaw():
+    from agent.workspace import cap_summaries
+
+    many = "# Memory\n\n## Stable Memory\n- Loves dinosaurs\n\n## Session Summaries\n" + "".join(f"- s{i}\n" for i in range(15))
+    capped = cap_summaries(many, 10)
+    assert "- s4\n" not in capped and "- s5\n" in capped and "- s14\n" in capped and "Loves dinosaurs" in capped
+    assert cap_summaries(MEMORY, 10) == MEMORY
+
+
 def test_system_prompt_is_built_from_the_files(tmp_path: Path):
     ws = hydrate_workspace(tmp_path, "room-2", Persona("You are Cheeko.", "Playful.", "", "en"), META, [])
     (ws / "SOUL.md").write_text("Edited on disk.", encoding="utf-8")  # proves the prompt comes from files, not memory

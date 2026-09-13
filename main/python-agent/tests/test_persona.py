@@ -8,6 +8,8 @@ def test_voice_instructions_layers_files_rules_bank_and_accent():
     assert ACCENT_INDIAN in v
     plain = voice_instructions("x", "English", "default", "", False)
     assert "<accent>" not in plain and "scored" not in plain
+    # seen live 2026-09-13: "Goodbye" as an answer ended the quiz, and a clue was improvised outside the ladder
+    assert "not a request to stop" in v and "clue" in v
 
 
 def test_speech_rules_come_last_and_override_picoclaw_text_rules():
