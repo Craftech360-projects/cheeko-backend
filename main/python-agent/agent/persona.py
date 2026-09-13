@@ -1,6 +1,23 @@
 """What the two models are told, composed once because GPT-Live cannot change it later."""
 from __future__ import annotations
 
+import re
+
+# Manager prompts are written for picoclaw, where a leading [tag] drives the firmware face and is stripped
+# before TTS. GPT-Live speaks what it produces, so the rules and the tagged examples are removed here.
+# ponytail: tag vocabulary is the set the dev-box prompts use; add a word here if a new character brings one
+_TAG_WORDS = ("neutral|happy|excited|laughing|love|silly|curious|surprised|confused|shy|sad|crying|angry|scared|sleepy|"
+              "encouraging|thinking|warm|gentle|soft|amused|thoughtful|proud|calm|playful")
+_TAG_TOKEN = re.compile(rf"\[(?:{_TAG_WORDS})\]\s*")
+_RULE_BULLET = re.compile(r"^[ \t]*[-*][ \t][^\n]*expression tag[^\n]*(?:\n|$)", re.MULTILINE | re.IGNORECASE)
+_RULE_SENTENCE = re.compile(r"[^.\s][^.\n]*expression tag[^\n]*?\.(?:[ \t]+|(?=\n)|$)", re.IGNORECASE)
+_TRAILING_SPACE = re.compile(r"[ \t]+$", re.MULTILINE)
+
+
+def strip_expression_tags(text: str) -> str:
+    out = _RULE_SENTENCE.sub("", _RULE_BULLET.sub("", text or ""))
+    return _TRAILING_SPACE.sub("", _TAG_TOKEN.sub("", out))
+
 ACCENT_INDIAN = """<accent>
 Speak Indian English: an Indian accent with Indian intonation and rhythm, and the everyday
 phrasing a child in India hears at home and at school. Keep it natural and warm, never a caricature.

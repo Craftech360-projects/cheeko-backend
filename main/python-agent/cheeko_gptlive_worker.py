@@ -33,7 +33,7 @@ from livekit.plugins.openai.realtime import GPTLiveModel  # noqa: E402
 from agent.manager import ManagerClient  # noqa: E402
 from agent.metadata import SessionMeta, parse_dispatch_metadata  # noqa: E402
 from agent.persistence import SessionRecorder  # noqa: E402
-from agent.persona import backend_instructions, greeting_instruction, session_start_block, voice_instructions  # noqa: E402
+from agent.persona import backend_instructions, greeting_instruction, session_start_block, strip_expression_tags, voice_instructions  # noqa: E402
 from agent.placeholders import quiz_block, render_placeholders, wants_quiz  # noqa: E402
 from agent.quiz import QuizTracker, memo_type_for  # noqa: E402
 from agent.tools import tools_for  # noqa: E402
@@ -89,7 +89,8 @@ async def assemble_session(room_name: str, metadata: str | None, manager: Manage
     bank = quiz_block(batch) if wants_quiz(persona.greeting) else ""
     memos = [str(s.get("memo") or "") for s in states if s.get("memo")]
     today = now()
-    session_start = session_start_block(render_placeholders(persona.greeting, batch, today))  # carries the quiz block
+    greeting_prompt = strip_expression_tags(render_placeholders(persona.greeting, batch, today))
+    session_start = session_start_block(greeting_prompt)  # carries the quiz block
     voice = voice_instructions(build_system_prompt(workspace), meta.language, meta.accent, session_start, has_quiz,
                                today=today.strftime("%A, %d %B %Y"))
     if len(voice) // 4 > MAX_INSTRUCTION_TOKENS:  # ponytail: chars/4 estimate, no tokenizer

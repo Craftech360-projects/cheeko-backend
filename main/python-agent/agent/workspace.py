@@ -12,6 +12,8 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
+from .persona import strip_expression_tags
+
 TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "workspace-template"
 PERSONA_PLACEHOLDER = "<!-- PERSONA -->"
 LANGUAGE_PLACEHOLDER = "<!-- LANGUAGE -->"
@@ -104,9 +106,10 @@ def render_user_md(meta) -> str:
 def hydrate_workspace(root: Path, room: str, persona: Persona, meta, memos: list[dict]) -> Path:
     ws = root / (_SAFE.sub("_", room) or "room")
     (ws / "memory" / "state").mkdir(parents=True, exist_ok=True)
-    (ws / "AGENT.md").write_text(render_agent_md(persona.system_prompt, meta.language, meta.parent_rule), encoding="utf-8")
+    agent_md = render_agent_md(persona.system_prompt, meta.language, meta.parent_rule)
+    (ws / "AGENT.md").write_text(strip_expression_tags(agent_md), encoding="utf-8")
     soul = persona.soul or (TEMPLATE_DIR / "SOUL.md").read_text(encoding="utf-8")
-    (ws / "SOUL.md").write_text(soul, encoding="utf-8")
+    (ws / "SOUL.md").write_text(strip_expression_tags(soul), encoding="utf-8")
     (ws / "USER.md").write_text(render_user_md(meta), encoding="utf-8")
     memory = ws / "memory" / "MEMORY.md"
     if not memory.exists():

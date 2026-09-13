@@ -13,7 +13,10 @@ META = '{"character":"Quizzy","child_profile":{"name":"Aarav","age":7},"gptlive"
 class FakeFetch:
     async def __call__(self, method, url, body):
         if "/agent/character/by-name/Quizzy/session" in url:
-            return 200, {"code": 0, "data": {"systemPrompt": "You are Quizzy, quiz master.", "soul": "Kind.", "greetingPrompt": "Ask away. {{QUIZ_QUESTIONS}}", "language": "en"}}
+            return 200, {"code": 0, "data": {
+                "systemPrompt": "You are Quizzy, quiz master.\n- Start every spoken sentence with an expression tag such as [excited] or [happy].\n- Cheer: \"[excited] Ting!\"",
+                "soul": "[happy] Kind.",
+                "greetingPrompt": "Ask away. Begin every spoken sentence with an expression tag such as [curious]. {{QUIZ_QUESTIONS}}", "language": "en"}}
         if "/quiz/next-questions" in url:
             return 200, {"code": 0, "data": {"level": 1, "age_band": "6-8", "bank": "quiz", "answered_today": 0,
                                             "questions": [{"id": "11", "question_text": "How many legs does a spider have?", "answer_text": "eight", "accepted_answers": [], "choice_order": [], "teach_text": ""}]}}
@@ -34,6 +37,11 @@ async def test_assemble_quizzy_session(tmp_path: Path):
     assert plan.voice_instructions.count("(id=11)") == 1
     assert "Ask away." not in plan.greeting and len(plan.greeting) < 400
     assert "Sunday, 13 September 2026" in plan.voice_instructions
+    # picoclaw face tags: rules and tagged examples are gone from the files and the instructions (the <speech> ban stays)
+    body = plan.voice_instructions[:plan.voice_instructions.index("<speech>")]
+    assert "expression tag" not in body and "[excited]" not in body and "[happy]" not in body and "[curious]" not in body
+    assert '- Cheer: "Ting!"' in (plan.workspace / "AGENT.md").read_text(encoding="utf-8")
+    assert "[happy]" not in (plan.workspace / "SOUL.md").read_text(encoding="utf-8")
     assert [t.info.name for t in plan.tools] == ["get_time_date", "remember_child_fact", "quiz_status", "quiz_score_answer", "quiz_record_wonder"]
 
 
