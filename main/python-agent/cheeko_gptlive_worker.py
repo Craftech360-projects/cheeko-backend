@@ -1,5 +1,5 @@
 """
-Cheeko GPT-Live worker (agent name: cheeko-gptlive, port 8090)
+Cheeko GPT-Live worker (agent name: $GPTLIVE_AGENT_NAME, default cheeko-agent; port 8090)
 
 Full-duplex OpenAI GPT-Live voice model; reasoning + tool calls delegated to a backend Responses model.
 Persona comes from the manager as AGENT.md / SOUL.md / USER.md files in an ephemeral workspace, like picoclaw.
@@ -40,7 +40,9 @@ from agent.tools import tools_for  # noqa: E402
 from agent.workspace import build_system_prompt, hydrate_workspace, persona_from_manager, remove_workspace  # noqa: E402
 
 logger = logging.getLogger("cheeko-gptlive")
-AGENT_NAME = "cheeko-gptlive"
+# Same name as picoclaw-livekit, so the manager's character routing reaches this worker. Run only one of the
+# two under a name: LiveKit spreads dispatches across every worker registered with it. GPTLIVE_AGENT_NAME=cheeko-gptlive for side by side.
+AGENT_NAME = os.getenv("GPTLIVE_AGENT_NAME", "cheeko-agent")
 DEFAULT_PORT = 8090
 WORKSPACES = ROOT / "workspaces"
 GREETING_FALLBACK_S = 3.0
