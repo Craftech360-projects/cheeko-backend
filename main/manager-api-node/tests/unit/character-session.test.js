@@ -58,6 +58,7 @@ describe('character session contract (getCharacterSession / getCurrentCharacter)
       sarvamVoiceId: null,
       elevenlabsVoiceId: null,
       smallestVoiceId: null,
+      gptliveVoice: null,
     });
   });
 

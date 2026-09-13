@@ -9,6 +9,7 @@ const mockPrisma = {
     updateMany: jest.fn(),
     upsert: jest.fn()
   },
+  realtime_providers: { findFirst: jest.fn().mockResolvedValue(null), findMany: jest.fn().mockResolvedValue([]) },
   $transaction: jest.fn(async (fn) => fn(mockPrisma))
 };
 

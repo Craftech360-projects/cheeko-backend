@@ -383,6 +383,7 @@ async function loadChar() {
   $('sarvamVoiceId').value = t.sarvamVoiceId || '';
   $('elevenlabsVoiceId').value = t.elevenlabsVoiceId || '';
   $('smallestVoiceId').value = t.smallestVoiceId || '';
+  $('gptliveVoice').value = t.gptliveVoice || '';
 }
 
 async function save() {
@@ -397,6 +398,7 @@ async function save() {
       sarvamVoiceId: $('sarvamVoiceId').value,
       elevenlabsVoiceId: $('elevenlabsVoiceId').value,
       smallestVoiceId: $('smallestVoiceId').value,
+      gptliveVoice: $('gptliveVoice').value,
     });
     setStatus('Saved ✓', true);
   } catch (e) {
@@ -438,6 +440,7 @@ function enterCreateMode() {
   $('sarvamVoiceId').value = '';
   $('elevenlabsVoiceId').value = '';
   $('smallestVoiceId').value = '';
+  $('gptliveVoice').value = '';
   setStatus('Fill name, AGENT.md and SOUL.md, then Save.');
   $('newName').focus();
 }
@@ -473,6 +476,7 @@ async function createChar() {
       sarvamVoiceId: $('sarvamVoiceId').value,
       elevenlabsVoiceId: $('elevenlabsVoiceId').value,
       smallestVoiceId: $('smallestVoiceId').value,
+      gptliveVoice: $('gptliveVoice').value,
     });
     creating = false;
     $('newCharBar').hidden = true;

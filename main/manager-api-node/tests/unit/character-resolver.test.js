@@ -48,7 +48,12 @@ describe('resolveSessionForCharacter', () => {
       sarvamVoiceId: null,
       elevenlabsVoiceId: null,
       smallestVoiceId: null,
+      gptliveVoice: null,
     });
+  });
+
+  it('passes the GPT-Live voice through', () => {
+    expect(resolveSessionForCharacter({ ...character, gptlive_voice: 'vesper' }, {}).gptliveVoice).toBe('vesper');
   });
 
   it('lets an explicit language override the character default', () => {

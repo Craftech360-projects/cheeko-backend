@@ -27,6 +27,11 @@ jest.mock('../../src/config/database', () => ({
       update: jest.fn(),
       updateMany: jest.fn()
     },
+    realtime_providers: {
+      findMany: jest.fn().mockResolvedValue([]),
+      update: jest.fn(),
+      updateMany: jest.fn()
+    },
     $transaction: jest.fn()
   }
 }));

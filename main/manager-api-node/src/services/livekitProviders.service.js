@@ -94,6 +94,20 @@ const providerModels = {
       priority: 'int',
       config_json: 'json'
     }
+  },
+  // Speech-to-speech models (OpenAI GPT-Live), read by the cheeko-gptlive worker at session start
+  realtime: {
+    delegate: 'realtime_providers',
+    updateFields: {
+      provider_name: 'string',
+      model: 'string',
+      backend_model: 'nullableString',
+      voice: 'nullableString',
+      api_base: 'nullableString',
+      api_key: 'string',
+      priority: 'int',
+      config_json: 'json'
+    }
   }
 };
 
@@ -151,12 +165,13 @@ const buildProviderUpdateData = (model, payload = {}) => {
 
 const listProviders = async () => {
   const orderBy = [{ is_active: 'desc' }, { priority: 'desc' }, { updated_at: 'desc' }];
-  const [llm, stt, tts, moderation, image] = await Promise.all([
+  const [llm, stt, tts, moderation, image, realtime] = await Promise.all([
     prisma.llm_providers.findMany({ orderBy }),
     prisma.stt_providers.findMany({ orderBy }),
     prisma.tts_providers.findMany({ orderBy }),
     prisma.moderation_providers.findMany({ orderBy }),
-    prisma.image_providers.findMany({ orderBy })
+    prisma.image_providers.findMany({ orderBy }),
+    prisma.realtime_providers.findMany({ orderBy })
   ]);
 
   return {
@@ -164,7 +179,8 @@ const listProviders = async () => {
     stt: (stt || []).map(normalizeProviderRow),
     tts: (tts || []).map(normalizeProviderRow),
     moderation: (moderation || []).map(normalizeProviderRow),
-    image: (image || []).map(normalizeProviderRow)
+    image: (image || []).map(normalizeProviderRow),
+    realtime: (realtime || []).map(normalizeProviderRow)
   };
 };
 
@@ -201,7 +217,8 @@ const activateProvider = async (type, id) => {
 };
 
 const getActiveProviders = async () => {
-  const [llm, stt, tts, moderation, image] = await Promise.all([
+  const activeOrder = { where: { is_active: true }, orderBy: [{ priority: 'desc' }, { updated_at: 'desc' }] };
+  const [llm, stt, tts, moderation, image, realtime] = await Promise.all([
     prisma.llm_providers.findFirst({
       where: { is_active: true },
       orderBy: [{ priority: 'desc' }, { updated_at: 'desc' }]
@@ -221,11 +238,12 @@ const getActiveProviders = async () => {
     prisma.image_providers.findFirst({
       where: { is_active: true },
       orderBy: [{ priority: 'desc' }, { updated_at: 'desc' }]
-    })
+    }),
+    prisma.realtime_providers.findFirst(activeOrder)
   ]);
 
   return {
-    updated_at: pickLatestUpdatedAt([llm, stt, tts, moderation, image]),
+    updated_at: pickLatestUpdatedAt([llm, stt, tts, moderation, image, realtime]),
     llm: llm ? {
       model_name: llm.model_name,
       model: llm.model,
@@ -256,6 +274,14 @@ const getActiveProviders = async () => {
       provider: image.provider_name,
       model: image.model || '',
       api_key: image.api_key || ''
+    } : null,
+    realtime: realtime ? {
+      provider: realtime.provider_name,
+      model: realtime.model || '',
+      backend_model: realtime.backend_model || '',
+      voice: realtime.voice || '',
+      api_base: realtime.api_base || null,
+      api_key: realtime.api_key || ''
     } : null
   };
 };

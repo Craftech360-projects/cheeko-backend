@@ -184,6 +184,14 @@
             :step="field.step || 1"
             class="full-input"
           ></el-input-number>
+          <el-select
+            v-else-if="field.options"
+            v-model="editForm[field.prop]"
+            clearable
+            class="full-input"
+          >
+            <el-option v-for="option in field.options" :key="option" :label="option" :value="option"></el-option>
+          </el-select>
           <el-input
             v-else-if="field.secret"
             v-model="editForm[field.prop]"
@@ -245,14 +253,16 @@ export default {
         stt: [],
         tts: [],
         moderation: [],
-        image: []
+        image: [],
+        realtime: []
       },
       providerTypes: [
         { value: "llm", label: "LLM", caption: "Reasoning model", icon: "el-icon-cpu" },
         { value: "stt", label: "STT", caption: "Speech to text", icon: "el-icon-microphone" },
         { value: "tts", label: "TTS", caption: "Voice output", icon: "el-icon-headset" },
         { value: "moderation", label: "Moderation", caption: "Content safety", icon: "el-icon-umbrella" },
-        { value: "image", label: "Image", caption: "AI Imagine generation", icon: "el-icon-picture-outline" }
+        { value: "image", label: "Image", caption: "AI Imagine generation", icon: "el-icon-picture-outline" },
+        { value: "realtime", label: "Realtime", caption: "Speech-to-speech (GPT-Live)", icon: "el-icon-phone-outline" }
       ],
       tableColumns: {
         llm: [
@@ -285,6 +295,13 @@ export default {
         image: [
           { label: "Provider", prop: "provider_name", mono: true },
           { label: "Model", prop: "model", mono: true },
+          { label: "API Key", prop: "api_key", secret: true }
+        ],
+        realtime: [
+          { label: "Provider", prop: "provider_name", mono: true },
+          { label: "Voice Model", prop: "model", mono: true },
+          { label: "Backend Model", prop: "backend_model", mono: true },
+          { label: "Default Voice", prop: "voice", mono: true },
           { label: "API Key", prop: "api_key", secret: true }
         ]
       },
@@ -323,6 +340,16 @@ export default {
         image: [
           { label: "Provider", prop: "provider_name" },
           { label: "Model", prop: "model" },
+          { label: "API Key", prop: "api_key", secret: true },
+          { label: "Priority", prop: "priority", type: "number", min: 0 }
+        ],
+        realtime: [
+          { label: "Provider", prop: "provider_name" },
+          { label: "Voice Model", prop: "model" },
+          { label: "Backend Model", prop: "backend_model" },
+          // aster is refused for this OpenAI account; characters can override in the admin dashboard
+          { label: "Default Voice", prop: "voice", options: ["beacon", "cinder", "marin", "stone", "vesper"] },
+          { label: "API Base", prop: "api_base" },
           { label: "API Key", prop: "api_key", secret: true },
           { label: "Priority", prop: "priority", type: "number", min: 0 }
         ]
@@ -380,7 +407,8 @@ export default {
             stt: (data.data.stt || []).map(this.withUiState),
             tts: (data.data.tts || []).map(this.withUiState),
             moderation: (data.data.moderation || []).map(this.withUiState),
-            image: (data.data.image || []).map(this.withUiState)
+            image: (data.data.image || []).map(this.withUiState),
+            realtime: (data.data.realtime || []).map(this.withUiState)
           };
           return;
         }
@@ -424,6 +452,7 @@ export default {
       if (type === "llm") return provider.model || "Model configured";
       if (type === "stt") return provider.model || provider.language || "STT configured";
       if (type === "moderation" || type === "image") return provider.model || provider.provider_name || "Configured";
+      if (type === "realtime") return [provider.model, provider.voice].filter(Boolean).join(" · ") || "Configured";
       return provider.model_id || provider.voice_id || "Voice configured";
     },
     providerRowClassName({ row }) {
