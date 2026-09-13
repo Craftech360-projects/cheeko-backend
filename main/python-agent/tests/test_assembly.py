@@ -24,6 +24,9 @@ class FakeFetch:
             summaries = "".join(f"- 2026-09-{d:02d} 10:00:00 UTC: session {d} " + "chat " * 60 + "\n" for d in range(1, 13))
             return 200, {"code": 0, "data": {"memory/MEMORY.md": {"content": "# Long-term Memory\n\n## Stable Memory\n- Has a dog named Harry\n\n## Session Summaries\n" + summaries},
                                             "USER.md": {"content": "# User\n\n- Name: Aarav\n- Learning goals: counting\n"}}}
+        if "/livekit/providers/active" in url:
+            return 200, {"code": 0, "data": {"realtime": {"provider": "openai-gpt-live", "model": "gpt-live-1", "backend_model": "gpt-5.6-luna",
+                                                          "voice": "stone", "api_base": None, "api_key": "sk-from-db"}}}
         if "/progress/state" in url:
             return 200, {"code": 0, "data": {"states": [{"state_type": "daily_quiz", "memo": "MEMO: type=daily_quiz | date=2026-09-12"}]}}
         return 404, {}
@@ -32,7 +35,8 @@ class FakeFetch:
 @pytest.mark.asyncio
 async def test_assemble_quizzy_session(tmp_path: Path):
     plan = await assemble_session(ROOM, META, ManagerClient("http://m/toy", "s", fetch=FakeFetch()), tmp_path, now=lambda: datetime(2026, 9, 13, 9))
-    assert plan.meta.voice == "vesper" and plan.meta.accent == "indian" and plan.has_quiz and plan.room_name == ROOM
+    assert plan.voice == "vesper" and plan.meta.accent == "indian" and plan.has_quiz and plan.room_name == ROOM
+    assert plan.realtime["api_key"] == "sk-from-db" and plan.realtime["backend_model"] == "gpt-5.6-luna"
     assert (plan.workspace / "AGENT.md").exists() and "You are Quizzy, quiz master." in plan.voice_instructions
     assert "(id=11)" in plan.voice_instructions and "(id=11)" in plan.backend_instructions and "<accent>" in plan.voice_instructions
     assert "MEMO: type=daily_quiz" in plan.backend_instructions
@@ -68,7 +72,38 @@ async def test_voice_memory_is_trimmed_to_the_instruction_cap(tmp_path: Path, mo
 
 
 @pytest.mark.asyncio
+async def test_voice_falls_back_to_character_then_provider(tmp_path: Path):
+    class CharacterVoice(FakeFetch):
+        async def __call__(self, method, url, body):
+            status, payload = await super().__call__(method, url, body)
+            if "/agent/character/by-name/" in url:
+                payload["data"]["gptliveVoice"] = "cinder"
+            return status, payload
+
+    no_session_voice = '{"character":"Quizzy"}'
+    mc = ManagerClient("http://m/toy", "s", fetch=CharacterVoice())
+    assert (await assemble_session(ROOM, no_session_voice, mc, tmp_path)).voice == "cinder"
+    mc = ManagerClient("http://m/toy", "s", fetch=FakeFetch())
+    assert (await assemble_session(ROOM, no_session_voice, mc, tmp_path)).voice == "stone"
+
+
+def test_gptlive_options_prefer_the_db_row_and_fall_back_to_env(monkeypatch):
+    from types import SimpleNamespace
+
+    from cheeko_gptlive_worker import gptlive_options
+
+    monkeypatch.setenv("GPTLIVE_BACKEND_MODEL", "env-backend")
+    db = SimpleNamespace(voice="cinder", backend_instructions="b",
+                         realtime={"model": "gpt-live-2", "backend_model": "db-backend", "api_key": "sk-db", "api_base": "https://x/v1"})
+    assert gptlive_options(db) == {"voice": "cinder", "model": "gpt-live-2", "api_key": "sk-db", "base_url": "https://x/v1",
+                                   "responses_options": {"model": "db-backend", "instructions": "b"}}
+    blank = SimpleNamespace(voice="marin", backend_instructions="b", realtime={"model": "", "backend_model": "", "api_key": "", "api_base": None})
+    assert gptlive_options(blank) == {"voice": "marin", "api_key": None, "responses_options": {"model": "env-backend", "instructions": "b"}}
+
+
+@pytest.mark.asyncio
 async def test_assemble_without_manager_degrades(tmp_path: Path):
     plan = await assemble_session("gptlive-test-9", None, ManagerClient("", ""), tmp_path)
     assert plan.meta.character == "Cheeko" and not plan.has_quiz and plan.quiz_tracker is None
+    assert plan.voice == "marin" and plan.realtime == {}
     assert "You are Cheeko" in plan.voice_instructions and [t.info.name for t in plan.tools] == ["get_time_date", "remember_child_fact"]

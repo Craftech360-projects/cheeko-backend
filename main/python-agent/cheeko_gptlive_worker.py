@@ -15,7 +15,7 @@ import asyncio
 import json
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
@@ -31,8 +31,8 @@ from livekit.plugins import openai, silero  # noqa: E402
 from livekit.plugins.openai.realtime import GPTLiveModel  # noqa: E402
 
 from agent.manager import ManagerClient  # noqa: E402
-from agent.metadata import SessionMeta, parse_dispatch_metadata  # noqa: E402
-from agent.persistence import SessionRecorder, default_summarizer  # noqa: E402
+from agent.metadata import DEFAULT_VOICE, SessionMeta, choose_voice, parse_dispatch_metadata  # noqa: E402
+from agent.persistence import SessionRecorder, openai_summarizer  # noqa: E402
 from agent.persona import backend_instructions, greeting_instruction, session_start_block, strip_expression_tags, voice_instructions  # noqa: E402
 from agent.placeholders import quiz_block, render_placeholders, wants_quiz  # noqa: E402
 from agent.quiz import QuizTracker, memo_type_for  # noqa: E402
@@ -62,6 +62,8 @@ class SessionPlan:
     quiz_tracker: QuizTracker | None
     has_quiz: bool
     room_name: str = ""
+    voice: str = DEFAULT_VOICE
+    realtime: dict = field(default_factory=dict)  # active Runtime Providers → Realtime row; {} = use .env
 
 
 async def _nothing(value):
@@ -72,13 +74,14 @@ async def assemble_session(room_name: str, metadata: str | None, manager: Manage
                            now: Callable[[], datetime] | None = None) -> SessionPlan:
     now = now or datetime.now
     meta = parse_dispatch_metadata(metadata, room_name)
-    persona_data, states, files = None, [], {}
+    persona_data, states, files, realtime = None, [], {}, {}
     if manager.enabled:
         mac = meta.device_mac
-        persona_data, states, files = await asyncio.gather(
+        persona_data, states, files, realtime = await asyncio.gather(
             manager.character_session(meta.character, meta.character_id),
             manager.progress_state(mac) if mac else _nothing([]),
             manager.workspace_files(mac) if mac else _nothing({}),
+            manager.realtime_provider(),
         )
     persona = persona_from_manager(persona_data, meta)
     workspace = hydrate_workspace(workspaces_root, room_name, persona, meta, states, files)
@@ -101,19 +104,39 @@ async def assemble_session(room_name: str, metadata: str | None, manager: Manage
                                   has_quiz, today=today.strftime("%A, %d %B %Y"))
 
     spare = MAX_VOICE_CHARS - len(voice_with_memory(0)) - 40  # 40: the section heading and separator
-    voice = voice_with_memory(spare)
-    if len(voice) > MAX_VOICE_CHARS:
+    instructions = voice_with_memory(spare)
+    if len(instructions) > MAX_VOICE_CHARS:
         logger.warning("voice instructions ~%d tokens, over the ~%d budget under GPT-Live's %d cap",
-                       len(voice) // 4, MAX_VOICE_CHARS // 4, MAX_INSTRUCTION_TOKENS)
+                       len(instructions) // 4, MAX_VOICE_CHARS // 4, MAX_INSTRUCTION_TOKENS)
     memory_path = workspace / "memory" / "MEMORY.md"
     return SessionPlan(
         meta=meta, workspace=workspace,
-        voice_instructions=voice,
+        voice=choose_voice(meta.voice, persona.voice, realtime.get("voice")), realtime=realtime,
+        voice_instructions=instructions,
         backend_instructions=backend_instructions(bank, memos, has_quiz, memory_path.read_text(encoding="utf-8")),
         greeting=greeting_instruction(meta.character, has_session_start=bool(session_start)),
         tools=tools_for(meta.character, workspace, tracker),
         quiz_tracker=tracker, has_quiz=has_quiz, room_name=room_name,
     )
+
+
+def backend_model(plan: SessionPlan) -> str:
+    return plan.realtime.get("backend_model") or os.getenv("GPTLIVE_BACKEND_MODEL", "gpt-5.6-luna")
+
+
+def gptlive_options(plan: SessionPlan) -> dict:
+    """The DB row (manager-web Runtime Providers → Realtime) wins; blank fields fall back to .env and defaults."""
+    rt = plan.realtime
+    options = {
+        "voice": plan.voice,
+        "responses_options": {"model": backend_model(plan), "instructions": plan.backend_instructions},
+        "api_key": rt.get("api_key") or None,  # None: the plugin reads OPENAI_API_KEY
+    }
+    if rt.get("model"):
+        options["model"] = rt["model"]
+    if rt.get("api_base"):
+        options["base_url"] = rt["api_base"]
+    return options
 
 
 class CheekoGPTLive(Agent):
@@ -123,10 +146,7 @@ class CheekoGPTLive(Agent):
         super().__init__(
             instructions=plan.voice_instructions,
             tools=plan.tools + [openai.tools.WebSearch()],  # WebSearch runs on OpenAI's side, invoked by the backend model
-            llm=GPTLiveModel(
-                voice=plan.meta.voice,
-                responses_options={"model": os.getenv("GPTLIVE_BACKEND_MODEL", "gpt-5.6-luna"), "instructions": plan.backend_instructions},
-            ),
+            llm=GPTLiveModel(**gptlive_options(plan)),
         )
 
     async def on_enter(self) -> None:
@@ -163,13 +183,15 @@ async def entrypoint(ctx: JobContext) -> None:
     manager = ManagerClient(os.getenv("MANAGER_API_URL", ""), os.getenv("MANAGER_API_SECRET", ""))
     metadata = ctx.job.metadata if ctx.job else None
     plan = await assemble_session(ctx.room.name, metadata, manager, WORKSPACES)
-    logger.info("session: character=%s voice=%s accent=%s rate=%s quiz=%s tools=%s",
-                plan.meta.character, plan.meta.voice, plan.meta.accent, plan.meta.sample_rate, plan.has_quiz,
-                [t.info.name for t in plan.tools])
+    logger.info("session: character=%s voice=%s accent=%s rate=%s quiz=%s key=%s tools=%s",
+                plan.meta.character, plan.voice, plan.meta.accent, plan.meta.sample_rate, plan.has_quiz,
+                "db" if plan.realtime.get("api_key") else "env", [t.info.name for t in plan.tools])
 
     session = AgentSession(vad=ctx.proc.userdata["vad"])
     agent = CheekoGPTLive(plan)
-    recorder = SessionRecorder(session, manager, plan, summarize=default_summarizer())
+    recorder = SessionRecorder(session, manager, plan,
+                               summarize=openai_summarizer(backend_model(plan), plan.realtime.get("api_key") or None,
+                                                           plan.realtime.get("api_base") or None))
 
     @session.on("metrics_collected")
     def _on_metrics(ev) -> None:

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,13 +16,14 @@ SUMMARY_PROMPT = "Provide a concise summary of this conversation segment, preser
 Summarize = Callable[[list[dict]], Awaitable[str]]
 
 
-def openai_summarizer(model: str) -> Summarize:
-    """picoclaw bridgeSummarizeBatch, on the backend Responses model."""
+def openai_summarizer(model: str, api_key: str | None = None, base_url: str | None = None) -> Summarize:
+    """picoclaw bridgeSummarizeBatch, on the backend Responses model. api_key None reads OPENAI_API_KEY."""
     async def summarize(messages: list[dict]) -> str:
         from openai import AsyncOpenAI
 
         prompt = SUMMARY_PROMPT + "\nCONVERSATION:\n" + "".join(f"{m['role']}: {m['content']}\n" for m in messages)
-        client = AsyncOpenAI(timeout=20, max_retries=0)  # inside the worker's 60 s shutdown window
+        # inside the worker's 60 s shutdown window
+        client = AsyncOpenAI(api_key=api_key, base_url=base_url, timeout=20, max_retries=0)
         try:
             resp = await client.responses.create(model=model, input=prompt)
             return (resp.output_text or "").strip()
@@ -175,7 +175,3 @@ class SessionRecorder:
             await self.manager.send_chat_history(mac, sid, self.snapshot())
         await self.manager.send_session_end(mac, sid, len(self.messages))
         await self.manager.send_token_usage(mac, sid, self.usage_payload(usage))
-
-
-def default_summarizer() -> Summarize:
-    return openai_summarizer(os.getenv("GPTLIVE_SUMMARY_MODEL") or os.getenv("GPTLIVE_BACKEND_MODEL", "gpt-5.6-luna"))

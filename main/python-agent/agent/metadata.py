@@ -6,7 +6,17 @@ import re
 from dataclasses import dataclass
 
 VOICES = ("beacon", "cinder", "marin", "stone", "vesper")  # aster is refused for this account
+DEFAULT_VOICE = "marin"
 DEFAULT_CHARACTER = "Cheeko"
+
+
+def choose_voice(*candidates: str | None) -> str:
+    """First usable voice, most specific first: session (dashboard), character, realtime provider default."""
+    for voice in candidates:
+        voice = str(voice or "").strip().lower()
+        if voice in VOICES:
+            return voice
+    return DEFAULT_VOICE
 
 _ROOM = re.compile(r"^[^_]+_([0-9A-Fa-f]{12})_([a-z_]+)$")  # <session uuid>_<MAC>_<type>
 
@@ -64,7 +74,7 @@ def parse_dispatch_metadata(raw: str | None, room: str) -> SessionMeta:
         child_interests=str(child.get("interests") or "").strip(),
         parent_rule=str(child.get("parent_rule") or "").strip(),
         language=str(data.get("session_language_name") or data.get("language") or "English").strip() or "English",
-        voice=voice if voice in VOICES else "marin",
+        voice=voice if voice in VOICES else "",  # "" = not chosen for this session; see choose_voice
         accent="indian" if live.get("accent") == "indian" else "default",
         sample_rate=24000 if live.get("rate") == 24000 else 16000,
     )

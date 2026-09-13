@@ -80,6 +80,15 @@ async def test_summary_and_memory_writes_use_the_picoclaw_endpoints():
 
 
 @pytest.mark.asyncio
+async def test_realtime_provider_comes_from_active_providers():
+    realtime = {"provider": "openai-gpt-live", "model": "gpt-live-1", "backend_model": "gpt-5.6-luna", "voice": "marin", "api_base": None, "api_key": "sk-db"}
+    fetch = FakeFetch({"/livekit/providers/active": (200, {"code": 0, "data": {"llm": None, "realtime": realtime}})})
+    assert await ManagerClient("http://m/toy", "s", fetch=fetch).realtime_provider() == realtime
+    no_row = FakeFetch({"/livekit/providers/active": (200, {"code": 0, "data": {"realtime": None}})})
+    assert await ManagerClient("http://m/toy", "s", fetch=no_row).realtime_provider() == {}
+
+
+@pytest.mark.asyncio
 async def test_failures_never_raise():
     async def boom(method, url, body):
         raise RuntimeError("down")

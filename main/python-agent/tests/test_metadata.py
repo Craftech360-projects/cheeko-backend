@@ -1,4 +1,4 @@
-from agent.metadata import SessionMeta, parse_dispatch_metadata, parse_room_name
+from agent.metadata import SessionMeta, choose_voice, parse_dispatch_metadata, parse_room_name
 
 
 def test_room_name_yields_mac_and_type():
@@ -17,5 +17,12 @@ def test_dispatch_metadata_fields_and_defaults():
 
 def test_dispatch_metadata_tolerates_garbage():
     m = parse_dispatch_metadata("not json", "u_68EE8F60BAAC_conversation")
-    assert m.character == "Cheeko" and m.voice == "marin" and m.accent == "default" and m.sample_rate == 16000
-    assert parse_dispatch_metadata('{"gptlive":{"voice":"aster"}}', "x").voice == "marin"  # refused voice never chosen
+    assert m.character == "Cheeko" and m.voice == "" and m.accent == "default" and m.sample_rate == 16000
+    assert parse_dispatch_metadata('{"gptlive":{"voice":"aster"}}', "x").voice == ""  # refused voice never chosen
+
+
+def test_choose_voice_prefers_session_then_character_then_provider():
+    assert choose_voice("vesper", "cinder", "stone") == "vesper"  # dashboard GPT-Live tab, this session only
+    assert choose_voice("", "cinder", "stone") == "cinder"  # ai_agent_template.gptlive_voice
+    assert choose_voice("", "", "Stone") == "stone"  # active realtime provider default
+    assert choose_voice("", "aster", "nonsense") == "marin"

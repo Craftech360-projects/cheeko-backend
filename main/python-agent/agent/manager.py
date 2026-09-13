@@ -67,6 +67,13 @@ class ManagerClient:
                 return data
         return None
 
+    # runtime providers: the Realtime tab of manager-web Runtime Providers
+    async def realtime_provider(self) -> dict:
+        """{provider, model, backend_model, voice, api_base, api_key} of the active realtime row, or {}."""
+        data = await self._call("GET", "/livekit/providers/active", what="realtime provider")
+        realtime = data.get("realtime") if isinstance(data, dict) else None
+        return realtime if isinstance(realtime, dict) else {}
+
     # memory: the device workspace picoclaw keeps in sync (USER.md, memory/MEMORY.md with session summaries)
     async def workspace_files(self, device_mac: str) -> dict[str, str]:
         data = await self._call("GET", f"/agent/device/{device_mac}/workspace-files", what="workspace files")

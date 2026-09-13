@@ -32,6 +32,7 @@ class Persona:
     soul: str
     greeting: str
     language: str
+    voice: str = ""  # ai_agent_template.gptlive_voice
 
 
 def persona_from_manager(data: dict | None, meta) -> Persona:
@@ -44,6 +45,7 @@ def persona_from_manager(data: dict | None, meta) -> Persona:
         soul=str(data.get("soul") or "").strip(),
         greeting=str(data.get("greetingPrompt") or "").strip(),
         language=str(data.get("language") or "").strip() or meta.language,
+        voice=str(data.get("gptliveVoice") or "").strip(),
     )
 
 
