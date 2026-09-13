@@ -32,7 +32,7 @@ from livekit.plugins.openai.realtime import GPTLiveModel  # noqa: E402
 
 from agent.manager import ManagerClient  # noqa: E402
 from agent.metadata import SessionMeta, parse_dispatch_metadata  # noqa: E402
-from agent.persistence import SessionRecorder  # noqa: E402
+from agent.persistence import SessionRecorder, default_summarizer  # noqa: E402
 from agent.persona import backend_instructions, greeting_instruction, session_start_block, strip_expression_tags, voice_instructions  # noqa: E402
 from agent.placeholders import quiz_block, render_placeholders, wants_quiz  # noqa: E402
 from agent.quiz import QuizTracker, memo_type_for  # noqa: E402
@@ -169,7 +169,7 @@ async def entrypoint(ctx: JobContext) -> None:
 
     session = AgentSession(vad=ctx.proc.userdata["vad"])
     agent = CheekoGPTLive(plan)
-    recorder = SessionRecorder(session, manager, plan)
+    recorder = SessionRecorder(session, manager, plan, summarize=default_summarizer())
 
     @session.on("metrics_collected")
     def _on_metrics(ev) -> None:
@@ -206,4 +206,6 @@ async def entrypoint(ctx: JobContext) -> None:
 
 if __name__ == "__main__":
     cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint, prewarm_fnc=prewarm, agent_name=AGENT_NAME,
-                              port=int(os.getenv("GPTLIVE_PORT", DEFAULT_PORT))))
+                              port=int(os.getenv("GPTLIVE_PORT", DEFAULT_PORT)),
+                              # default 10 s kills the shutdown mid-upload: summary (<= 20 s) + memory + transcript
+                              shutdown_process_timeout=60.0))

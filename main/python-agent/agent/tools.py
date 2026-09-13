@@ -35,10 +35,10 @@ def remember_child_fact(workspace: Path):
         fact = " ".join((fact or "").split())
         if not fact:
             return "error: fact is required"
-        memory = Path(workspace) / "memory" / "MEMORY.md"
-        memory.parent.mkdir(parents=True, exist_ok=True)
-        with memory.open("a", encoding="utf-8") as f:
-            f.write(f"- {datetime.now().strftime('%Y-%m-%d')}: {fact}\n")
+        facts = Path(workspace) / "memory" / "new_facts.md"  # merged into MEMORY.md Stable Memory at shutdown
+        facts.parent.mkdir(parents=True, exist_ok=True)
+        with facts.open("a", encoding="utf-8") as f:
+            f.write(fact + "\n")
         return "remembered: " + fact
 
     return _remember

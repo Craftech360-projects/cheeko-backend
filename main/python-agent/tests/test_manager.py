@@ -65,6 +65,21 @@ async def test_workspace_files_returns_path_to_content():
 
 
 @pytest.mark.asyncio
+async def test_summary_and_memory_writes_use_the_picoclaw_endpoints():
+    fetch = FakeFetch({"/summary": (200, {"code": 0}), "/workspace-sync": (200, {"code": 0})})
+    mc = ManagerClient("http://m/toy", "s", fetch=fetch)
+    await mc.send_session_summary("AA:BB:CC:DD:EE:FF", "room-1", "Played a quiz.", 6)
+    method, url, body = fetch.calls[0]
+    assert method == "PUT" and url.endswith("/agent/device/AA:BB:CC:DD:EE:FF/sessions/room-1/summary")
+    assert body == {"summary": "Played a quiz.", "sourceMessageCount": 6}
+    await mc.save_memory("AA:BB:CC:DD:EE:FF", "# Memory\n")
+    method, url, body = fetch.calls[1]
+    assert method == "PUT" and url.endswith("/agent/device/AA:BB:CC:DD:EE:FF/workspace-sync")
+    assert body["files"] == [{"relativePath": "memory/MEMORY.md", "content": "# Memory\n", "contentType": "text/markdown"}]
+    assert body["newRevision"].isdigit() and body["deleted"] == [] and body["manifest"]["source"] == "cheeko-gptlive"
+
+
+@pytest.mark.asyncio
 async def test_failures_never_raise():
     async def boom(method, url, body):
         raise RuntimeError("down")

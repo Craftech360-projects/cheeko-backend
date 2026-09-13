@@ -10,7 +10,8 @@ async def test_remember_appends_a_dated_line(tmp_path: Path):
     tool = remember_child_fact(tmp_path)
     out = await tool("has a dog named Harry")  # FunctionTool.__call__ runs the wrapped coroutine
     assert "remembered" in out
-    assert "has a dog named Harry" in (tmp_path / "memory" / "MEMORY.md").read_text(encoding="utf-8")
+    # merged into MEMORY.md's Stable Memory at shutdown (agent.persistence.add_facts)
+    assert (tmp_path / "memory" / "new_facts.md").read_text(encoding="utf-8") == "has a dog named Harry\n"
     assert "error" in await tool("   ")
 
 

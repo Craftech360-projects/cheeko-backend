@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable
 from urllib.parse import quote
@@ -72,6 +73,19 @@ class ManagerClient:
         if not isinstance(data, dict):
             return {}
         return {path: str(f.get("content") or "") for path, f in data.items() if isinstance(f, dict)}
+
+    async def save_memory(self, device_mac: str, content: str) -> None:
+        """workspace-sync, not workspace-files: it bumps the manifest revision, so picoclaw re-downloads this
+        MEMORY.md instead of uploading its stale copy over it. No baseRevision: our write wins a race."""
+        # ponytail: no workspace lock; a picoclaw session ending in the same second on this device can overwrite it
+        body = {"newRevision": str(int(time.time() * 1000)), "deleted": [],
+                "files": [{"relativePath": "memory/MEMORY.md", "content": content, "contentType": "text/markdown"}],
+                "manifest": {"source": "cheeko-gptlive", "changedCount": 1, "deletedCount": 0}}
+        await self._call("PUT", f"/agent/device/{device_mac}/workspace-sync", body, what="memory sync")
+
+    async def send_session_summary(self, device_mac: str, session_id: str, summary: str, source_message_count: int) -> None:
+        body = {"summary": summary, "sourceMessageCount": source_message_count}
+        await self._call("PUT", f"/agent/device/{device_mac}/sessions/{quote(session_id, safe='')}/summary", body, what="session summary")
 
     # quiz
     async def quiz_batch(self, device_mac: str, character: str) -> dict | None:
