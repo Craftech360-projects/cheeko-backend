@@ -56,6 +56,7 @@ class SessionPlan:
     tools: list
     quiz_tracker: QuizTracker | None
     has_quiz: bool
+    room_name: str = ""
 
 
 async def _no_states() -> list[dict]:
@@ -91,7 +92,7 @@ async def assemble_session(room_name: str, metadata: str | None, manager: Manage
         backend_instructions=backend_instructions(bank, memos, has_quiz),
         greeting=greeting_instruction(meta.character, render_placeholders(persona.greeting, batch, now())),
         tools=tools_for(meta.character, workspace, tracker),
-        quiz_tracker=tracker, has_quiz=has_quiz,
+        quiz_tracker=tracker, has_quiz=has_quiz, room_name=room_name,
     )
 
 
@@ -155,26 +156,9 @@ async def entrypoint(ctx: JobContext) -> None:
         # RealtimeModelMetrics.session_duration = voice seconds; LLMMetrics = backend tokens
         metrics.log_metrics(ev.metrics)
 
-    @session.on("conversation_item_added")
-    def _on_item(ev) -> None:
-        item = ev.item
-        logger.info("TRANSCRIPT %s: %s", getattr(item, "role", type(item).__name__), getattr(item, "text_content", ""))
-
-    @session.on("agent_state_changed")
-    def _on_state(ev) -> None:
-        logger.info("STATE %s -> %s", ev.old_state, ev.new_state)
-
-    @session.on("function_tools_executed")
-    def _on_tools(ev) -> None:
-        logger.info("TOOLS %s", [(c.name, c.arguments) for c in ev.function_calls])
-
     @session.on("speech_created")
     def _on_speech(ev) -> None:
         logger.info("SPEECH created source=%s", ev.source)
-
-    @session.on("error")
-    def _on_error(ev) -> None:
-        logger.error("SESSION ERROR %s", ev.error)
 
     @ctx.room.on("data_received")
     def _on_data(packet: rtc.DataPacket) -> None:

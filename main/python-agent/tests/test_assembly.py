@@ -25,7 +25,7 @@ class FakeFetch:
 @pytest.mark.asyncio
 async def test_assemble_quizzy_session(tmp_path: Path):
     plan = await assemble_session(ROOM, META, ManagerClient("http://m/toy", "s", fetch=FakeFetch()), tmp_path, now=lambda: datetime(2026, 9, 13, 9))
-    assert plan.meta.voice == "vesper" and plan.meta.accent == "indian" and plan.has_quiz
+    assert plan.meta.voice == "vesper" and plan.meta.accent == "indian" and plan.has_quiz and plan.room_name == ROOM
     assert (plan.workspace / "AGENT.md").exists() and "You are Quizzy, quiz master." in plan.voice_instructions
     assert "(id=11)" in plan.voice_instructions and "(id=11)" in plan.backend_instructions and "<accent>" in plan.voice_instructions
     assert "MEMO: type=daily_quiz" in plan.backend_instructions
