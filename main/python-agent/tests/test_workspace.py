@@ -29,6 +29,22 @@ def test_hydrate_writes_the_three_files_and_state(tmp_path: Path):
     assert (ws / "memory" / "MEMORY.md").exists()
 
 
+def test_full_agent_md_from_manager_is_used_verbatim(tmp_path: Path):
+    full = "# Quizzy AGENT.md\n\nSpeak <!-- LANGUAGE --> only.\n\n## Rules\nmanager-owned rules"
+    ws = hydrate_workspace(tmp_path, "room-3", Persona(full, "", "", "hi"), META, [])
+    agent_md = (ws / "AGENT.md").read_text(encoding="utf-8")
+    assert agent_md.startswith("# Quizzy AGENT.md\n\nSpeak Hindi only.")
+    assert "Voice Output Rules" not in agent_md  # the local scaffold is not merged in
+
+
+def test_parent_rule_is_appended_subordinate_and_sanitized(tmp_path: Path):
+    meta = META.__class__(**{**META.__dict__, "parent_rule": "No `scary`\nstories"})
+    agent_md = (hydrate_workspace(tmp_path, "room-4", Persona("You are Quizzy.", "", "", "hi"), meta, []) / "AGENT.md").read_text(encoding="utf-8")
+    assert agent_md.index("## Parent Preferences (subordinate)") < agent_md.index("No scary stories") < agent_md.index("## Rule Precedence (absolute)")
+    no_rule = META.__class__(**{**META.__dict__, "parent_rule": ""})
+    assert "Parent Preferences" not in (hydrate_workspace(tmp_path, "room-5", Persona("x", "", "", "hi"), no_rule, []) / "AGENT.md").read_text(encoding="utf-8")
+
+
 def test_system_prompt_is_built_from_the_files(tmp_path: Path):
     ws = hydrate_workspace(tmp_path, "room-2", Persona("You are Cheeko.", "Playful.", "", "en"), META, [])
     (ws / "SOUL.md").write_text("Edited on disk.", encoding="utf-8")  # proves the prompt comes from files, not memory
