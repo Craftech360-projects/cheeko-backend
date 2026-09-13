@@ -47,6 +47,8 @@ DEFAULT_PORT = 8090
 WORKSPACES = ROOT / "workspaces"
 GREETING_FALLBACK_S = 3.0
 MAX_INSTRUCTION_TOKENS = 8192  # GPT-Live startup cap; a single append is capped at 500
+# ponytail: chars/4 token estimate with ~600 tokens of headroom; use a tokenizer if sessions start failing
+MAX_VOICE_CHARS = (MAX_INSTRUCTION_TOKENS - 600) * 4
 
 
 @dataclass
@@ -62,22 +64,24 @@ class SessionPlan:
     room_name: str = ""
 
 
-async def _no_states() -> list[dict]:
-    return []
+async def _nothing(value):
+    return value
 
 
 async def assemble_session(room_name: str, metadata: str | None, manager: ManagerClient, workspaces_root: Path,
                            now: Callable[[], datetime] | None = None) -> SessionPlan:
     now = now or datetime.now
     meta = parse_dispatch_metadata(metadata, room_name)
-    persona_data, states = None, []
+    persona_data, states, files = None, [], {}
     if manager.enabled:
-        persona_data, states = await asyncio.gather(
+        mac = meta.device_mac
+        persona_data, states, files = await asyncio.gather(
             manager.character_session(meta.character, meta.character_id),
-            manager.progress_state(meta.device_mac) if meta.device_mac else _no_states(),
+            manager.progress_state(mac) if mac else _nothing([]),
+            manager.workspace_files(mac) if mac else _nothing({}),
         )
     persona = persona_from_manager(persona_data, meta)
-    workspace = hydrate_workspace(workspaces_root, room_name, persona, meta, states)
+    workspace = hydrate_workspace(workspaces_root, room_name, persona, meta, states, files)
 
     batch = None
     if wants_quiz(persona.greeting) and manager.enabled and meta.device_mac:
@@ -91,15 +95,21 @@ async def assemble_session(room_name: str, metadata: str | None, manager: Manage
     today = now()
     greeting_prompt = strip_expression_tags(render_placeholders(persona.greeting, batch, today))
     session_start = session_start_block(greeting_prompt)  # carries the quiz block
-    voice = voice_instructions(build_system_prompt(workspace), meta.language, meta.accent, session_start, has_quiz,
-                               today=today.strftime("%A, %d %B %Y"))
-    if len(voice) // 4 > MAX_INSTRUCTION_TOKENS:  # ponytail: chars/4 estimate, no tokenizer
-        logger.warning("voice instructions ~%d tokens exceed GPT-Live's %d cap", len(voice) // 4, MAX_INSTRUCTION_TOKENS)
+    def voice_with_memory(memory_chars: int | None) -> str:
+        # meta.language is the session choice from dispatch; AGENT.md uses the same value
+        return voice_instructions(build_system_prompt(workspace, memory_chars), meta.language, meta.accent, session_start,
+                                  has_quiz, today=today.strftime("%A, %d %B %Y"))
+
+    spare = MAX_VOICE_CHARS - len(voice_with_memory(0)) - 40  # 40: the section heading and separator
+    voice = voice_with_memory(spare)
+    if len(voice) > MAX_VOICE_CHARS:
+        logger.warning("voice instructions ~%d tokens, over the ~%d budget under GPT-Live's %d cap",
+                       len(voice) // 4, MAX_VOICE_CHARS // 4, MAX_INSTRUCTION_TOKENS)
+    memory_path = workspace / "memory" / "MEMORY.md"
     return SessionPlan(
         meta=meta, workspace=workspace,
-        # meta.language is the session choice from dispatch; AGENT.md uses the same value
         voice_instructions=voice,
-        backend_instructions=backend_instructions(bank, memos, has_quiz),
+        backend_instructions=backend_instructions(bank, memos, has_quiz, memory_path.read_text(encoding="utf-8")),
         greeting=greeting_instruction(meta.character, has_session_start=bool(session_start)),
         tools=tools_for(meta.character, workspace, tracker),
         quiz_tracker=tracker, has_quiz=has_quiz, room_name=room_name,

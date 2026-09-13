@@ -45,6 +45,31 @@ def test_parent_rule_is_appended_subordinate_and_sanitized(tmp_path: Path):
     assert "Parent Preferences" not in (hydrate_workspace(tmp_path, "room-5", Persona("x", "", "", "hi"), no_rule, []) / "AGENT.md").read_text(encoding="utf-8")
 
 
+MEMORY = ("# Long-term Memory\n\n## Stable Memory\n- Loves dinosaurs\n\n## Session Summaries\n"
+          "- 2026-08-20 13:56:37 UTC: talked about rockets\n"
+          "- 2026-09-12 18:10:04 UTC: sang a rain song\n"
+          "- 2026-09-13 05:24:36 UTC: planned a volcano story\n")
+
+
+def test_manager_memory_and_user_files_are_restored(tmp_path: Path):
+    files = {"memory/MEMORY.md": MEMORY, "USER.md": "# User\n\n- Name: Hitansh\n- Learning goals: counting\n"}
+    ws = hydrate_workspace(tmp_path, "room-6", Persona("x", "", "", "hi"), META, [], files)
+    assert (ws / "memory" / "MEMORY.md").read_text(encoding="utf-8") == MEMORY
+    assert "Learning goals: counting" in (ws / "USER.md").read_text(encoding="utf-8")
+    ws2 = hydrate_workspace(tmp_path, "room-7", Persona("x", "", "", "hi"), META, [], {"USER.md": "  "})
+    assert "- Name: Aarav" in (ws2 / "USER.md").read_text(encoding="utf-8")  # blank manager copy: use dispatch profile
+
+
+def test_memory_section_keeps_stable_facts_and_newest_summaries_within_the_limit(tmp_path: Path):
+    ws = hydrate_workspace(tmp_path, "room-8", Persona("x", "", "", "hi"), META, [], {"memory/MEMORY.md": MEMORY})
+    full = build_system_prompt(ws)
+    assert "## memory/MEMORY.md" in full and "talked about rockets" in full and full.index("## USER.md") < full.index("## memory/MEMORY.md")
+    trimmed = build_system_prompt(ws, memory_chars=len(MEMORY) - 20)
+    assert "Loves dinosaurs" in trimmed and "planned a volcano story" in trimmed and "sang a rain song" in trimmed
+    assert "talked about rockets" not in trimmed  # oldest summary dropped first
+    assert "## memory/MEMORY.md" not in build_system_prompt(ws, memory_chars=0)
+
+
 def test_system_prompt_is_built_from_the_files(tmp_path: Path):
     ws = hydrate_workspace(tmp_path, "room-2", Persona("You are Cheeko.", "Playful.", "", "en"), META, [])
     (ws / "SOUL.md").write_text("Edited on disk.", encoding="utf-8")  # proves the prompt comes from files, not memory

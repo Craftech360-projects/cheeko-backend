@@ -66,6 +66,13 @@ class ManagerClient:
                 return data
         return None
 
+    # memory: the device workspace picoclaw keeps in sync (USER.md, memory/MEMORY.md with session summaries)
+    async def workspace_files(self, device_mac: str) -> dict[str, str]:
+        data = await self._call("GET", f"/agent/device/{device_mac}/workspace-files", what="workspace files")
+        if not isinstance(data, dict):
+            return {}
+        return {path: str(f.get("content") or "") for path, f in data.items() if isinstance(f, dict)}
+
     # quiz
     async def quiz_batch(self, device_mac: str, character: str) -> dict | None:
         path = f"/quiz/next-questions?device_mac={quote(device_mac, safe='')}&character={quote(character, safe='')}"

@@ -103,17 +103,19 @@ def render_user_md(meta) -> str:
     return "\n".join(lines) + "\n"
 
 
-def hydrate_workspace(root: Path, room: str, persona: Persona, meta, memos: list[dict]) -> Path:
+def hydrate_workspace(root: Path, room: str, persona: Persona, meta, memos: list[dict], files: dict[str, str] | None = None) -> Path:
+    """files: the device workspace from the manager (picoclaw's restore); USER.md and memory/MEMORY.md win when non-blank."""
+    files = files or {}
     ws = root / (_SAFE.sub("_", room) or "room")
     (ws / "memory" / "state").mkdir(parents=True, exist_ok=True)
     agent_md = render_agent_md(persona.system_prompt, meta.language, meta.parent_rule)
     (ws / "AGENT.md").write_text(strip_expression_tags(agent_md), encoding="utf-8")
     soul = persona.soul or (TEMPLATE_DIR / "SOUL.md").read_text(encoding="utf-8")
     (ws / "SOUL.md").write_text(strip_expression_tags(soul), encoding="utf-8")
-    (ws / "USER.md").write_text(render_user_md(meta), encoding="utf-8")
-    memory = ws / "memory" / "MEMORY.md"
-    if not memory.exists():
-        memory.write_text("# Memory\n", encoding="utf-8")
+    user_md = files.get("USER.md", "")
+    (ws / "USER.md").write_text(user_md if user_md.strip() else render_user_md(meta), encoding="utf-8")
+    memory_md = files.get("memory/MEMORY.md") or files.get("MEMORY.md") or ""
+    (ws / "memory" / "MEMORY.md").write_text(memory_md if memory_md.strip() else "# Memory\n", encoding="utf-8")
     for state in memos:
         kind = _SAFE.sub("_", str(state.get("state_type") or "")).strip("_")
         memo = str(state.get("memo") or "").strip()
@@ -130,8 +132,36 @@ def _section(ws: Path, name: str) -> str:
     return f"## {name}\n\n{body}" if body else ""
 
 
-def build_system_prompt(workspace: Path) -> str:
+def trim_memory(text: str, limit: int) -> str:
+    """Fit MEMORY.md into limit chars: every non-summary line, then the newest session summaries (they are oldest first)."""
+    if len(text) <= limit:
+        return text
+    lines = text.splitlines()
+    in_summaries, keep, summaries = False, [], []
+    for i, line in enumerate(lines):
+        if line.startswith("#"):
+            in_summaries = "summar" in line.lower()
+        (summaries if in_summaries and not line.startswith("#") else keep).append((i, line))
+    used = sum(len(l) + 1 for _, l in keep)
+    if used > limit:
+        return ""  # ponytail: stable facts alone overflow; backend still has the full file
+    for i, line in reversed(summaries):
+        if used + len(line) + 1 > limit:
+            break
+        keep.append((i, line))
+        used += len(line) + 1
+    return "\n".join(l for _, l in sorted(keep))
+
+
+def build_system_prompt(workspace: Path, memory_chars: int | None = None) -> str:
+    """memory_chars: None for all of memory/MEMORY.md, otherwise at most that many chars of it (0 leaves it out)."""
     parts = [IDENTITY] + [s for s in (_section(workspace, n) for n in ("AGENT.md", "SOUL.md", "USER.md")) if s]
+    memory_path = workspace / "memory" / "MEMORY.md"
+    memory = memory_path.read_text(encoding="utf-8").strip() if memory_path.exists() else ""
+    if memory and memory != "# Memory" and memory_chars != 0:
+        memory = memory if memory_chars is None else trim_memory(memory, max(memory_chars, 0)).strip()
+        if memory:
+            parts.append(f"## memory/MEMORY.md\n\n{memory}")
     return "\n\n---\n\n".join(parts)
 
 

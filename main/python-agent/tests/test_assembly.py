@@ -20,6 +20,10 @@ class FakeFetch:
         if "/quiz/next-questions" in url:
             return 200, {"code": 0, "data": {"level": 1, "age_band": "6-8", "bank": "quiz", "answered_today": 0,
                                             "questions": [{"id": "11", "question_text": "How many legs does a spider have?", "answer_text": "eight", "accepted_answers": [], "choice_order": [], "teach_text": ""}]}}
+        if "/workspace-files" in url:
+            summaries = "".join(f"- 2026-09-{d:02d} 10:00:00 UTC: session {d} " + "chat " * 60 + "\n" for d in range(1, 13))
+            return 200, {"code": 0, "data": {"memory/MEMORY.md": {"content": "# Long-term Memory\n\n## Stable Memory\n- Has a dog named Harry\n\n## Session Summaries\n" + summaries},
+                                            "USER.md": {"content": "# User\n\n- Name: Aarav\n- Learning goals: counting\n"}}}
         if "/progress/state" in url:
             return 200, {"code": 0, "data": {"states": [{"state_type": "daily_quiz", "memo": "MEMO: type=daily_quiz | date=2026-09-12"}]}}
         return 404, {}
@@ -42,6 +46,24 @@ async def test_assemble_quizzy_session(tmp_path: Path):
     assert "expression tag" not in body and "[excited]" not in body and "[happy]" not in body and "[curious]" not in body
     assert '- Cheer: "Ting!"' in (plan.workspace / "AGENT.md").read_text(encoding="utf-8")
     assert "[happy]" not in (plan.workspace / "SOUL.md").read_text(encoding="utf-8")
+    # memory restored from the manager: the backend gets all of it, the voice model the newest that fit its cap
+    assert "Has a dog named Harry" in plan.voice_instructions and "session 12 " in plan.voice_instructions
+    assert "session 1 " in plan.backend_instructions and "session 12 " in plan.backend_instructions
+    assert "Learning goals: counting" in plan.voice_instructions
+
+
+@pytest.mark.asyncio
+async def test_voice_memory_is_trimmed_to_the_instruction_cap(tmp_path: Path, monkeypatch):
+    import cheeko_gptlive_worker as worker
+    mc = ManagerClient("http://m/toy", "s", fetch=FakeFetch())
+    full = await assemble_session(ROOM, META, mc, tmp_path, now=lambda: datetime(2026, 9, 13, 9))
+    cap = len(full.voice_instructions) - 500  # force the memory section to lose ~two summaries
+    monkeypatch.setattr(worker, "MAX_VOICE_CHARS", cap)
+    plan = await assemble_session(ROOM, META, mc, tmp_path, now=lambda: datetime(2026, 9, 13, 9))
+    voice = plan.voice_instructions
+    assert len(voice) <= cap
+    assert "Has a dog named Harry" in voice and "session 12 " in voice and "session 1 " not in voice  # oldest dropped first
+    assert "session 1 " in plan.backend_instructions
     assert [t.info.name for t in plan.tools] == ["get_time_date", "remember_child_fact", "quiz_status", "quiz_score_answer", "quiz_record_wonder"]
 
 

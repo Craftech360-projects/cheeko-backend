@@ -56,6 +56,15 @@ async def test_persistence_payloads():
 
 
 @pytest.mark.asyncio
+async def test_workspace_files_returns_path_to_content():
+    fetch = FakeFetch({"/agent/device/68:EE:8F:60:BA:AC/workspace-files": (200, {"code": 0, "data": {
+        "memory/MEMORY.md": {"content": "# Long-term Memory\n", "updatedAt": "x"}, "AGENT.md": {"content": "", "updatedAt": None}, "bad": "nope"}})})
+    files = await ManagerClient("http://m/toy", "s", fetch=fetch).workspace_files("68:EE:8F:60:BA:AC")
+    assert files == {"memory/MEMORY.md": "# Long-term Memory\n", "AGENT.md": ""}
+    assert await ManagerClient("http://m/toy", "s", fetch=FakeFetch({})).workspace_files("AA") == {}
+
+
+@pytest.mark.asyncio
 async def test_failures_never_raise():
     async def boom(method, url, body):
         raise RuntimeError("down")

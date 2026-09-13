@@ -30,7 +30,9 @@ def delegation_block(language: str, has_quiz: bool) -> str:
         "<delegation>",
         "You cannot look things up or keep score yourself. Delegate any question about the current time,",
         "date or weather, any factual question you are not sure about, and anything worth remembering",
-        "about the child. While you wait, say one short cheerful line, then read out the result when it arrives.",
+        "about the child. If the child asks what you talked about before, or about something from an earlier",
+        "session that you cannot see in memory/MEMORY.md above, delegate: the helper has the full memory.",
+        "While you wait, say one short cheerful line, then read out the result when it arrives.",
         "Answer greetings, small talk, jokes and simple questions yourself.",
     ]
     if has_quiz:
@@ -72,7 +74,7 @@ def voice_instructions(system_prompt_from_files: str, language: str, accent: str
     return "\n\n---\n\n".join(parts)
 
 
-def backend_instructions(bank_block: str, memos: list[str], has_quiz: bool) -> str:
+def backend_instructions(bank_block: str, memos: list[str], has_quiz: bool, memory: str = "") -> str:
     text = ("You handle the work a voice model delegates while it talks to a child aged 3 to 16. "
             "Use tools when current information is required or when the child says something worth remembering. "
             "Reply with one or two short, friendly, child-safe sentences the voice model can read out.")
@@ -83,6 +85,9 @@ def backend_instructions(bank_block: str, memos: list[str], has_quiz: bool) -> s
         text += "\n\n" + bank_block.strip()
     if memos:
         text += "\n\n## Saved state from earlier sessions\n" + "\n".join(m.strip() for m in memos if m.strip())
+    if memory.strip():
+        text += ("\n\n## What you remember about this child (memory/MEMORY.md, session summaries oldest first)\n"
+                 "Use it to answer questions about earlier conversations; say plainly when something is not in it.\n\n" + memory.strip())
     return text
 
 
