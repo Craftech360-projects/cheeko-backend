@@ -29,7 +29,11 @@ async def test_assemble_quizzy_session(tmp_path: Path):
     assert (plan.workspace / "AGENT.md").exists() and "You are Quizzy, quiz master." in plan.voice_instructions
     assert "(id=11)" in plan.voice_instructions and "(id=11)" in plan.backend_instructions and "<accent>" in plan.voice_instructions
     assert "MEMO: type=daily_quiz" in plan.backend_instructions
-    assert "Ask away." in plan.greeting and "{{" not in plan.greeting
+    # the greeting prompt lives in the session instructions; the spoken ask stays under GPT-Live's 500-token append cap
+    assert "## Session start" in plan.voice_instructions and "Ask away." in plan.voice_instructions and "{{" not in plan.voice_instructions
+    assert plan.voice_instructions.count("(id=11)") == 1
+    assert "Ask away." not in plan.greeting and len(plan.greeting) < 400
+    assert "Sunday, 13 September 2026" in plan.voice_instructions
     assert [t.info.name for t in plan.tools] == ["get_time_date", "remember_child_fact", "quiz_status", "quiz_score_answer", "quiz_record_wonder"]
 
 

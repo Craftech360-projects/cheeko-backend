@@ -26,12 +26,32 @@ def delegation_block(language: str, has_quiz: bool) -> str:
     return "\n".join(lines)
 
 
-def voice_instructions(system_prompt_from_files: str, language: str, accent: str, bank_block: str, has_quiz: bool) -> str:
+def speech_block(today: str) -> str:
+    """Last word on output. Manager prompts are written for picoclaw, which strips MEMO lines and [tags]
+    from text before TTS; GPT-Live speaks everything it produces, so those rules must be overridden here."""
+    lines = [
+        "<speech>",
+        "Everything you produce is spoken aloud to the child. This overrides any rule above:",
+        "- Never say, write or produce a MEMO line, scoreboard, status fields or any other metadata, and ignore every",
+        "  instruction above about writing or updating a MEMO or Saved State. Quiz progress is recorded for you when",
+        "  you delegate the child's answer.",
+        "- Never say expression tags or anything in square brackets, such as [happy]. Show the feeling in your voice instead.",
+        "- Never read out question ids, file names or tool names.",
+    ]
+    if today:
+        lines.append(f"- Today is {today}.")
+    lines.append("</speech>")
+    return "\n".join(lines)
+
+
+def voice_instructions(system_prompt_from_files: str, language: str, accent: str, bank_block: str, has_quiz: bool,
+                       today: str = "") -> str:
     parts = [system_prompt_from_files, delegation_block(language, has_quiz)]
     if bank_block.strip():
         parts.append(bank_block.strip())
     if accent == "indian":
         parts.append(ACCENT_INDIAN)
+    parts.append(speech_block(today))
     return "\n\n---\n\n".join(parts)
 
 
@@ -49,8 +69,14 @@ def backend_instructions(bank_block: str, memos: list[str], has_quiz: bool) -> s
     return text
 
 
-def greeting_instruction(character: str, greeting_prompt: str) -> str:
-    head = f"Immediately greet the child as {character or 'Cheeko'} in one or two short sentences. Do not wait for them to speak first."
-    if greeting_prompt.strip():
-        return head + "\n\n" + greeting_prompt.strip()
-    return head + " Then ask what they want to do, and pause to listen."
+def session_start_block(rendered_greeting_prompt: str) -> str:
+    """The manager greeting prompt, kept in the instructions: a generate_reply ask is capped at 500 tokens."""
+    text = rendered_greeting_prompt.strip()
+    return f"## Session start\nWhen the session starts, open it like this:\n\n{text}" if text else ""
+
+
+def greeting_instruction(character: str, has_session_start: bool) -> str:
+    head = f"Greet the child now as {character or 'Cheeko'}, in one or two short sentences."
+    if has_session_start:
+        return head + " Follow the Session start section of your instructions."
+    return head + " Then ask what they want to do."

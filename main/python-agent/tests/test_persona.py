@@ -10,13 +10,23 @@ def test_voice_instructions_layers_files_rules_bank_and_accent():
     assert "<accent>" not in plain and "scored" not in plain
 
 
+def test_speech_rules_come_last_and_override_picoclaw_text_rules():
+    # picoclaw strips MEMO lines and [tags] from text before TTS; GPT-Live speaks everything it produces
+    v = voice_instructions("Everything you output is spoken aloud, except the hidden MEMO line.", "English", "indian",
+                           "## Session start\nAsk question one.", True, today="Sunday, 13 September 2026")
+    rules = v[v.index("<speech>"):]
+    assert v.index("## Session start") < v.index("<accent>") < v.index("<speech>")
+    assert "MEMO" in rules and "square brackets" in rules and "Sunday, 13 September 2026" in rules
+    assert "<speech>" in voice_instructions("x", "English", "default", "", False)
+
+
 def test_backend_instructions_carry_bank_and_memos():
     b = backend_instructions("## Today's Quiz Questions", ["MEMO: type=daily_quiz | date=2026-09-12 | answered=3"], True)
     assert "quiz_score_answer" in b and "## Today's Quiz Questions" in b and "MEMO: type=daily_quiz" in b
     assert "quiz_score_answer" not in backend_instructions("", [], False)
 
 
-def test_greeting_instruction():
-    g = greeting_instruction("Quizzy", "Start with question one.")
-    assert "Quizzy" in g and "Start with question one." in g
-    assert "greet" in greeting_instruction("Cheeko", "").lower()
+def test_greeting_instruction_is_short_and_points_at_session_start():
+    g = greeting_instruction("Quizzy", has_session_start=True)
+    assert "Quizzy" in g and "Session start" in g and len(g) < 400  # GPT-Live caps a commentary append at 500 tokens
+    assert "greet" in greeting_instruction("Cheeko", has_session_start=False).lower()

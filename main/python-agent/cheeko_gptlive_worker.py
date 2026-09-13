@@ -33,7 +33,7 @@ from livekit.plugins.openai.realtime import GPTLiveModel  # noqa: E402
 from agent.manager import ManagerClient  # noqa: E402
 from agent.metadata import SessionMeta, parse_dispatch_metadata  # noqa: E402
 from agent.persistence import SessionRecorder  # noqa: E402
-from agent.persona import backend_instructions, greeting_instruction, voice_instructions  # noqa: E402
+from agent.persona import backend_instructions, greeting_instruction, session_start_block, voice_instructions  # noqa: E402
 from agent.placeholders import quiz_block, render_placeholders, wants_quiz  # noqa: E402
 from agent.quiz import QuizTracker, memo_type_for  # noqa: E402
 from agent.tools import tools_for  # noqa: E402
@@ -46,6 +46,7 @@ AGENT_NAME = os.getenv("GPTLIVE_AGENT_NAME", "cheeko-agent")
 DEFAULT_PORT = 8090
 WORKSPACES = ROOT / "workspaces"
 GREETING_FALLBACK_S = 3.0
+MAX_INSTRUCTION_TOKENS = 8192  # GPT-Live startup cap; a single append is capped at 500
 
 
 @dataclass
@@ -87,12 +88,18 @@ async def assemble_session(room_name: str, metadata: str | None, manager: Manage
     has_quiz = tracker is not None
     bank = quiz_block(batch) if wants_quiz(persona.greeting) else ""
     memos = [str(s.get("memo") or "") for s in states if s.get("memo")]
+    today = now()
+    session_start = session_start_block(render_placeholders(persona.greeting, batch, today))  # carries the quiz block
+    voice = voice_instructions(build_system_prompt(workspace), meta.language, meta.accent, session_start, has_quiz,
+                               today=today.strftime("%A, %d %B %Y"))
+    if len(voice) // 4 > MAX_INSTRUCTION_TOKENS:  # ponytail: chars/4 estimate, no tokenizer
+        logger.warning("voice instructions ~%d tokens exceed GPT-Live's %d cap", len(voice) // 4, MAX_INSTRUCTION_TOKENS)
     return SessionPlan(
         meta=meta, workspace=workspace,
         # meta.language is the session choice from dispatch; AGENT.md uses the same value
-        voice_instructions=voice_instructions(build_system_prompt(workspace), meta.language, meta.accent, bank, has_quiz),
+        voice_instructions=voice,
         backend_instructions=backend_instructions(bank, memos, has_quiz),
-        greeting=greeting_instruction(meta.character, render_placeholders(persona.greeting, batch, now())),
+        greeting=greeting_instruction(meta.character, has_session_start=bool(session_start)),
         tools=tools_for(meta.character, workspace, tracker),
         quiz_tracker=tracker, has_quiz=has_quiz, room_name=room_name,
     )
