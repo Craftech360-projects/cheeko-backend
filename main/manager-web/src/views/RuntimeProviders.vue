@@ -4,7 +4,7 @@
     <div class="page-head">
       <div>
         <h1 class="page-title">Runtime Providers</h1>
-        <p class="page-lead">The LLM, STT and TTS vendors the agent falls through, in priority order.</p>
+        <p class="page-lead">The LLM, STT, TTS and realtime voice vendors the agent uses, in priority order.</p>
       </div>
       <div class="page-actions">
         <div class="runtime-health">
@@ -190,7 +190,7 @@
             clearable
             class="full-input"
           >
-            <el-option v-for="option in field.options" :key="option" :label="option" :value="option"></el-option>
+            <el-option v-for="option in optionsFor(field)" :key="option" :label="option" :value="option"></el-option>
           </el-select>
           <el-input
             v-else-if="field.secret"
@@ -224,6 +224,16 @@ import ListToolbar from '@/components/ListToolbar.vue';
 import listControls from '@/mixins/listControls';
 import Api from "@/apis/api";
 import VersionFooter from "@/components/VersionFooter.vue";
+
+// Mirrors main/python-agent/agent/realtime.py. GPT-Live "aster" is refused for this OpenAI account.
+const REALTIME_VOICES = {
+  openai: ["beacon", "cinder", "marin", "stone", "vesper"],
+  google: ["Achernar", "Achird", "Algenib", "Algieba", "Alnilam", "Aoede", "Autonoe", "Callirrhoe", "Charon", "Despina",
+    "Enceladus", "Erinome", "Fenrir", "Gacrux", "Iapetus", "Kore", "Laomedeia", "Leda", "Orus", "Pulcherrima", "Puck",
+    "Rasalgethi", "Sadachbia", "Sadaltager", "Schedar", "Sulafat", "Umbriel", "Vindemiatrix", "Zephyr", "Zubenelgenubi"],
+  xai: ["carina", "zagan", "helix", "orion", "luna", "iris", "altair", "zenith", "perseus", "helios", "lux", "kepler",
+    "rigel", "cosmo", "celeste", "ursa", "sirius", "lumen", "castor", "naksh", "atlas", "ara", "eve", "leo", "rex", "sal"]
+};
 
 export default {
   name: 'RuntimeProviders',
@@ -299,6 +309,7 @@ export default {
         ],
         realtime: [
           { label: "Provider", prop: "provider_name", mono: true },
+          { label: "Vendor", prop: "vendor", mono: true },
           { label: "Voice Model", prop: "model", mono: true },
           { label: "Backend Model", prop: "backend_model", mono: true },
           { label: "Default Voice", prop: "voice", mono: true },
@@ -345,10 +356,11 @@ export default {
         ],
         realtime: [
           { label: "Provider", prop: "provider_name" },
+          { label: "Vendor", prop: "vendor", options: ["openai", "google", "xai"] },
           { label: "Voice Model", prop: "model" },
-          { label: "Backend Model", prop: "backend_model" },
-          // aster is refused for this OpenAI account; characters can override in the admin dashboard
-          { label: "Default Voice", prop: "voice", options: ["beacon", "cinder", "marin", "stone", "vesper"] },
+          { label: "Backend / Text Model", prop: "backend_model" },
+          // voices depend on the vendor; characters can override per vendor in the admin dashboard
+          { label: "Default Voice", prop: "voice", options: form => REALTIME_VOICES[form.vendor] || REALTIME_VOICES.openai },
           { label: "API Base", prop: "api_base" },
           { label: "API Key", prop: "api_key", secret: true },
           { label: "Priority", prop: "priority", type: "number", min: 0 }
@@ -377,6 +389,10 @@ export default {
   methods: {
     dirtyState() {
       return this.editForm;
+    },
+
+    optionsFor(field) {
+      return typeof field.options === "function" ? field.options(this.editForm) : field.options;
     },
 
     // Sort/search the visible type's providers through the shared mixin
@@ -452,7 +468,7 @@ export default {
       if (type === "llm") return provider.model || "Model configured";
       if (type === "stt") return provider.model || provider.language || "STT configured";
       if (type === "moderation" || type === "image") return provider.model || provider.provider_name || "Configured";
-      if (type === "realtime") return [provider.model, provider.voice].filter(Boolean).join(" · ") || "Configured";
+      if (type === "realtime") return [provider.vendor, provider.model, provider.voice].filter(Boolean).join(" · ") || "Configured";
       return provider.model_id || provider.voice_id || "Voice configured";
     },
     providerRowClassName({ row }) {
