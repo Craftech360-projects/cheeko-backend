@@ -106,6 +106,8 @@ function gSetRunning(on) {
   G('gptMute').disabled = !on;
   G('gptAgent').disabled = on;
   G('gptMac').disabled = on;
+  G('gptChar').disabled = on;
+  G('gptProvider').disabled = on;
   G('gptVoice').disabled = on;
   G('gptAccent').disabled = on;
   G('gptState').textContent = on ? 'live' : 'idle';
@@ -131,7 +133,8 @@ async function gptStart() {
     body: JSON.stringify({
       agentName: G('gptAgent').value.trim(),
       mac: G('gptMac').value.trim(),
-      gptlive: { voice: G('gptVoice').value, accent: G('gptAccent').value },
+      characterName: G('gptChar').value || null,
+      gptlive: { voice: G('gptVoice').value, accent: G('gptAccent').value, provider: G('gptProvider').value },
     }),
   });
   gSession = await res.json();
@@ -209,3 +212,28 @@ G('gptMute').addEventListener('click', async () => {
   await gRoom.localParticipant.setMicrophoneEnabled(!on);
   G('gptMute').textContent = on ? 'Unmute mic' : 'Mute mic';
 });
+
+// Voices follow the chosen provider's vendor; "Active" keeps the GPT-Live list (the usual active row).
+G('gptProvider').addEventListener('change', () => {
+  const vendor = window.REALTIME_PROVIDERS[G('gptProvider').value] || 'openai';
+  window.fillVoiceSelect(G('gptVoice'), vendor, 'Character / provider default');
+});
+
+// Loaded when the tab is opened, not at page load: /templates needs the admin login token.
+let gCharsLoaded = false;
+async function loadGptCharacters() {
+  if (gCharsLoaded) return;
+  try {
+    const list = await api('GET', '/templates');
+    list.slice().sort((a, b) => String(a.agentName).localeCompare(String(b.agentName))).forEach((t) => {
+      const o = document.createElement('option');
+      o.value = t.agentName;
+      o.textContent = t.agentName;
+      G('gptChar').appendChild(o);
+    });
+    gCharsLoaded = true;
+  } catch (e) {
+    glog('Could not load characters: ' + e.message, 'err');
+  }
+}
+document.querySelector('.tab[data-tab="gptliveView"]')?.addEventListener('click', loadGptCharacters);

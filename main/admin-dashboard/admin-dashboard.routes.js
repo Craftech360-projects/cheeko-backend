@@ -65,6 +65,8 @@ router.get('/templates/:id', gate, asyncHandler(async (req, res) => {
     elevenlabsVoiceId: t.elevenlabsVoiceId,
     smallestVoiceId: t.smallestVoiceId,
     gptliveVoice: t.gptliveVoice,
+    geminiVoice: t.geminiVoice,
+    xaiVoice: t.xaiVoice,
   });
 }));
 
@@ -93,6 +95,8 @@ router.post('/templates', gate, asyncHandler(async (req, res) => {
       elevenlabsVoiceId: b.elevenlabsVoiceId,
       smallestVoiceId: b.smallestVoiceId,
       gptliveVoice: b.gptliveVoice,
+      geminiVoice: b.geminiVoice,
+      xaiVoice: b.xaiVoice,
     });
     success(res, { id }, 'Created');
   } catch (err) {
@@ -112,6 +116,8 @@ router.put('/templates/:id', gate, asyncHandler(async (req, res) => {
       elevenlabsVoiceId: req.body.elevenlabsVoiceId,
       smallestVoiceId: req.body.smallestVoiceId,
       gptliveVoice: req.body.gptliveVoice,
+      geminiVoice: req.body.geminiVoice,
+      xaiVoice: req.body.xaiVoice,
     });
     success(res, null, 'Saved');
   } catch (err) {
