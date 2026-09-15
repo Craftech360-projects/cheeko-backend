@@ -69,6 +69,37 @@ function gState(next) {
   gMetrics();
 }
 
+// Audio flow, every 5 s, from WebRTC stats. Agent audio in: packets (250 per 5 s at 20 ms
+// frames), jitter, loss, and concealment — audio the browser had to invent because packets
+// were late, i.e. the jitter you hear. Mic out: packets sent to the agent.
+let gAgentTrack = null, gStatsTimer = null, gPrev = null;
+async function gAudioStats() {
+  const pick = async (sender, type) => {
+    let out = null;
+    (await sender?.getStats())?.forEach((s) => { if (s.type === type) out = s; });
+    return out;
+  };
+  const inb = await pick(gAgentTrack?.receiver, 'inbound-rtp');
+  const outb = await pick(gRoom?.localParticipant.getTrackPublication(gLK.Track.Source.Microphone)?.track?.sender, 'outbound-rtp');
+  if (!inb) return;
+  const cur = {
+    rx: inb.packetsReceived || 0, lost: inb.packetsLost || 0,
+    concealed: (inb.concealedSamples || 0) - (inb.silentConcealedSamples || 0),
+    events: inb.concealmentEvents || 0, samples: inb.totalSamplesReceived || 0,
+    jbDelay: inb.jitterBufferDelay || 0, jbCount: inb.jitterBufferEmittedCount || 0,
+    tx: outb?.packetsSent || 0,
+  };
+  if (gPrev) {
+    const d = (k) => cur[k] - gPrev[k];
+    const concealedMs = d('samples') ? Math.round((d('concealed') / d('samples')) * 5000) : 0;
+    const jbMs = d('jbCount') ? Math.round((d('jbDelay') / d('jbCount')) * 1000) : 0;
+    glog(`audio in: ${d('rx')} pkts, lost ${d('lost')}, jitter ${Math.round((inb.jitter || 0) * 1000)} ms, `
+      + `buffer ${jbMs} ms, concealed ${concealedMs} ms (${d('events')} gaps) · mic out: ${d('tx')} pkts`,
+      concealedMs > 40 ? 'err' : '');
+  }
+  gPrev = cur;
+}
+
 function gSetRunning(on) {
   G('gptStart').hidden = on;
   G('gptStop').hidden = !on;
@@ -121,6 +152,10 @@ async function gptStart() {
     el.autoplay = true;
     G('gptAudioSink').appendChild(el);
     glog('Agent audio attached', 'ok');
+    gAgentTrack = track;
+    gPrev = null;
+    clearInterval(gStatsTimer);
+    gStatsTimer = setInterval(() => gAudioStats().catch(() => {}), 5000);
   });
   gRoom.on(gLK.RoomEvent.ParticipantConnected, (p) => onAgentJoined(p.identity));
   gRoom.on(gLK.RoomEvent.ParticipantDisconnected, (p) => glog(`Left: ${p.identity}`));
@@ -150,6 +185,8 @@ async function gptStart() {
 }
 
 async function gptStop() {
+  clearInterval(gStatsTimer);
+  gAgentTrack = null;
   try { await gRoom?.disconnect(); } catch { /* already down */ }
   gRoom = null;
   G('gptAudioSink').innerHTML = '';

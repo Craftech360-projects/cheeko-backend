@@ -120,3 +120,24 @@ describe('livekitProviders.service provider management', () => {
     expect(activated).toEqual(expect.objectContaining({ id: '3', is_active: true }));
   });
 });
+
+describe('livekitProviders.service getActiveProviders', () => {
+  it('reports no realtime row when the realtime_providers table is not migrated', async () => {
+    for (const t of ['llm_providers', 'stt_providers', 'tts_providers', 'moderation_providers', 'image_providers']) {
+      prisma[t].findFirst = jest.fn().mockResolvedValue(null);
+    }
+    prisma.stt_providers.findFirst.mockResolvedValue({ provider_name: 'sarvam_rest', model: 'saaras:v4', api_key: 'k' });
+    prisma.realtime_providers.findFirst = jest.fn().mockRejectedValue(Object.assign(new Error('missing table'), { code: 'P2021' }));
+
+    const active = await livekitProvidersService.getActiveProviders();
+
+    expect(active.realtime).toBeNull();
+    expect(active.stt).toEqual(expect.objectContaining({ provider: 'sarvam_rest' }));
+  });
+
+  it('still fails on any other realtime query error', async () => {
+    prisma.realtime_providers.findFirst = jest.fn().mockRejectedValue(Object.assign(new Error('db down'), { code: 'P1001' }));
+
+    await expect(livekitProvidersService.getActiveProviders()).rejects.toThrow('db down');
+  });
+});

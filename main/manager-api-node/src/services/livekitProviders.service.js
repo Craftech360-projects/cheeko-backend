@@ -239,7 +239,12 @@ const getActiveProviders = async () => {
       where: { is_active: true },
       orderBy: [{ priority: 'desc' }, { updated_at: 'desc' }]
     }),
-    prisma.realtime_providers.findFirst(activeOrder)
+    // A database without the realtime_providers migration has no realtime row, not a broken endpoint:
+    // failing here took the LLM/STT/TTS config down with it for every agent.
+    prisma.realtime_providers.findFirst(activeOrder).catch((err) => {
+      if (err?.code === 'P2021') return null;
+      throw err;
+    })
   ]);
 
   return {
