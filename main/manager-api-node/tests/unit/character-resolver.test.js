@@ -49,11 +49,18 @@ describe('resolveSessionForCharacter', () => {
       elevenlabsVoiceId: null,
       smallestVoiceId: null,
       gptliveVoice: null,
+      geminiVoice: null,
+      xaiVoice: null,
     });
   });
 
   it('passes the GPT-Live voice through', () => {
     expect(resolveSessionForCharacter({ ...character, gptlive_voice: 'vesper' }, {}).gptliveVoice).toBe('vesper');
+  });
+
+  it('passes the per-vendor realtime voices through', () => {
+    const out = resolveSessionForCharacter({ ...character, gptlive_voice: 'vesper', gemini_voice: 'Kore', xai_voice: 'eve' }, {});
+    expect([out.gptliveVoice, out.geminiVoice, out.xaiVoice]).toEqual(['vesper', 'Kore', 'eve']);
   });
 
   it('lets an explicit language override the character default', () => {

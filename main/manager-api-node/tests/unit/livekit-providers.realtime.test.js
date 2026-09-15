@@ -22,13 +22,13 @@ describe('realtime providers (GPT-Live)', () => {
 
   test('getActiveProviders includes the active realtime provider', async () => {
     mockPrisma.realtime_providers.findFirst.mockResolvedValue({
-      id: 1n, provider_name: 'openai-gpt-live', model: 'gpt-live-1', backend_model: 'gpt-5.6-luna',
-      voice: 'marin', api_base: null, api_key: 'sk-x', is_active: true, priority: 100, updated_at: new Date()
+      id: 1n, provider_name: 'google-gemini-live', vendor: 'google', model: 'gemini-2.5-flash-native-audio-preview-12-2025',
+      backend_model: 'gemini-2.5-flash', voice: 'Kore', api_base: null, api_key: 'g-key', is_active: true, priority: 50, updated_at: new Date()
     });
     const out = await service.getActiveProviders();
     expect(out.realtime).toEqual({
-      provider: 'openai-gpt-live', model: 'gpt-live-1', backend_model: 'gpt-5.6-luna',
-      voice: 'marin', api_base: null, api_key: 'sk-x'
+      provider: 'google-gemini-live', vendor: 'google', model: 'gemini-2.5-flash-native-audio-preview-12-2025',
+      backend_model: 'gemini-2.5-flash', voice: 'Kore', api_base: null, api_key: 'g-key'
     });
   });
 
@@ -57,5 +57,17 @@ describe('realtime providers (GPT-Live)', () => {
     mockPrisma.realtime_providers.update.mockResolvedValue({ id: 1n, provider_name: 'openai-gpt-live', is_active: true });
     await service.activateProvider('realtime', '1');
     expect(mockPrisma.realtime_providers.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: { is_active: true } }));
+  });
+
+  test('updateProvider accepts a known realtime vendor, lower-cased', async () => {
+    mockPrisma.realtime_providers.update.mockResolvedValue({ id: 2n, provider_name: 'xai-grok-voice' });
+    await service.updateProvider('realtime', '2', { vendor: 'XAI' });
+    expect(mockPrisma.realtime_providers.update.mock.calls[0][0].data.vendor).toBe('xai');
+  });
+
+  test('updateProvider rejects an unknown realtime vendor', async () => {
+    await expect(service.updateProvider('realtime', '2', { vendor: 'azure' }))
+      .rejects.toThrow('vendor must be one of openai, google, xai');
+    expect(mockPrisma.realtime_providers.update).not.toHaveBeenCalled();
   });
 });

@@ -73,6 +73,8 @@ model ai_agent_template {
   elevenlabs_voice_id String?  @db.VarChar(100)
   smallest_voice_id  String?   @db.VarChar(100)
   gptlive_voice      String?   @db.VarChar(100)
+  gemini_voice       String?   @db.VarChar(100)
+  xai_voice          String?   @db.VarChar(100)
   mem_model_id       String?   @db.Uuid
   intent_model_id    String?   @db.Uuid
   chat_history_conf  Int?      @default(1)
@@ -1295,6 +1297,7 @@ model image_providers {
 model realtime_providers {
   id            BigInt    @id @default(autoincrement())
   provider_name String    @unique @db.VarChar(100)
+  vendor        String    @default("openai") @db.VarChar(20)
   api_key       String    @default("")
   model         String    @default("") @db.VarChar(120)
   backend_model String?   @db.VarChar(120)

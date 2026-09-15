@@ -37,6 +37,8 @@ const pickLatestUpdatedAt = (rows) => {
   return latest ? new Date(latest).toISOString() : null;
 };
 
+const REALTIME_VENDORS = ['openai', 'google', 'xai'];
+
 const providerModels = {
   llm: {
     delegate: 'llm_providers',
@@ -100,6 +102,7 @@ const providerModels = {
     delegate: 'realtime_providers',
     updateFields: {
       provider_name: 'string',
+      vendor: 'realtimeVendor',
       model: 'string',
       backend_model: 'nullableString',
       voice: 'nullableString',
@@ -143,6 +146,13 @@ const coerceUpdateValue = (value, type, fieldName) => {
   if (type === 'float') {
     const parsed = toOptionalFloat(value, fieldName);
     return parsed === null || parsed === undefined ? null : Number(parsed.toFixed(2));
+  }
+  if (type === 'realtimeVendor') {
+    const vendor = (toNullableString(value) || '').toLowerCase();
+    if (!REALTIME_VENDORS.includes(vendor)) {
+      throw new Error(`vendor must be one of ${REALTIME_VENDORS.join(', ')}`);
+    }
+    return vendor;
   }
   if (type === 'json') {
     if (value === undefined) return undefined;
@@ -282,6 +292,7 @@ const getActiveProviders = async () => {
     } : null,
     realtime: realtime ? {
       provider: realtime.provider_name,
+      vendor: realtime.vendor || 'openai',
       model: realtime.model || '',
       backend_model: realtime.backend_model || '',
       voice: realtime.voice || '',
