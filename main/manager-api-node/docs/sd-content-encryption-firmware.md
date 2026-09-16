@@ -829,9 +829,8 @@ This is Task 1. It is also the only automated guard on the byte format, so keep 
 
   | Pack | Id | Contents |
   |---|---|---|
-  | `WASHHAND-V1-20260912` | see the dashboard | sealed **version 1**: 10 MP3 and 10 LVGL `.bin` |
-  | `ENCTEST-20260909-1046` | 72 | sealed **version 2** — stale. v1 firmware must refuse it, loudly. Useful as a negative test, useless as a positive one. |
-  | `ENCTEST-LEGACY-20260909-1046` | 73 | plaintext control |
+  | `WASHHAND-V1-20260912` | 99 | sealed **version 1**: 10 MP3 + 10 LVGL `.bin`. Cards `2B44FA4E` (physical) and `0499AA12` (mimic). |
+  | `WASHHAND-PLAIN-20260915` | 101 | plaintext control, same 20 files unsealed. Card `0499BB12` (mimic). |
 
 - **Card binding.** The card UIDs used in software tests are synthetic, so bind **real** RC522 cards to those packs. Use the dashboard's RFID page, or an admin call:
 
@@ -851,7 +850,7 @@ This is Task 1. It is also the only automated guard on the byte format, so keep 
 | 4 | Disconnect Wi-Fi and tap the sealed card again | Plays fully offline |
 | 5 | Tap the plaintext card | Plays. No crypto logs. |
 | 6 | Move the SD card to a second toy and tap offline | Plays. Same fleet secret. This is version 1's accepted limit, not a bug. |
-| 7 | Tap a **version 2** sealed pack (id 72) | Refuses, loudly, with the unsupported-version log. Never plays noise. |
+| 7 | Put a file sealed with version byte 2 on the card (`client_crypto.seal(data, K, 2)`) and play it | Refuses, loudly, with the unsupported-version log. Never plays noise. There is no v2 pack on the dev box to tap. |
 | 8 | Erase NVS and reboot | Nothing to do with content. Packs still play. |
 | 9 | Tap an unknown card while the server is unreachable | "Can't reach Cheeko" message, no download |
 | 10 | Server reachable, tap again | Wrapped key arrives, files download, it plays |

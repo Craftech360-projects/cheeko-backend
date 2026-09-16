@@ -107,6 +107,21 @@
           <label for="smallestVoiceId">SmallestAI voice ID</label>
           <input id="smallestVoiceId" placeholder="e.g. liam" />
         </div>
+
+        <div class="card">
+          <label for="gptliveVoice">GPT-Live voice</label>
+          <select id="gptliveVoice" data-voices="openai" data-default-label="Default (Runtime Providers → Realtime)"></select>
+        </div>
+
+        <div class="card">
+          <label for="geminiVoice">Gemini Live voice</label>
+          <select id="geminiVoice" data-voices="google" data-default-label="Default (Runtime Providers → Realtime)"></select>
+        </div>
+
+        <div class="card">
+          <label for="xaiVoice">Grok Voice voice</label>
+          <select id="xaiVoice" data-voices="xai" data-default-label="Default (Runtime Providers → Realtime)"></select>
+        </div>
       </div>
 
       <div class="card actionbar">
@@ -193,23 +208,35 @@
       <div class="card toolbar">
         <div class="field">
           <label for="gptAgent">Agent name</label>
-          <input id="gptAgent" value="cheeko-gptlive" />
+          <input id="gptAgent" value="cheeko-agent" />
         </div>
         <div class="field">
           <label for="gptMac">Device MAC</label>
           <input id="gptMac" value="68:EE:8F:60:BA:AC" />
         </div>
         <div class="field">
+          <label for="gptChar">Character</label>
+          <div class="select-wrap">
+            <select id="gptChar"><option value="">(device default)</option></select>
+            <svg class="select-arrow" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m6 9 6 6 6-6"/></svg>
+          </div>
+        </div>
+        <div class="field">
+          <label for="gptProvider">Realtime provider</label>
+          <div class="select-wrap">
+            <select id="gptProvider">
+              <option value="" selected>Active (Runtime Providers)</option>
+              <option value="openai-gpt-live">GPT-Live</option>
+              <option value="google-gemini-live">Gemini Live</option>
+              <option value="xai-grok-voice">Grok Voice</option>
+            </select>
+            <svg class="select-arrow" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m6 9 6 6 6-6"/></svg>
+          </div>
+        </div>
+        <div class="field">
           <label for="gptVoice">Voice</label>
           <div class="select-wrap">
-            <select id="gptVoice">
-              <option value="marin" selected>marin (default)</option>
-              <option value="aster">aster</option>
-              <option value="beacon">beacon</option>
-              <option value="cinder">cinder</option>
-              <option value="stone">stone</option>
-              <option value="vesper">vesper</option>
-            </select>
+            <select id="gptVoice" data-voices="openai" data-default-label="Character / provider default"></select>
             <svg class="select-arrow" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m6 9 6 6 6-6"/></svg>
           </div>
         </div>
@@ -410,6 +437,7 @@
 
   </main>
 
+  <script src="voices.js"></script>
   <script src="app.js"></script>
   <script src="visualizer.js"></script>
   <script src="test.js"></script>

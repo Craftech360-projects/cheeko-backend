@@ -1671,7 +1671,7 @@ const getCurrentCharacter = async (mac) => {
 const mergeTemplatePersona = async (agent) => {
   const template = await prisma.ai_agent_template.findFirst({
     where: { agent_name: { equals: normalizeCharacterName(agent.agent_name), mode: 'insensitive' } },
-    select: { system_prompt: true, greeting_prompt: true, soul: true, runtime_agent_name: true, sarvam_voice_id: true, elevenlabs_voice_id: true, smallest_voice_id: true },
+    select: { system_prompt: true, greeting_prompt: true, soul: true, runtime_agent_name: true, sarvam_voice_id: true, elevenlabs_voice_id: true, smallest_voice_id: true, gptlive_voice: true, gemini_voice: true, xai_voice: true },
   });
   return {
     ...agent,
@@ -1683,6 +1683,9 @@ const mergeTemplatePersona = async (agent) => {
     sarvam_voice_id: template?.sarvam_voice_id ?? null,
     elevenlabs_voice_id: template?.elevenlabs_voice_id ?? null,
     smallest_voice_id: template?.smallest_voice_id ?? null,
+    gptlive_voice: template?.gptlive_voice ?? null,
+    gemini_voice: template?.gemini_voice ?? null,
+    xai_voice: template?.xai_voice ?? null,
   };
 };
 
@@ -1726,7 +1729,7 @@ const getCharacterSession = async (characterId, { language } = {}) => {
 const getCharacterSessionByName = async (characterName, { language } = {}) => {
   const template = await prisma.ai_agent_template.findFirst({
     where: { agent_name: { equals: characterName, mode: 'insensitive' } },
-    select: { id: true, agent_name: true, runtime_agent_name: true, system_prompt: true, greeting_prompt: true, soul: true, language: true, sarvam_voice_id: true, elevenlabs_voice_id: true, smallest_voice_id: true },
+    select: { id: true, agent_name: true, runtime_agent_name: true, system_prompt: true, greeting_prompt: true, soul: true, language: true, sarvam_voice_id: true, elevenlabs_voice_id: true, smallest_voice_id: true, gptlive_voice: true, gemini_voice: true, xai_voice: true },
   });
   if (!template) throw new Error('Character not found');
   return resolveSessionForCharacter(
@@ -1741,6 +1744,9 @@ const getCharacterSessionByName = async (characterName, { language } = {}) => {
       sarvam_voice_id: template.sarvam_voice_id,
       elevenlabs_voice_id: template.elevenlabs_voice_id,
       smallest_voice_id: template.smallest_voice_id,
+      gptlive_voice: template.gptlive_voice,
+      gemini_voice: template.gemini_voice,
+      xai_voice: template.xai_voice,
     },
     { language }
   );
@@ -2499,6 +2505,9 @@ const createTemplate = async (data) => {
       sarvam_voice_id: toNullIfEmpty(data.sarvamVoiceId),
       elevenlabs_voice_id: toNullIfEmpty(data.elevenlabsVoiceId),
       smallest_voice_id: toNullIfEmpty(data.smallestVoiceId),
+      gptlive_voice: toNullIfEmpty(data.gptliveVoice),
+      gemini_voice: toNullIfEmpty(data.geminiVoice),
+      xai_voice: toNullIfEmpty(data.xaiVoice),
       mem_model_id: toNullIfEmpty(data.memModelId),
       intent_model_id: toNullIfEmpty(data.intentModelId),
       chat_history_conf: data.chatHistoryConf || 0,
@@ -2552,6 +2561,9 @@ const updateTemplate = async (templateId, data) => {
   if (data.sarvamVoiceId !== undefined) updateData.sarvam_voice_id = toNullIfEmpty(data.sarvamVoiceId);
   if (data.elevenlabsVoiceId !== undefined) updateData.elevenlabs_voice_id = toNullIfEmpty(data.elevenlabsVoiceId);
   if (data.smallestVoiceId !== undefined) updateData.smallest_voice_id = toNullIfEmpty(data.smallestVoiceId);
+  if (data.gptliveVoice !== undefined) updateData.gptlive_voice = toNullIfEmpty(data.gptliveVoice);
+  if (data.geminiVoice !== undefined) updateData.gemini_voice = toNullIfEmpty(data.geminiVoice);
+  if (data.xaiVoice !== undefined) updateData.xai_voice = toNullIfEmpty(data.xaiVoice);
   if (data.memModelId !== undefined) updateData.mem_model_id = toNullIfEmpty(data.memModelId);
   if (data.intentModelId !== undefined) updateData.intent_model_id = toNullIfEmpty(data.intentModelId);
   if (data.chatHistoryConf !== undefined) updateData.chat_history_conf = data.chatHistoryConf;

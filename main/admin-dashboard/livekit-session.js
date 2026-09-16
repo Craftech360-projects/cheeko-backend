@@ -104,8 +104,9 @@ async function startSession({ livekit, managerApiUrl, managerSecret, mac, charac
   const roomService = new RoomServiceClient(livekit.url, livekit.apiKey, livekit.apiSecret);
   const dispatchClient = new AgentDispatchClient(livekit.url, livekit.apiKey, livekit.apiSecret);
 
+  // Always resolve the character: the GPT-Live tab overrides only the agent name, not who is speaking.
   const [character, childProfile] = await Promise.all([
-    agentOverride ? null : resolveCharacter(managerApiUrl, mac, characterName), // override skips the manager lookup
+    resolveCharacter(managerApiUrl, mac, characterName),
     fetchChildProfile(managerApiUrl, managerSecret, mac),
   ]);
 

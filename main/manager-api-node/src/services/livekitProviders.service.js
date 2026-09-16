@@ -37,6 +37,8 @@ const pickLatestUpdatedAt = (rows) => {
   return latest ? new Date(latest).toISOString() : null;
 };
 
+const REALTIME_VENDORS = ['openai', 'google', 'xai'];
+
 const providerModels = {
   llm: {
     delegate: 'llm_providers',
@@ -94,6 +96,21 @@ const providerModels = {
       priority: 'int',
       config_json: 'json'
     }
+  },
+  // Speech-to-speech models (OpenAI GPT-Live), read by the cheeko-gptlive worker at session start
+  realtime: {
+    delegate: 'realtime_providers',
+    updateFields: {
+      provider_name: 'string',
+      vendor: 'realtimeVendor',
+      model: 'string',
+      backend_model: 'nullableString',
+      voice: 'nullableString',
+      api_base: 'nullableString',
+      api_key: 'string',
+      priority: 'int',
+      config_json: 'json'
+    }
   }
 };
 
@@ -130,6 +147,13 @@ const coerceUpdateValue = (value, type, fieldName) => {
     const parsed = toOptionalFloat(value, fieldName);
     return parsed === null || parsed === undefined ? null : Number(parsed.toFixed(2));
   }
+  if (type === 'realtimeVendor') {
+    const vendor = (toNullableString(value) || '').toLowerCase();
+    if (!REALTIME_VENDORS.includes(vendor)) {
+      throw new Error(`vendor must be one of ${REALTIME_VENDORS.join(', ')}`);
+    }
+    return vendor;
+  }
   if (type === 'json') {
     if (value === undefined) return undefined;
     if (value === null || typeof value === 'object') return value;
@@ -151,12 +175,13 @@ const buildProviderUpdateData = (model, payload = {}) => {
 
 const listProviders = async () => {
   const orderBy = [{ is_active: 'desc' }, { priority: 'desc' }, { updated_at: 'desc' }];
-  const [llm, stt, tts, moderation, image] = await Promise.all([
+  const [llm, stt, tts, moderation, image, realtime] = await Promise.all([
     prisma.llm_providers.findMany({ orderBy }),
     prisma.stt_providers.findMany({ orderBy }),
     prisma.tts_providers.findMany({ orderBy }),
     prisma.moderation_providers.findMany({ orderBy }),
-    prisma.image_providers.findMany({ orderBy })
+    prisma.image_providers.findMany({ orderBy }),
+    prisma.realtime_providers.findMany({ orderBy })
   ]);
 
   return {
@@ -164,7 +189,8 @@ const listProviders = async () => {
     stt: (stt || []).map(normalizeProviderRow),
     tts: (tts || []).map(normalizeProviderRow),
     moderation: (moderation || []).map(normalizeProviderRow),
-    image: (image || []).map(normalizeProviderRow)
+    image: (image || []).map(normalizeProviderRow),
+    realtime: (realtime || []).map(normalizeProviderRow)
   };
 };
 
@@ -201,7 +227,8 @@ const activateProvider = async (type, id) => {
 };
 
 const getActiveProviders = async () => {
-  const [llm, stt, tts, moderation, image] = await Promise.all([
+  const activeOrder = { where: { is_active: true }, orderBy: [{ priority: 'desc' }, { updated_at: 'desc' }] };
+  const [llm, stt, tts, moderation, image, realtime] = await Promise.all([
     prisma.llm_providers.findFirst({
       where: { is_active: true },
       orderBy: [{ priority: 'desc' }, { updated_at: 'desc' }]
@@ -221,11 +248,17 @@ const getActiveProviders = async () => {
     prisma.image_providers.findFirst({
       where: { is_active: true },
       orderBy: [{ priority: 'desc' }, { updated_at: 'desc' }]
+    }),
+    // A database without the realtime_providers migration has no realtime row, not a broken endpoint:
+    // failing here took the LLM/STT/TTS config down with it for every agent.
+    prisma.realtime_providers.findFirst(activeOrder).catch((err) => {
+      if (err?.code === 'P2021') return null;
+      throw err;
     })
   ]);
 
   return {
-    updated_at: pickLatestUpdatedAt([llm, stt, tts, moderation, image]),
+    updated_at: pickLatestUpdatedAt([llm, stt, tts, moderation, image, realtime]),
     llm: llm ? {
       model_name: llm.model_name,
       model: llm.model,
@@ -256,6 +289,15 @@ const getActiveProviders = async () => {
       provider: image.provider_name,
       model: image.model || '',
       api_key: image.api_key || ''
+    } : null,
+    realtime: realtime ? {
+      provider: realtime.provider_name,
+      vendor: realtime.vendor || 'openai',
+      model: realtime.model || '',
+      backend_model: realtime.backend_model || '',
+      voice: realtime.voice || '',
+      api_base: realtime.api_base || null,
+      api_key: realtime.api_key || ''
     } : null
   };
 };
