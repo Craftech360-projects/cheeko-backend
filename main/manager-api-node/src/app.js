@@ -131,12 +131,13 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // XSS protection
 app.use(xssFilter({
-  // Workspace markdown files and child facts are trusted service-to-service
-  // payloads and must be stored verbatim (without HTML entity escaping): a fact
-  // stored as "Rahul&#x27;s" is read back into the prompt that way, and the
-  // model copies the entity into the next extraction. Anything that renders
-  // facts as HTML (a parent view) escapes on output.
-  shouldSkip: (req) => /^\/toy\/agent\/device\/[^/]+\/(workspace-files|sessions\/[^/]+\/facts)$/.test(req.path)
+  // Workspace markdown files, session summaries and child facts are trusted
+  // service-to-service payloads and must be stored verbatim (without HTML
+  // entity escaping): a fact stored as "Rahul&#x27;s" is read back into the
+  // prompt that way, and the model copies the entity into the next extraction.
+  // Anything that renders them as HTML (dashboards, a parent view) escapes on
+  // output.
+  shouldSkip: (req) => /^\/toy\/agent\/device\/[^/]+\/(workspace-files|sessions\/[^/]+\/(facts|summary))$/.test(req.path)
 }));
 
 // ===========================================
