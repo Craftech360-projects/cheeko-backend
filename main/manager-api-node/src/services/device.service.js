@@ -239,8 +239,44 @@ const clearUnattributedDeviceRows = async (tx, macAddress) => {
   await tx.imagine_image.deleteMany({ where: { owner_key: macKey } });
 };
 
+/**
+ * Tables with a partial unique on (kid_id, ...keys) can't blindly re-own the
+ * device's unlinked rows: the child may already hold that key (from another
+ * toy). One row per key survives — the newest — before the updateMany runs.
+ * Table/column names are constants from the caller, never user input.
+ */
+const dropAdoptionClashes = async (tx, table, keys, newest, macAddress, kidId) => {
+  const same = (a, b) => keys.map((k) => `${a}."${k}" = ${b}."${k}"`).join(' AND ');
+  const incoming = (a) => `${a}.kid_id IS NULL AND lower(${a}.device_mac) = lower($1)`;
+  // Unlinked rows differing only in MAC case: keep the newest.
+  await tx.$executeRawUnsafe(
+    `DELETE FROM "${table}" a USING "${table}" b
+      WHERE ${incoming('a')} AND ${incoming('b')} AND ${same('a', 'b')}
+        AND (a."${newest}", a.id) < (b."${newest}", b.id)`,
+    macAddress
+  );
+  // Child's row is older than the device's: the device's wins.
+  await tx.$executeRawUnsafe(
+    `DELETE FROM "${table}" k USING "${table}" d
+      WHERE k.kid_id = $2 AND ${incoming('d')} AND ${same('k', 'd')}
+        AND k."${newest}" < d."${newest}"`,
+    macAddress,
+    BigInt(kidId)
+  );
+  // Whatever still clashes lost to the child's row.
+  await tx.$executeRawUnsafe(
+    `DELETE FROM "${table}" d USING "${table}" k
+      WHERE ${incoming('d')} AND k.kid_id = $2 AND ${same('k', 'd')}`,
+    macAddress,
+    BigInt(kidId)
+  );
+};
+
 const adoptUnattributedRows = async (tx, macAddress, kidId) => {
   if (!macAddress || !kidId) return;
+
+  await dropAdoptionClashes(tx, 'kid_character_state', ['state_type'], 'updated_at', macAddress, kidId);
+  await dropAdoptionClashes(tx, 'kid_content_seen', ['bank', 'code'], 'seen_at', macAddress, kidId);
 
   const answerWhere = {
     device_mac: { equals: macAddress, mode: 'insensitive' },
