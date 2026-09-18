@@ -1099,15 +1099,8 @@ const updateKidProfile = async (kidId, data) => {
  */
 const deleteKidProfile = async (kidId) => {
   try {
-    // First unassign from any devices
-    await prisma.ai_device.updateMany({
-      where: { kid_id: BigInt(kidId) },
-      data: { kid_id: null }
-    });
-
-    await prisma.kid_profile.delete({
-      where: { id: BigInt(kidId) }
-    });
+    // Unpairs the devices and deletes everything stored about the child with it.
+    await require('./kid-data.service').deleteKidCompletely(kidId);
   } catch (err) {
     logger.error('Failed to delete kid profile:', err);
     throw new Error('Failed to delete kid profile');

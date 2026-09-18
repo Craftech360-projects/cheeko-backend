@@ -152,9 +152,8 @@ const deleteKid = async (userId, kidId) => {
   if (!existing) throw new Error('Kid profile not found');
 
   try {
-    await prisma.kid_profile.delete({
-      where: { id: BigInt(kidId) }
-    });
+    // Everything stored about the child goes with the profile, not just the row.
+    await require('./kid-data.service').deleteKidCompletely(kidId);
   } catch (err) {
     logger.error('Failed to delete kid profile:', err);
     throw new Error('Failed to delete kid profile');

@@ -202,6 +202,19 @@ The result is added to the prompt as a short block:
 4. **Compact profile at session start:** top facts plus the last 2–3 sessions, fetched once per session and never per turn.
 5. **pgvector on `child_facts`** only if forgetting persists after that. Consider a graph database only for real multi-step relationship questions, tested on your own transcripts.
 
+### Status (branch `child-memory-cleanup`)
+
+| Item | State |
+|---|---|
+| 1. Deletion | Done. `kid-data.service.js` `purgeKidData` runs inside every delete path (mobile kid, mobile account, web profile, admin). Deletes what the child said and progressed through, detaches usage counters and session rows, sweeps Imagine pictures from S3 after the commit. |
+| 1. Retention | Built, **off**. Set `CHILD_DATA_RETENTION_DAYS` to enable a daily 03:30 expiry of transcripts, summaries, attempt transcripts, legacy chat history and facts not mentioned within the window. The number is a legal/product decision. |
+| 2. Duplicate summaries | Steps 1–2 done. Step 3 (MEMORY.md as a DB cache) not started. |
+| 3. `child_facts` | Done: table, API, extraction in picoclaw. |
+| 4. Profile at session start | Done: picoclaw writes the newest 20 facts to `memory/state/child_facts.md` once per session; never synced back. |
+| 5. pgvector | Not needed yet. |
+
+Still open: a parent view to list and delete facts; worker-local workspace copies (`MEMORY.md` on LiveKit worker disks) are not reached by the server-side delete; old `device_memory_documents` rows and their read endpoints can be removed once confirmed unused.
+
 ## Sources
 
 - Mem0 v3 algorithm: https://docs.mem0.ai/migration/platform-v2-to-v3 and https://mem0.ai/blog/mem0-the-token-efficient-memory-algorithm

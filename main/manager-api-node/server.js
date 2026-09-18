@@ -36,6 +36,7 @@ const startServer = async () => {
     const { assertRequiredPrismaModels, assertRequiredDatabaseTables } = require('./src/config/prisma-client-guard');
     const { startEmailReportCron, stopEmailReportCron } = require('./src/jobs/dailyEmailReport');
     const { startUsageSummaryCrons, stopUsageSummaryCrons } = require('./src/jobs/usageSummaryNotification');
+    const { startChildDataRetentionCron, stopChildDataRetentionCron } = require('./src/services/kid-data.service');
     const shouldSkipRequiredTableGuard = process.env.SKIP_DB_SYNC === '1';
 
     assertRequiredPrismaModels(prisma);
@@ -73,6 +74,9 @@ const startServer = async () => {
       startUsageSummaryCrons().catch(err => {
         logger.warn('Failed to start usage summary crons:', err.message);
       });
+      startChildDataRetentionCron().catch(err => {
+        logger.warn('Failed to start child data retention cron:', err.message);
+      });
     });
 
     // Graceful shutdown
@@ -82,6 +86,7 @@ const startServer = async () => {
       // Stop background jobs
       stopEmailReportCron();
       stopUsageSummaryCrons();
+      stopChildDataRetentionCron();
 
       server.close(() => {
         logger.info('Server closed.');

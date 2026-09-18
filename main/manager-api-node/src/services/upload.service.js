@@ -572,7 +572,22 @@ async function deleteCustomCardObject(s3Key) {
   }
 }
 
+/**
+ * Delete one AI Imagine picture from storage (a deleted child's gallery).
+ * Keys come from imagine_image rows; still confined to the imagine/ prefix so a
+ * bad row can never delete anything else. Best-effort, like the other sweeps.
+ */
+async function deleteImagineObject(s3Key) {
+  if (!s3Key || !s3Key.startsWith('imagine/') || s3Key.includes('..')) return;
+  try {
+    await s3Client.send(new DeleteObjectCommand({ Bucket: S3_BUCKET, Key: s3Key }));
+  } catch (error) {
+    logger.warn(`Failed to delete imagine picture ${s3Key}: ${error.message}`);
+  }
+}
+
 module.exports = {
+  deleteImagineObject,
   uploadContentFile,
   uploadThumbnail,
   uploadImagineImage,

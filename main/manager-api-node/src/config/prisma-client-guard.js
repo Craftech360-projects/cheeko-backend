@@ -13,7 +13,10 @@ const REQUIRED_PRISMA_MODELS = [
   'quiz_question',
   'quiz_question_answer',
   'riddle_question',
-  'riddle_question_answer'
+  'riddle_question_answer',
+  // Child deletion purges this table; without the migration every "delete child"
+  // would fail. Boot failure is the clearer place to find out.
+  'child_facts'
 ];
 
 const REQUIRED_PRISMA_TABLES = [...REQUIRED_PRISMA_MODELS];

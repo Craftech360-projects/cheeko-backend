@@ -55,6 +55,13 @@ jest.mock('../../src/services/device.service', () => ({}));
 jest.mock('../../src/services/deviceSettings.service', () => ({}));
 jest.mock('../../src/services/deviceAnalytics.service', () => ({}));
 jest.mock('../../src/services/customCard.service', () => ({ MAX_ITEMS: 10 }));
+// The purge of everything else stored about the child has its own test
+// (kid-data.service.test.js); here it is one recorded step in the transaction.
+const mockKidData = {
+  purgeKidData: jest.fn(),
+  sweepKidObjects: jest.fn(async () => {})
+};
+jest.mock('../../src/services/kid-data.service', () => mockKidData);
 
 const mobileService = require('../../src/services/mobile.service');
 
@@ -99,6 +106,7 @@ beforeEach(() => {
     { audio_url: 'https://cdn.test/customcard_kid42/b.mp3', image_url: null }
   ]));
   mockTx.content_item.deleteMany.mockImplementation(record('delete-items', { count: 2 }));
+  mockKidData.purgeKidData.mockImplementation(record('purge-kid-data', { imagineKeys: ['imagine/aa/1.jpg'] }));
 });
 
 describe('deleteKid', () => {
@@ -134,7 +142,15 @@ describe('deleteKid', () => {
     expect(result.retired).toEqual([]);
     expect(mockTx.content_item.deleteMany).not.toHaveBeenCalled();
     expect(mockTx.rfid_content_pack.delete).not.toHaveBeenCalled();
-    expect(calls).toEqual(['unpair-devices', 'find-pack', 'delete-kid']);
+    expect(calls).toEqual(['unpair-devices', 'purge-kid-data', 'find-pack', 'delete-kid']);
+  });
+
+  it('purges the child\'s other data inside the transaction, before the profile row', async () => {
+    const result = await mobileService.deleteKid(UID, KID_ID);
+
+    expect(mockKidData.purgeKidData).toHaveBeenCalledWith(mockTx, KID_ID);
+    expect(calls.indexOf('purge-kid-data')).toBeLessThan(calls.indexOf('delete-kid'));
+    expect(result.imagine_keys).toEqual(['imagine/aa/1.jpg']);
   });
 
   it('sweeps nothing itself — that is the route\'s job, after the commit', async () => {
@@ -184,6 +200,7 @@ describe('the delete routes', () => {
     ]);
     expect(mockUploadService.deleteKidAvatarByUrl)
       .toHaveBeenCalledWith('https://cdn.test/avatars/42.png');
+    expect(mockKidData.sweepKidObjects).toHaveBeenCalledWith({ imagineKeys: ['imagine/aa/1.jpg'] });
   });
 
   it('DELETE /account sweeps without putting the URL lists in the response', async () => {
@@ -191,6 +208,7 @@ describe('the delete routes', () => {
 
     expect(res.status).toBe(200);
     expect(mockUploadService.deleteCustomCardObject).toHaveBeenCalled();
+    expect(mockKidData.sweepKidObjects).toHaveBeenCalledWith({ imagineKeys: ['imagine/aa/1.jpg'] });
     // The sweep's input is not part of the shape the app parses.
     expect(res.body).toEqual({
       success: true,

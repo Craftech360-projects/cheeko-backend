@@ -9,6 +9,7 @@ const deviceService = require('../services/device.service');
 const deviceSettingsService = require('../services/deviceSettings.service');
 const deviceAnalyticsService = require('../services/deviceAnalytics.service');
 const uploadService = require('../services/upload.service');
+const { sweepKidObjects } = require('../services/kid-data.service');
 const customCardService = require('../services/customCard.service');
 const warrantyService = require('../services/warranty.service');
 const idempotencyService = require('../services/idempotency.service');
@@ -339,6 +340,7 @@ router.delete('/kids/:id', asyncHandler(async (req, res) => {
     // transaction can never leave rows pointing at objects that are gone.
     await uploadService.deleteKidAvatarByUrl(deleted.avatar_url);
     await sweepCustomCardUrls(deleted.retired);
+    await sweepKidObjects({ imagineKeys: deleted.imagine_keys });
     success(res, null, 'Kid profile deleted');
 }));
 
@@ -553,7 +555,7 @@ router.get('/check-email', asyncHandler(async (req, res) => {
 }));
 
 router.delete('/account', asyncHandler(async (req, res) => {
-    const { retired, avatar_urls: avatarUrls, ...result } =
+    const { retired, avatar_urls: avatarUrls, imagine_keys: imagineKeys, ...result } =
         await mobileService.deleteUserAccount(req.firebaseUser.uid);
     // Same post-commit ordering as the single-kid delete above. The two URL
     // lists are the sweep's input, not part of the response body — the shape
@@ -562,6 +564,7 @@ router.delete('/account', asyncHandler(async (req, res) => {
         await uploadService.deleteKidAvatarByUrl(avatarUrl);
     }
     await sweepCustomCardUrls(retired);
+    await sweepKidObjects({ imagineKeys });
     res.json(result);
 }));
 

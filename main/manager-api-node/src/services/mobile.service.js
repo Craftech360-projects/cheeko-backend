@@ -4,6 +4,11 @@ const { ApiError } = require('../middleware/errorHandler');
 const { normalizeMacAddress, packCodeForKid } = require('../utils/helpers');
 const { isKidAvatarUrl, kidAvatarOrNull } = require('../utils/kidAvatar');
 const { normalizeCharacterName } = require('./character-resolver');
+const { purgeKidData } = require('./kid-data.service');
+
+// A child with months of sessions is a few dozen deleteMany statements; the
+// Prisma default of 5s is too tight to be safe for a delete a parent asked for.
+const KID_DELETE_TX_TIMEOUT_MS = 30000;
 const {
     isValidTimezone,
     resolveTimezone,
@@ -2106,17 +2111,22 @@ async function deleteKid(firebaseUid, kidId) {
     if (!kid) throw new Error('Kid profile not found');
 
     let retired = [];
+    let purged = { imagineKeys: [] };
     await prisma.$transaction(async (tx) => {
         await tx.ai_device.updateMany({
             where: { kid_id: BigInt(kidId) },
             data: { kid_id: null, update_date: new Date() },
         });
+        // Everything else stored about the child: transcripts, summaries, facts,
+        // answers, workspace files. Before the profile delete — two tables
+        // reference it with ON DELETE NO ACTION.
+        purged = await purgeKidData(tx, kidId);
         retired = await deleteCustomPackForKid(tx, kidId);
         await tx.kid_profile.delete({ where: { id: BigInt(kidId) } });
-    });
+    }, { timeout: KID_DELETE_TX_TIMEOUT_MS });
     // Returned so the caller can clean up the publicly-served objects: the
-    // avatar, and every custom-card recording and picture the child owned.
-    return { success: true, avatar_url: kid.avatar_url, retired };
+    // avatar, every custom-card recording and picture, and the Imagine gallery.
+    return { success: true, avatar_url: kid.avatar_url, retired, imagine_keys: purged.imagineKeys };
 }
 
 // ─── RPC Replacements ───────────────────────────────────────────────────────
@@ -2141,17 +2151,19 @@ async function deleteUserAccount(firebaseUid) {
 
     // Delete all user references (Cascade should handle most if set up, but doing it explicitly for safety)
     const retired = [];
+    const imagineKeys = [];
     await prisma.$transaction(async (tx) => {
         // Custom packs hang off pack_code, not an FK, so deleting the children
         // does not reach them. Same reasoning as deleteKid — see there.
         for (const kid of kids) {
+            imagineKeys.push(...(await purgeKidData(tx, kid.id)).imagineKeys);
             retired.push(...await deleteCustomPackForKid(tx, kid.id));
         }
         await tx.kid_profile.deleteMany({ where: { user_id: user.id } });
         await tx.parent_profile.deleteMany({ where: { user_id: user.id } });
         await tx.ai_device.deleteMany({ where: { user_id: user.id } });
         await tx.sys_user.delete({ where: { id: user.id } });
-    });
+    }, { timeout: KID_DELETE_TX_TIMEOUT_MS });
 
     // Swept by the route after the commit, alongside the avatars.
     return {
@@ -2160,6 +2172,7 @@ async function deleteUserAccount(firebaseUid) {
         deleted_at: new Date().toISOString(),
         retired,
         avatar_urls: kids.map((kid) => kid.avatar_url).filter(Boolean),
+        imagine_keys: imagineKeys,
     };
 }
 
@@ -4250,6 +4263,7 @@ module.exports = {
     createKid,
     updateKid,
     deleteKid,
+    deleteCustomPackForKid,
     checkEmailExists,
     deleteUserAccount,
     getHomepageActivity,
