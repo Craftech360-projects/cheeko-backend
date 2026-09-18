@@ -320,6 +320,74 @@ function buildProgressCalendarMonthRange(timezone, now = new Date(), selectedMon
     };
 }
 
+/**
+ * The `week_start` a request asked for, or null when it did not ask for one.
+ *
+ * Only meaningful with `period=week`: a week start on any other period would
+ * be silently ignored, which is worse than refusing it.
+ */
+function requestedWeekStart(options, period) {
+    const value = options.week_start ?? options.weekStart;
+    if (value == null || String(value).trim() === '') return null;
+    if (period !== 'week') {
+        throw new ApiError('week_start requires period=week', 400, 400);
+    }
+    return String(value).trim();
+}
+
+/**
+ * One Monday-to-Sunday week in the parent's zone, for the app's week picker.
+ *
+ * Any date inside the wanted week is accepted and snapped back to its Monday —
+ * the same Monday anchor the month's week sections use — so the picker and the
+ * server cannot disagree about where a week begins. The current week ends
+ * today, as the calendar month does. A week that has not started yet in the
+ * parent's zone (a phone a timezone ahead of the account) reads as an empty
+ * week rather than an error, because one 400 would fail the app's whole
+ * analytics fan-out.
+ *
+ * `spanDays` is the week's full length, so "the same days last week" can be
+ * found even while this week is still partial.
+ */
+/** The Monday of the week `dateKey` falls in. */
+function mondayOfDateKey(dateKey) {
+    const weekday = new Date(`${dateKey}T00:00:00.000Z`).getUTCDay();
+    return shiftDateKey(dateKey, -((weekday + 6) % 7));
+}
+
+/**
+ * A date key exactly as sent, or a 400 naming the parameter.
+ *
+ * shiftDateKey normalises overflow, so 2026-02-30 comes back as March and is
+ * refused here rather than silently reported as another day.
+ */
+function parseRequestedDateKey(value, label) {
+    const text = String(value == null ? '' : value).trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(text) || shiftDateKey(text, 0) !== text) {
+        throw new ApiError(`${label} must be a date in YYYY-MM-DD format`, 400, 400);
+    }
+    return text;
+}
+
+function buildProgressWeekRange(weekStart, timezone, now = new Date()) {
+    const requested = parseRequestedDateKey(weekStart, 'week_start');
+    const startDate = mondayOfDateKey(requested);
+    const weekEnd = shiftDateKey(startDate, 6);
+    const today = formatDateInTimezone(now, timezone);
+    const endDate = weekEnd < today ? weekEnd : today;
+    const dates = [];
+    for (let dateKey = startDate; dateKey <= endDate; dateKey = shiftDateKey(dateKey, 1)) {
+        dates.push(dateKey);
+    }
+    return {
+        startDate,
+        endDate,
+        dates,
+        weekEnd,
+        spanDays: 7,
+    };
+}
+
 function parsePagination(options = {}) {
     const page = Math.max(1, parseInt(options.page, 10) || 1);
     const rawLimit = parseInt(options.limit, 10);
@@ -2649,9 +2717,13 @@ async function getProgressSummary(firebaseUid, options = {}) {
         throw new ApiError('period must be one of: today, week, month', 400, 400);
     }
 
+    const weekStart = requestedWeekStart(options, period);
     const scope = await resolveProgressScope(firebaseUid, options);
-    const range = buildProgressDateRange(period, scope.timezone, options.now || new Date());
+    const range = weekStart
+        ? buildProgressWeekRange(weekStart, scope.timezone, options.now || new Date())
+        : buildProgressDateRange(period, scope.timezone, options.now || new Date());
     if (scope.macAddresses.length === 0) {
+        // No toy, so no first day to open a date picker on either.
         return {
             period,
             timezone: scope.timezone,
@@ -2667,6 +2739,8 @@ async function getProgressSummary(firebaseUid, options = {}) {
             gamesPlayed: 0,
             ai_interaction_count: 0,
             aiInteractionCount: 0,
+            first_activity_date: null,
+            firstActivityDate: null,
         };
     }
 
@@ -2680,6 +2754,7 @@ async function getProgressSummary(firebaseUid, options = {}) {
         cardRows,
         aiRows,
         projectedGamesCount,
+        firstActivity,
     ] = await Promise.all([
         prisma.device_usage_daily.findMany({
             where: {
@@ -2714,6 +2789,13 @@ async function getProgressSummary(firebaseUid, options = {}) {
                 activity_date: dateWhere,
             },
         }),
+        // The first day this child's toy reported anything, whatever window
+        // was asked for. The app greys out every earlier date in its picker,
+        // so a parent cannot ask for weeks that never existed.
+        prisma.device_usage_daily.aggregate({
+            where: progressOwnerFilter(scope),
+            _min: { date: true },
+        }),
     ]);
     const gamesCount = projectedGamesCount > 0
         ? projectedGamesCount
@@ -2722,6 +2804,8 @@ async function getProgressSummary(firebaseUid, options = {}) {
     const usageTimeSeconds = completedUsageSecondsForRows(usageRows);
     const cardTapCount = sumBy(cardRows, 'card_tap_count');
     const aiInteractionCount = sumBy(aiRows, 'ai_interaction_count');
+    // Null for a toy that has never reported a day.
+    const firstActivityDate = dateOnlyKey(firstActivity && firstActivity._min && firstActivity._min.date);
 
     return {
         period,
@@ -2738,6 +2822,8 @@ async function getProgressSummary(firebaseUid, options = {}) {
         gamesPlayed: gamesCount,
         ai_interaction_count: aiInteractionCount,
         aiInteractionCount,
+        first_activity_date: firstActivityDate,
+        firstActivityDate,
     };
 }
 
@@ -2747,14 +2833,20 @@ async function getProgressTrend(firebaseUid, options = {}) {
         throw new ApiError('period must be one of: week, month', 400, 400);
     }
 
+    const weekStart = requestedWeekStart(options, period);
     const scope = await resolveProgressScope(firebaseUid, options);
-    const range = period === 'week'
-        ? buildProgressCalendarMonthRange(
+    let range;
+    if (weekStart) {
+        range = buildProgressWeekRange(weekStart, scope.timezone, options.now || new Date());
+    } else if (period === 'week') {
+        range = buildProgressCalendarMonthRange(
             scope.timezone,
             options.now || new Date(),
             options.month || options.selected_month || options.selectedMonth
-        )
-        : buildProgressDateRange(period, scope.timezone, options.now || new Date());
+        );
+    } else {
+        range = buildProgressDateRange(period, scope.timezone, options.now || new Date());
+    }
     const trendMap = new Map(
         range.dates.map(date => [date, {
             date,
@@ -2853,14 +2945,23 @@ async function getProgressDetails(firebaseUid, options = {}) {
         throw new ApiError('period must be one of: today, week, month', 400, 400);
     }
 
+    const weekStart = requestedWeekStart(options, period);
     const scope = await resolveProgressScope(firebaseUid, options);
-    const range = period === 'week'
-        ? buildProgressCalendarMonthRange(
+    let range;
+    if (weekStart) {
+        range = buildProgressWeekRange(weekStart, scope.timezone, options.now || new Date());
+    } else if (period === 'week') {
+        range = buildProgressCalendarMonthRange(
             scope.timezone,
             options.now || new Date(),
             options.month || options.selected_month || options.selectedMonth
-        )
-        : buildProgressDateRange(period, scope.timezone, options.now || new Date());
+        );
+    } else {
+        range = buildProgressDateRange(period, scope.timezone, options.now || new Date());
+    }
+    // Week-of-month sections describe a calendar month, so a single named week
+    // has none — its own totals are the whole answer.
+    const wantsWeekSections = period === 'week' && !weekStart;
     const { page, limit, offset } = parsePagination(options);
     const detailNow = options.now || new Date();
     const weekMonth = period === 'week'
@@ -2892,7 +2993,7 @@ async function getProgressDetails(firebaseUid, options = {}) {
         });
         const { items, totalSeconds } = usageCategoryItemsFromDailyRows(rows);
         let weekSections = null;
-        if (period === 'week') {
+        if (wantsWeekSections) {
             const monthKey = getMonthKeyFromReference(options.month || options.selected_month || options.selectedMonth || options.now || new Date(), scope.timezone);
             const monthStart = dateOnlyFromKey(monthStartDateKey(monthKey));
             const monthEnd = dateOnlyFromKey(range.endDate);
@@ -2943,7 +3044,7 @@ async function getProgressDetails(firebaseUid, options = {}) {
         const sections = period === 'month'
             ? await buildMonthSections(events, buildCardsGrouped, toCountSection, scope.timezone)
             : null;
-        const weekSections = period === 'week'
+        const weekSections = wantsWeekSections
             ? await buildWeekSections(events, weekMonth, buildCardsGrouped, toCountWeekSection, scope.timezone)
             : null;
         return withWeekSections(withMonthSections({
@@ -2967,7 +3068,7 @@ async function getProgressDetails(firebaseUid, options = {}) {
         const sections = period === 'month'
             ? await buildMonthSections(events, buildAiInteractionGrouped, toCountSection, scope.timezone)
             : null;
-        const weekSections = period === 'week'
+        const weekSections = wantsWeekSections
             ? await buildWeekSections(events, weekMonth, buildAiInteractionGrouped, toCountWeekSection, scope.timezone)
             : null;
         return withWeekSections(withMonthSections({
@@ -3766,17 +3867,23 @@ async function buildQuizAnalyticsForScope(scope, options = {}) {
         throw new ApiError('period must be one of: today, week, month', 400, 400);
     }
 
+    const weekStart = requestedWeekStart(options, period);
     const now = options.now || new Date();
-    const range = buildProgressDateRange(period, scope.timezone, now);
+    const range = weekStart
+        ? buildProgressWeekRange(weekStart, scope.timezone, now)
+        : buildProgressDateRange(period, scope.timezone, now);
     const inRange = new Set(range.dates);
 
-    if (!scope.macAddresses.length) {
+    // A named week that has not started yet in the parent's zone has no days.
+    if (!scope.macAddresses.length || !range.dates.length) {
         return { period, start_date: range.startDate, end_date: range.endDate, banks: [] };
     }
 
     // The equal-length period immediately before this one, so the banner can say
-    // "better than last week" from data rather than as decoration.
-    const previousDates = range.dates.map(dateKey => shiftDateKey(dateKey, -range.dates.length));
+    // "better than last week" from data rather than as decoration. A named week
+    // steps back a whole week, so a week still in progress is compared with the
+    // same days of the week before.
+    const previousDates = range.dates.map(dateKey => shiftDateKey(dateKey, -(range.spanDays || range.dates.length)));
     const inPrevious = new Set(previousDates);
 
     // Bucketing happens in the parent's timezone, so the window is widened a day

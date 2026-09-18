@@ -15,7 +15,7 @@ jest.mock('../../src/config/database', () => ({
         ai_device: { findMany: jest.fn(), findUnique: jest.fn() },
         kid_profile: { findFirst: jest.fn() },
         device_analytics_event: { findMany: jest.fn(), findFirst: jest.fn() },
-        device_usage_daily: { findMany: jest.fn() },
+        device_usage_daily: { findMany: jest.fn(), aggregate: jest.fn() },
         device_card_taps_daily: { findMany: jest.fn() },
         device_ai_interactions_daily: { findMany: jest.fn() },
         device_games_played: { findMany: jest.fn(), count: jest.fn() },
@@ -49,6 +49,7 @@ beforeEach(() => {
     prisma.device_analytics_event.findMany.mockResolvedValue([]);
     prisma.device_analytics_event.findFirst.mockResolvedValue(null);
     prisma.device_usage_daily.findMany.mockResolvedValue([]);
+    prisma.device_usage_daily.aggregate.mockResolvedValue({ _min: { date: null } });
     prisma.device_card_taps_daily.findMany.mockResolvedValue([]);
     prisma.device_ai_interactions_daily.findMany.mockResolvedValue([]);
     prisma.device_games_played.findMany.mockResolvedValue([]);

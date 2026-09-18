@@ -14,36 +14,27 @@
     <div class="dialog-container">
       <div class="dialog-header">
         <h2 class="dialog-title">{{ title }}</h2>
-        <button class="custom-close-btn" @click="cancel">
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M13 1L1 13M1 1L13 13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        <button class="custom-close-btn" aria-label="Close" @click="cancel">
+          <svg width="12" height="12" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M13 1L1 13M1 1L13 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
           </svg>
         </button>
       </div>
 
-      <el-form :model="form" :rules="rules" ref="form" label-width="110px" label-position="left" class="rfid-form">
+      <el-form :model="form" :rules="rules" ref="form" label-position="top" class="rfid-form">
         <el-form-item label="RFID UID" prop="rfidUid" class="form-item">
           <el-input v-model="form.rfidUid" placeholder="Physical card UID (hex)" class="custom-input"></el-input>
         </el-form-item>
 
         <el-form-item label="Content Type" class="form-item">
-            <div class="type-selector">
-                <div class="type-option" :class="{ active: form.actionType === 'qna' }" @click="setActionType('qna')">
-                    <i class="el-icon-chat-square"></i>
-                    <span>Q&A Pack</span>
-                </div>
-                <div class="type-option" :class="{ active: form.actionType === 'content' }" @click="setActionType('content')">
-                    <i class="el-icon-notebook-2"></i>
-                    <span>Content Pack</span>
-                </div>
-                <div class="type-option" :class="{ active: form.actionType === 'ai' }" @click="setActionType('ai')">
-                    <i class="el-icon-cpu"></i>
-                    <span>AI Card</span>
-                </div>
-                <div class="type-option" :class="{ active: form.actionType === 'game' }" @click="setActionType('game')">
-                    <i class="el-icon-trophy"></i>
-                    <span>Game Card</span>
-                </div>
+            <div class="type-selector" role="radiogroup">
+                <button type="button" v-for="opt in typeOptions" :key="opt.value"
+                    class="type-option" :class="{ active: form.actionType === opt.value }"
+                    role="radio" :aria-checked="form.actionType === opt.value"
+                    @click="setActionType(opt.value)">
+                    <i :class="opt.icon"></i>
+                    <span>{{ opt.label }}</span>
+                </button>
             </div>
         </el-form-item>
 
@@ -67,23 +58,23 @@
           <div class="field-hint">This becomes <code>actionData.agent_name</code> for the AI card. Listed from AI agent templates; the worker pulls the persona by this exact name.</div>
         </el-form-item>
 
-        <el-form-item v-if="form.actionType === 'ai'" label="Language" class="form-item">
-          <el-select v-model="form.aiLanguageCode" placeholder="Select language" class="custom-select" @change="handleLanguageChange">
-            <el-option label="English" value="en" />
-            <el-option label="Hindi" value="hi" />
-            <el-option label="Telugu" value="te" />
-            <el-option label="Kannada" value="kn" />
-            <el-option label="Tamil" value="ta" />
-            <el-option label="Malayalam" value="ml" />
-            <el-option label="German" value="de" />
-          </el-select>
-          <div class="field-hint">The session language will be injected into the Cheeko prompt for this card.</div>
-        </el-form-item>
+        <div v-if="form.actionType === 'ai'" class="form-row">
+          <el-form-item label="Language" class="form-item">
+            <el-select v-model="form.aiLanguageCode" placeholder="Select language" class="custom-select" @change="handleLanguageChange">
+              <el-option label="English" value="en" />
+              <el-option label="Hindi" value="hi" />
+              <el-option label="Telugu" value="te" />
+              <el-option label="Kannada" value="kn" />
+              <el-option label="Tamil" value="ta" />
+              <el-option label="Malayalam" value="ml" />
+              <el-option label="German" value="de" />
+            </el-select>
+          </el-form-item>
 
-        <el-form-item v-if="form.actionType === 'ai'" label="Voice ID" class="form-item">
-          <el-input v-model="form.aiVoiceId" placeholder="Optional voice override" class="custom-input"></el-input>
-          <div class="field-hint">Optional. Saved as <code>actionData.voice_id</code>.</div>
-        </el-form-item>
+          <el-form-item label="Voice ID" class="form-item">
+            <el-input v-model="form.aiVoiceId" placeholder="Optional override" class="custom-input"></el-input>
+          </el-form-item>
+        </div>
 
         <el-form-item v-if="form.actionType === 'ai'" label="Thumbnail URL" class="form-item">
           <el-input v-model="form.thumbnailUrl" placeholder="Paste image URL or upload" class="custom-input">
@@ -220,6 +211,14 @@ export default {
     packOptions() {
       const isGame = this.form.actionType === 'game';
       return (this.contentPacks || []).filter(cp => (cp.contentType === 'sound_quiz') === isGame);
+    },
+    typeOptions() {
+      return [
+        { value: 'qna', label: 'Q&A Pack', icon: 'el-icon-chat-square' },
+        { value: 'content', label: 'Content Pack', icon: 'el-icon-notebook-2' },
+        { value: 'ai', label: 'AI Card', icon: 'el-icon-cpu' },
+        { value: 'game', label: 'Game Card', icon: 'el-icon-trophy' }
+      ];
     }
   },
   mounted() {
@@ -414,90 +413,91 @@ export default {
 
 .rfid-dialog-wrapper {
   .dialog-container {
-    padding: 24px 32px;
     background: $surface;
   }
 
   .dialog-header {
-    position: relative;
-    margin-bottom: 24px;
-    text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 18px 24px;
+    border-bottom: 1px solid $border-color;
   }
 
   .dialog-title {
-    font-size: 20px;
+    font-family: $font-display;
+    font-size: 16px;
+    font-weight: 600;
     color: $text-dark;
     margin: 0;
-    padding: 0;
-    font-weight: 600;
   }
 
   .custom-close-btn {
-    position: absolute;
-    top: -8px;
-    right: -8px;
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
+    width: 28px;
+    height: 28px;
+    border-radius: $radius-sm;
     border: none;
-    background: $divider-color;
-    color: $text-gray;
+    background: transparent;
+    color: $text-light;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
     padding: 0;
-    outline: none;
-    transition: all 0.3s;
+    transition: background 0.15s, color 0.15s;
 
     &:hover {
-      color: #ffffff;
-      background: $danger;
-      transform: rotate(90deg);
+      background: $surface-sunk;
+      color: $text-dark;
     }
   }
 
   .rfid-form {
+    padding: 20px 24px 4px;
+    max-height: 64vh;
+    overflow-y: auto;
+
     .form-item {
-      margin-bottom: 20px;
+      margin-bottom: 16px;
 
       :deep(.el-form-item__label) {
-        color: $text-body;
-        font-weight: 500;
-        font-size: 14px;
+        float: none;
+        display: block;
+        text-align: left;
+        padding: 0 0 6px;
+        line-height: 1.4;
       }
+
+      :deep(.el-form-item__content) {
+        line-height: 1.4;
+      }
+    }
+
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
     .field-hint {
-        font-size: 12px;
-        color: $text-light;
-        margin-top: 4px;
-    }
-    }
-
-    .custom-input {
-      :deep(.el-input__inner) {
-        background-color: #ffffff;
-        border-radius: 8px;
-        border: 1px solid $border-color;
-        height: 42px;
-        font-size: 14px;
-        color: $text-body;
-
-        &:focus {
-          border-color: $text-light;
-          box-shadow: none;
-        }
-      }
+      font-size: 11.5px;
+      color: $text-light;
+      margin-top: 6px;
+      line-height: 1.5;
     }
 
     .custom-select {
       width: 100%;
+    }
 
+    .custom-input,
+    .custom-select {
       :deep(.el-input__inner) {
-        background-color: #ffffff;
-        border-radius: 8px;
+        height: 36px;
+        line-height: 36px;
+        border-radius: 6px;
         border: 1px solid $border-color;
-        height: 42px;
-        font-size: 14px;
+        font-size: 13px;
         color: $text-body;
 
         &:focus {
@@ -509,11 +509,9 @@ export default {
 
     .custom-textarea {
       :deep(.el-textarea__inner) {
-        background-color: #ffffff;
-        border-radius: 8px;
+        border-radius: 6px;
         border: 1px solid $border-color;
-        padding: 12px 14px;
-        font-size: 14px;
+        font-size: 13px;
         color: $text-body;
 
         &:focus {
@@ -528,52 +526,68 @@ export default {
     display: flex;
     justify-content: flex-end;
     gap: 8px;
-    padding-top: 18px;
-    margin-top: 22px;
+    padding: 14px 24px;
     border-top: 1px solid $border-color;
   }
 }
 
+/* One outlined control split into equal segments; fits three or four types. */
 .type-selector {
-  display: flex;
-  gap: 12px;
-  margin-top: 5px;
-}
-.type-option {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
   border: 1px solid $border-color;
   border-radius: 6px;
-  padding: 10px 16px;
-  cursor: pointer;
+  overflow: hidden;
+  background: $surface;
+}
+.type-option {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 8px;
-  transition: all 0.2s;
-  color: $text-body;
-  background: #fff;
-  flex: 1;
   justify-content: center;
-}
-.type-option:hover {
-  color: $info;
-  border-color: $text-light;
-}
-.type-option.active {
-  color: $info;
-  border-color: $info;
-  background: $row-selected;
-  font-weight: 500;
-}
-.type-option i {
-  font-size: 16px;
-}
+  gap: 4px;
+  height: 56px;
+  padding: 0 6px;
+  border: none;
+  border-left: 1px solid $border-color;
+  background: transparent;
+  color: $text-gray;
+  font-family: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
 
+  &:first-child {
+    border-left: none;
+  }
+  &:hover {
+    color: $text-dark;
+    background: $surface-sunk;
+  }
+  &.active {
+    color: $text-dark;
+    background: $row-selected;
+    font-weight: 600;
+    box-shadow: inset 0 -2px 0 $text-dark;
+  }
+  i {
+    font-size: 16px;
+  }
+  span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+  }
+}
 .thumbnail-preview {
-  margin-top: 10px;
+  margin-top: 8px;
   width: 96px;
   height: 72px;
   border: 1px solid $border-color;
   border-radius: 6px;
-  background: #ffffff;
+  background: $surface;
   overflow: hidden;
 }
 

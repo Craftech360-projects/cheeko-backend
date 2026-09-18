@@ -3919,6 +3919,64 @@ router.post('/content-pack',
 
 /**
  * @swagger
+ * /admin/rfid/content-pack/{id}/assign-cards:
+ *   post:
+ *     tags: [RFID Content Pack]
+ *     summary: Assign many RFID cards to a content pack
+ *     description: Creates a mapping for each new UID and moves already-mapped UIDs onto this pack. UIDs are normalised (case, `:`/`-` separators).
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - rfidUids
+ *             properties:
+ *               rfidUids:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 example: ["7941AE0D", "29994A0E"]
+ *     responses:
+ *       200:
+ *         description: "data: { added: string[], moved: {rfidUid, fromContentPackId, fromName}[], unchanged: string[], invalid: string[] }"
+ *       400:
+ *         description: No UIDs given, or pack not found
+ */
+router.post('/content-pack/:id/assign-cards',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { rfidUids } = req.body || {};
+    if (!/^\d+$/.test(req.params.id)) {
+      return badRequest(res, 'Invalid content pack ID');
+    }
+    if (!Array.isArray(rfidUids) || rfidUids.length === 0) {
+      return badRequest(res, 'rfidUids must be a non-empty array');
+    }
+    if (rfidUids.length > 1000) {
+      return badRequest(res, 'At most 1000 UIDs per request');
+    }
+
+    try {
+      const result = await rfidService.assignCardsToContentPack(req.params.id, rfidUids);
+      success(res, result);
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
  * /admin/rfid/content-pack:
  *   put:
  *     tags: [RFID Content Pack]

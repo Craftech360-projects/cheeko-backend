@@ -34,7 +34,8 @@ jest.mock('../../src/config/database', () => ({
       findFirst: jest.fn()
     },
     device_usage_daily: {
-      findMany: jest.fn()
+      findMany: jest.fn(),
+      aggregate: jest.fn()
     },
     device_card_taps_daily: {
       findMany: jest.fn()

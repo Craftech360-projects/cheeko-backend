@@ -226,10 +226,11 @@
                                     </p>
                                 </div>
                             </div>
-                            <el-table ref="cardsTable" :data="sortRows(cardsList)" class="transparent-table" v-loading="cardsLoading"
+                            <el-table ref="cardsTable" :data="sortRows(cardsList)" class="transparent-table rows-clickable" v-loading="cardsLoading"
                                 element-loading-text="Loading..." element-loading-spinner="el-icon-loading"
                                 element-loading-background="rgba(255, 255, 255, 0.7)"
-                                :header-cell-class-name="headerCellClassName">
+                                :header-cell-class-name="headerCellClassName"
+                                @row-click="openCardDetail">
                                 <el-table-column label="Select" align="center" width="60">
                                     <template slot-scope="scope">
                                         <el-checkbox v-model="scope.row.selected"></el-checkbox>
@@ -610,6 +611,7 @@
 
                                         <footer class="pack-actions">
                                             <el-button type="text" @click.stop="editContentPack(pack)">Edit</el-button>
+                                            <el-button type="text" @click.stop="openAssignCards(pack)">Assign</el-button>
                                             <el-button type="text" class="is-danger" @click.stop="deleteContentPack(pack)">Delete</el-button>
                                         </footer>
                                     </article>
@@ -1270,6 +1272,21 @@
             @cancel="seriesDialogVisible = false"
         />
 
+        <RfidAssignCardsDialog
+            :visible.sync="assignCardsVisible"
+            :pack="assignCardsPack"
+            @assigned="onCardsAssigned"
+        />
+
+        <RfidCardDetailDialog
+            :visible.sync="cardDetailVisible"
+            :card="cardDetail"
+            :content-packs="contentPacksDropdown"
+            :question-packs="questionPacksDropdown"
+            :packs="packsDropdown"
+            @edit="editCardFromDetail"
+        />
+
 
         <el-footer>
             <version-footer />
@@ -1286,6 +1303,8 @@ import RfidPackDialog from "@/components/RfidPackDialog.vue";
 import RfidCardDialog from "@/components/RfidCardDialog.vue";
 import RfidContentPackDialog from "@/components/RfidContentPackDialog.vue";
 import RfidSeriesDialog from "@/components/RfidSeriesDialog.vue";
+import RfidAssignCardsDialog from "@/components/RfidAssignCardsDialog.vue";
+import RfidCardDetailDialog from "@/components/RfidCardDetailDialog.vue";
 import { previewAudioObjectUrl } from "@/apis/module/rfid";
 import { contentTypeLabel, customContentTypes } from "@/utils/contentTypes";
 import { isBinUrl, loadLvglBinAsDataUrl } from "@/utils/lvglBin";
@@ -1317,7 +1336,7 @@ const SERVER_SEARCH_TABS = ['cards', 'aiCards', 'contentPacks'];
 export default {
   name: 'RfidManagement',
     mixins: [listControls],
-    components: { ListToolbar, VersionFooter, RfidPackDialog, RfidCardDialog, RfidContentPackDialog, RfidSeriesDialog },
+    components: { ListToolbar, VersionFooter, RfidPackDialog, RfidCardDialog, RfidContentPackDialog, RfidSeriesDialog, RfidAssignCardsDialog, RfidCardDetailDialog },
     data() {
         return {
             // Track thumbnails whose URL failed to load, so the row shows a
@@ -1458,6 +1477,10 @@ export default {
             nfcReconnectTimer: null,
             nfcTimeAgoTimer: null,
             nfcDetailVisible: false,
+            assignCardsVisible: false,
+            assignCardsPack: null,
+            cardDetailVisible: false,
+            cardDetail: null,
             nfcDetailData: null,
             nfcDetailUid: '',
             nfcShowRawJson: false,
@@ -2587,6 +2610,29 @@ export default {
             }).catch(() => {});
         },
 
+        openAssignCards(pack) {
+            this.assignCardsPack = pack;
+            this.assignCardsVisible = true;
+        },
+
+        onCardsAssigned() {
+            this.fetchCards();
+            this.scheduleStatsRefresh();
+        },
+
+        // Row click on Card Mappings. The Select and Actions cells have their
+        // own controls, so a click there must not also open the dialog.
+        openCardDetail(row, column) {
+            if (column && (column.label === 'Select' || column.label === 'Actions')) return;
+            this.cardDetail = row;
+            this.cardDetailVisible = true;
+        },
+
+        editCardFromDetail(row) {
+            this.cardDetailVisible = false;
+            this.editCard(row);
+        },
+
         deleteSelectedCards() {
             const selected = this.cardsList.filter(r => r.selected);
             if (selected.length === 0) {
@@ -3680,6 +3726,10 @@ export default {
         color: $text-body;
         font-size: 14px;
     }
+}
+
+:deep(.rows-clickable .el-table__row) {
+    cursor: pointer;
 }
 
 :deep(.transparent-table) {
