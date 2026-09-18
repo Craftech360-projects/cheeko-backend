@@ -86,6 +86,18 @@ describe('agent voice session lifecycle', () => {
     expectNoMemoryDocumentWrites();
   });
 
+  it('reads a numeric timestamp as seconds, or as milliseconds when it can only be that', async () => {
+    prisma.voice_sessions.update.mockResolvedValue({ session_id: 'session-1', status: 'ended' });
+    const expected = new Date('2026-09-18T11:22:37.000Z');
+
+    await agentService.endVoiceSession({ macAddress: 'aa-bb-cc-dd-ee-ff', sessionId: 'session-1', endedAt: expected.getTime() / 1000 });
+    await agentService.endVoiceSession({ macAddress: 'aa-bb-cc-dd-ee-ff', sessionId: 'session-1', endedAt: expected.getTime() });
+
+    const endedAts = prisma.voice_sessions.update.mock.calls.map(([args]) => args.data.ended_at);
+    // Milliseconds used to be multiplied again and stored as year 58678.
+    expect(endedAts).toEqual([expected, expected]);
+  });
+
   it('persists a session summary without writing rolling memory', async () => {
     prisma.ai_device.findUnique.mockResolvedValue({
       id: 'device-id',

@@ -119,10 +119,18 @@ const parseMemoryDate = (memoryDate) => {
   return parsed;
 };
 
+// Numeric timestamps are epoch seconds by contract, but a worker sending
+// milliseconds got multiplied again and stored as year 58678, which JavaScript
+// cannot format — one such row broke every session list for its agent. Anything
+// above 1e11 (year 5138 in seconds) can only be milliseconds.
+const EPOCH_MS_THRESHOLD = 1e11;
+
 const parseMessageTimestamp = (timestamp, fallbackDate = new Date()) => {
   if (!timestamp) return fallbackDate;
-  if (typeof timestamp === 'number') return new Date(timestamp * 1000);
-  return new Date(timestamp);
+  const date = typeof timestamp === 'number'
+    ? new Date(timestamp > EPOCH_MS_THRESHOLD ? timestamp : timestamp * 1000)
+    : new Date(timestamp);
+  return Number.isNaN(date.getTime()) ? fallbackDate : date;
 };
 
 const formatChatHistoryMessages = (messages, getChatType) => {
