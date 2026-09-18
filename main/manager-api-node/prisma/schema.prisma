@@ -506,6 +506,25 @@ model voice_session_summaries {
   @@index([kid_id, updated_at(sort: Desc)], map: "idx_voice_session_summaries_kid_updated")
 }
 
+/// One lasting fact about a child ("Has a dog named Bruno"), extracted from their
+/// sessions by the worker. (kid_id, category, subject) is the de-dup key: a new
+/// mention updates the row instead of adding one. Deleted with the child.
+model child_facts {
+  id             BigInt      @id @default(autoincrement())
+  kid_id         BigInt
+  category       String      @db.VarChar(20)
+  subject        String      @db.VarChar(60)
+  fact           String      @db.VarChar(300)
+  first_seen     DateTime    @default(now()) @db.Timestamptz(6)
+  last_seen      DateTime    @default(now()) @db.Timestamptz(6)
+  source_session String?
+  expires_at     DateTime?   @db.Timestamptz(6)
+  kid_profile    kid_profile @relation(fields: [kid_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([kid_id, category, subject], map: "uq_child_facts_kid_category_subject")
+  @@index([kid_id, last_seen(sort: Desc)], map: "idx_child_facts_kid_last_seen")
+}
+
 model device_token_usage_session {
   id                              BigInt         @id @default(autoincrement())
   session_id                      String
@@ -673,6 +692,7 @@ model kid_profile {
   sys_user                sys_user?                 @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   voice_sessions          voice_sessions[]
   voice_session_summaries voice_session_summaries[]
+  child_facts             child_facts[]
   device_memory_documents device_memory_documents[]
   device_memory_chunks    device_memory_chunks[]
   custom_card             custom_card?

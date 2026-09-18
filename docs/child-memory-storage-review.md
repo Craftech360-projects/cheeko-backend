@@ -150,12 +150,15 @@ create table child_facts (
 
 ### Write path (after each session)
 
-1. The session ends, and picoclaw already sends the transcript and summary to the server.
-2. The server makes **one** model call with the transcript and the child's current facts:
-   > "Here is what we know about the child, and today's conversation. Return JSON of facts to add or update: `{category, subject, fact, expires_at?}`. Only lasting personal facts the child said about themselves. Do not store anything about other people's private details, health, or location."
-3. The server upserts each returned fact on `(kid_id, category, subject)`. A new fact inserts a row. A changed fact rewrites `fact` and moves `last_seen` forward.
+The manager API has no LLM client, so the model call lives in picoclaw next to the session summary (`pkg/livekit/child_facts.go`). The API owns validation and storage (`src/services/child-facts.service.js`).
 
-This replaces the regex and keyword code in `agent.service.js`. It runs after the session ends, so the conversation never slows down.
+1. The session ends and picoclaw writes the summary. On a preempted handoff both are skipped.
+2. picoclaw reads the child's known facts (`GET /agent/device/:mac/facts`). An unpaired device has no child, so it stops here and makes no model call.
+3. picoclaw makes **one** model call with the summary, the remaining turns and the known facts:
+   > "Here is what we know about the child, and today's conversation. Return JSON of facts to add or update: `{category, subject, fact, expires_at?}`. Only lasting personal facts the child said about themselves. Do not store anything about other people's private details, health, or location."
+4. picoclaw sends the result (`PUT /agent/device/:mac/sessions/:sessionId/facts`). The API cleans every field, caps it at 20 facts, drops expired or unparseable dates, and upserts on `(kid_id, category, subject)`. A new fact inserts a row. A changed fact rewrites `fact` and moves `last_seen` forward, keeping `first_seen`.
+
+This replaces the regex and keyword code that was in `agent.service.js`. It runs after the session ends, so the conversation never slows down. The "never store" list is enforced only by the prompt; the parent view is the backstop.
 
 ### Read path (at session start)
 

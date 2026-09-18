@@ -9,6 +9,7 @@ const express = require('express');
 const multer = require('multer');
 const router = express.Router();
 const agentService = require('../services/agent.service');
+const childFactsService = require('../services/child-facts.service');
 const { CHARACTER_ART_STATES } = require('../config/constants');
 const {
   getWorkspaceFiles,
@@ -780,6 +781,43 @@ router.put('/device/:mac/sessions/:sessionId/summary',
       success(res, result, 'Session summary saved');
     } catch (error) {
       logger.error(`[AGENT] PUT /device/${req.params.mac}/sessions/${req.params.sessionId}/summary failed: ${error.message}`);
+      if (error.message.includes('not found')) {
+        return notFound(res, error.message);
+      }
+      badRequest(res, error.message);
+    }
+  })
+);
+
+// Lasting facts about the device's child. Service key only: the worker reads
+// them to de-dup against, then sends what it extracted from the finished session.
+router.get('/device/:mac/facts',
+  requireServiceKey,
+  asyncHandler(async (req, res) => {
+    try {
+      success(res, await childFactsService.listChildFacts(req.params.mac, { limit: req.query.limit }));
+    } catch (error) {
+      if (error.message.includes('not found')) {
+        return notFound(res, error.message);
+      }
+      badRequest(res, error.message);
+    }
+  })
+);
+
+router.put('/device/:mac/sessions/:sessionId/facts',
+  requireServiceKey,
+  asyncHandler(async (req, res) => {
+    try {
+      const result = await childFactsService.saveChildFacts({
+        macAddress: req.params.mac,
+        sessionId: req.params.sessionId,
+        facts: req.body?.facts
+      });
+      // Counts only: fact text is a child's personal data and stays out of logs.
+      logger.info(`[AGENT] PUT /device/${req.params.mac}/sessions/${req.params.sessionId}/facts ${JSON.stringify(result)}`);
+      success(res, result, 'Child facts saved');
+    } catch (error) {
       if (error.message.includes('not found')) {
         return notFound(res, error.message);
       }
