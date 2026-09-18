@@ -590,12 +590,8 @@ class LiveKitBridge extends EventEmitter {
                 // Set audio playing flag to false
                 this.isAudioPlaying = false;
                 this.audioPlayingStartTime = null;
-                console.log(`🎵 [AUDIO-STOP] TTS stopped, sending tts_stop in 1s (device: ${this.macAddress})`);
-                // Send TTS stop message to device
-                setTimeout(() => {
-                  console.log(`📤 [TTS-STOP] Sending tts stop message now (device: ${this.macAddress})`);
-                  this.sendTtsStopMessage();
-                }, 500);
+                console.log(`🎵 [AUDIO-STOP] TTS stopped, sending tts_stop in 500ms (device: ${this.macAddress})`);
+                this.scheduleTtsStop();
 
                 // If we're in ending phase, send goodbye MQTT message now that TTS finished
                 if (
@@ -771,10 +767,7 @@ class LiveKitBridge extends EventEmitter {
                 this.isAudioPlaying = false;
                 this.audioPlayingStartTime = null;
                 console.log(`🎵 [AUDIO-STOP] TTS stopped via stream, sending tts_stop in 500ms (device: ${this.macAddress})`);
-                setTimeout(() => {
-                  console.log(`📤 [TTS-STOP] Sending tts stop message now (device: ${this.macAddress})`);
-                  this.sendTtsStopMessage();
-                }, 500);
+                this.scheduleTtsStop();
                 if (this.connection && this.connection.isEnding && !this.connection.goodbyeSent) {
                   this.connection.goodbyeSent = true;
                   this.connection.sendMqttMessage(JSON.stringify({
@@ -1647,9 +1640,38 @@ class LiveKitBridge extends EventEmitter {
     return this.room && this.room.isConnected;
   }
 
+  // The tts stop after speaking -> listening waits 500ms so the device drains its
+  // playout buffer first. That delay must never let it land after the NEXT turn's
+  // start: an interrupted greeting's stop arrived 121ms after the reply's start
+  // (dev, 2026-09-18) and the device played none of the reply.
+  scheduleTtsStop() {
+    this.cancelPendingTtsStop();
+    this._pendingTtsStopTimer = setTimeout(() => {
+      this._pendingTtsStopTimer = null;
+      console.log(`📤 [TTS-STOP] Sending tts stop message now (device: ${this.macAddress})`);
+      this.sendTtsStopMessage();
+    }, 500);
+  }
+
+  cancelPendingTtsStop() {
+    if (!this._pendingTtsStopTimer) return false;
+    clearTimeout(this._pendingTtsStopTimer);
+    this._pendingTtsStopTimer = null;
+    return true;
+  }
+
   // Send TTS start message to device (with dedup — both DataReceived and text stream fire)
   sendTtsStartMessage(text = "") {
     if (!this.connection) return;
+
+    // New speech while the previous turn's stop is still waiting: send that stop
+    // now, so the device sees stop -> start (the order it already handles) and
+    // never a stale stop in the middle of this turn.
+    if (this.cancelPendingTtsStop()) {
+      console.log(`📤 [TTS-STOP] Flushing pending tts stop before new speech (device: ${this.macAddress})`);
+      this.sendTtsStopMessage();
+      this._lastTtsStartTime = null; // the flushed stop ended the old turn; this one needs a real start
+    }
 
     // Within the same speaking turn (chunks < 3s apart), the first chunk is
     // tts_start (triggers playback); later chunks become per-sentence updates so
