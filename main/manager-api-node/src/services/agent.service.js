@@ -16,7 +16,6 @@ const path = require('path');
 const emptyMemoryPayload = () => ({ memories: [], relations: [], entities: [] });
 const MAX_WORKSPACE_ARTIFACT_BYTES = 256 * 1024;
 const MAX_DEVICE_MEMORY_DOCUMENT_BYTES = 512 * 1024;
-const MAX_ROLLING_SUMMARY_MEMORY_CHARS = 1500;
 
 const toStringOrNull = (value) => {
   if (value === null || value === undefined) return null;
@@ -510,396 +509,6 @@ const ensureVoiceSession = async ({ sessionId, normalizedMac, agentId, eventAt }
   });
 };
 
-const buildSessionEpisodeMemoryContent = ({ summary }) => {
-  const cleanedSummary = normalizeMemoryText(summary);
-  if (!cleanedSummary) return '';
-  return `Session summary:\n${cleanedSummary}`;
-};
-
-const normalizeMemoryText = (value) => String(value || '')
-  .replace(/\r\n/g, '\n')
-  .replace(/[ \t]+/g, ' ')
-  .replace(/\n{3,}/g, '\n\n')
-  .trim();
-
-const truncateMemoryText = (value, maxChars = MAX_ROLLING_SUMMARY_MEMORY_CHARS) => {
-  const normalized = normalizeMemoryText(value);
-  if (normalized.length <= maxChars) return normalized;
-
-  const truncated = normalized.slice(0, maxChars);
-  const lastBreak = truncated.lastIndexOf('\n');
-  if (lastBreak > Math.floor(maxChars * 0.75)) {
-    return truncated.slice(0, lastBreak).trim();
-  }
-  return truncated.trim();
-};
-
-const formatMemoryList = (items) => {
-  const filtered = [...new Set((items || []).filter(Boolean))];
-  if (filtered.length === 0) return '';
-  if (filtered.length === 1) return filtered[0];
-  if (filtered.length === 2) return `${filtered[0]} and ${filtered[1]}`;
-  return `${filtered.slice(0, -1).join(', ')}, and ${filtered[filtered.length - 1]}`;
-};
-
-const extractChildName = (text) => {
-  const candidates = [...String(text || '').matchAll(/\b([A-Z][a-z]+)\b(?=\s+(?:is|likes|loves|enjoys|asks|asked|expects|recently))/g)]
-    .map((match) => match[1])
-    .filter((name) => !['Cheeko', 'Child', 'After', 'Recent', 'Overall', 'The'].includes(name));
-  return candidates[0] || null;
-};
-
-const extractChildAge = (text, childName) => {
-  const escapedName = childName ? childName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : '[A-Z][a-z]+';
-  const pattern = new RegExp(`\\b${escapedName}\\s+is\\s+(\\d+)\\s+years?\\s+old\\b`, 'i');
-  const match = String(text || '').match(pattern);
-  return match ? match[1] : null;
-};
-
-const addIfMatches = (items, text, pattern, label) => {
-  if (pattern.test(text)) items.push(label);
-};
-
-const uniqueNonEmptyItems = (items, maxItems = 8) => [...new Set(
-  (items || [])
-    .map((item) => String(item || '').trim())
-    .filter(Boolean)
-)].slice(0, maxItems);
-
-const extractMemorySignals = (text) => {
-  const normalized = normalizeMemoryText(text);
-  const lower = normalized.toLowerCase();
-  const interests = [];
-  const topics = [];
-
-  addIfMatches(interests, lower, /\bsongs?\b|sing|sings|rhyme/, 'songs');
-  addIfMatches(interests, lower, /\bjokes?\b|silly joke|funny/, 'jokes');
-  addIfMatches(interests, lower, /\bstor(?:y|ies)\b|\btale\b/, 'short stories');
-  addIfMatches(interests, lower, /\bdrawing\b|\bdraw\b/, 'drawing');
-  addIfMatches(interests, lower, /playful learning/, 'playful learning');
-  addIfMatches(interests, lower, /\bscience\b|experiment|fun facts?/, 'science facts');
-  addIfMatches(interests, lower, /\bsports?\b|cricket/, 'sports talk');
-
-  addIfMatches(topics, lower, /\belephants?\b/, 'elephants');
-  addIfMatches(topics, lower, /\bzoomy\b|\brocket ship\b|\brocket\b/, 'Zoomy the rocket');
-  addIfMatches(topics, lower, /choco-?planet|chocolate planet/, 'chocolate planet');
-  addIfMatches(topics, lower, /tomato.*joke|joke.*tomato/, 'tomato jokes');
-  addIfMatches(topics, lower, /banana.*joke|joke.*banana/, 'banana jokes');
-  addIfMatches(topics, lower, /\bflowers?\b/, 'flowers');
-  addIfMatches(topics, lower, /\brobots?\b/, 'robot stories');
-  addIfMatches(topics, lower, /\bipl\b|cricket/, 'IPL');
-  addIfMatches(topics, lower, /\bscience\b|\bdiamond rain\b/, 'science facts');
-  addIfMatches(topics, lower, /deep[- ]sea|ocean creatures?/, 'deep-sea creatures');
-  addIfMatches(topics, lower, /\bdinosaurs?\b/, 'dinosaurs');
-
-  return {
-    interests: uniqueNonEmptyItems(interests, 8),
-    topics: uniqueNonEmptyItems(topics, 10),
-    expectsMemory: /remember|remembers|previous conversation|previous conversations|last time/.test(lower)
-  };
-};
-
-const isControlOrTranscriptLine = (line) => {
-  const trimmed = String(line || '').trim().replace(/^-+\s*/, '');
-  if (!trimmed) return true;
-  return /^Transcript excerpt:$/i.test(trimmed) ||
-    /^Session summary:$/i.test(trimmed) ||
-    /^\s*(User|Assistant|System|Tool):/i.test(trimmed) ||
-    /\[System Event\]/i.test(trimmed) ||
-    /successfully connected to the room/i.test(trimmed) ||
-    /You must end this conversation now/i.test(trimmed);
-};
-
-const stripRollingMemoryNoise = (text) => normalizeMemoryText(text)
-  .replace(/^Overall memory:\s*/i, '')
-  .replace(/\n?\s*Recent durable context:\s*/gi, '\n')
-  .split('\n')
-  .reduce((lines, line) => {
-    const trimmed = String(line || '').trim();
-    const normalized = trimmed.replace(/^-+\s*/, '');
-    const isBlockLabel = /^Transcript excerpt:$/i.test(normalized) || /^Session summary:$/i.test(normalized);
-    if (isBlockLabel) {
-      lines.skipRawBlock = true;
-      return lines;
-    }
-    if (lines.skipRawBlock) {
-      if (!trimmed || /^\s*(User|Assistant|System|Tool):/i.test(trimmed) || !trimmed.startsWith('-')) {
-        return lines;
-      }
-      lines.skipRawBlock = false;
-    }
-    if (!isControlOrTranscriptLine(line)) {
-      lines.values.push(line);
-    }
-    return lines;
-  }, { values: [], skipRawBlock: false })
-  .values
-  .join('\n');
-
-const normalizeMemoryLineKey = (line) => String(line || '')
-  .toLowerCase()
-  .replace(/^-+\s*/, '')
-  .replace(/[^a-z0-9\s]/g, ' ')
-  .replace(/\s+/g, ' ')
-  .trim();
-
-const parseRollingMemoryBullets = (text) => stripRollingMemoryNoise(text)
-  .split('\n')
-  .map((line) => line.trim())
-  .filter(Boolean)
-  .map((line) => (line.startsWith('-') ? line : `- ${line}`));
-
-const isEphemeralRollingLine = (line) => {
-  const trimmed = String(line || '').trim();
-  return /^\-\s*(?:last|latest|most recent)\s+session\b/i.test(trimmed) ||
-    /^\-\s*good follow-up topics\b/i.test(trimmed);
-};
-
-const categorizeRollingMemoryLine = (line) => {
-  const normalized = String(line || '').trim().toLowerCase().replace(/^-+\s*/, '');
-  if (!normalized) return null;
-  if (/ is \d+ years old\.$/.test(normalized) || / is the child using this device\.$/.test(normalized)) {
-    return 'child_profile';
-  }
-  if (/ is \d+ years old and likes /.test(normalized)) {
-    return 'child_profile';
-  }
-  if (/ enjoys .* with cheeko\.$/.test(normalized)) {
-    return 'interests';
-  }
-  if (/ expects cheeko to remember previous conversations\.$/.test(normalized)) {
-    return 'memory_expectation';
-  }
-  if (/^recent recurring topics include /.test(normalized)) {
-    return 'recurring_topics';
-  }
-  if (/^last session highlights: /.test(normalized)) {
-    return 'last_session';
-  }
-  if (/^good follow-up topics: /.test(normalized)) {
-    return 'follow_up';
-  }
-  return null;
-};
-
-const isNarrativeSessionLine = (line) => {
-  const normalized = String(line || '').trim().toLowerCase().replace(/^-+\s*/, '');
-  if (!normalized) return false;
-  if (/^(after reconnecting|cheeko greets|cheeko greeted|the segment|the session|the call)\b/.test(normalized)) {
-    return true;
-  }
-  if (/\b(the segment ends|the segment concludes|the session ends|the call ends)\b/.test(normalized)) {
-    return true;
-  }
-  return normalized.length > 220 && categorizeRollingMemoryLine(line) === null;
-};
-
-const buildRollingOverallMemory = ({ existingMemory, latestSummary }) => {
-  const existing = stripRollingMemoryNoise(existingMemory);
-  const latest = normalizeMemoryText(latestSummary);
-  if (!latest) return truncateMemoryText(existing);
-
-  const combinedInput = normalizeMemoryText(`${existing}\n${latest}`);
-  const childName = extractChildName(combinedInput);
-  const displayName = childName || 'The child';
-  const age = extractChildAge(combinedInput, childName);
-  const signals = extractMemorySignals(combinedInput);
-  const lines = ['Overall memory:'];
-  const seenLineKeys = new Set();
-  const generatedCategories = new Set();
-  const pushUniqueLine = (line) => {
-    const normalizedLine = String(line || '').trim();
-    if (!normalizedLine) return;
-    const lineWithBullet = normalizedLine.startsWith('-') ? normalizedLine : `- ${normalizedLine}`;
-    const key = normalizeMemoryLineKey(lineWithBullet);
-    if (!key || seenLineKeys.has(key)) return false;
-    seenLineKeys.add(key);
-    lines.push(lineWithBullet);
-    return true;
-  };
-  const pushStructuredLine = (line, category) => {
-    const added = pushUniqueLine(line);
-    if (added && category) generatedCategories.add(category);
-    return added;
-  };
-
-  if (childName && age) {
-    pushStructuredLine(`- ${childName} is ${age} years old.`, 'child_profile');
-  } else if (childName) {
-    pushStructuredLine(`- ${childName} is the child using this device.`, 'child_profile');
-  }
-
-  if (signals.interests.length > 0) {
-    pushStructuredLine(`- ${displayName} enjoys ${formatMemoryList(signals.interests)} with Cheeko.`, 'interests');
-  }
-
-  if (signals.expectsMemory && childName) {
-    pushStructuredLine(`- ${childName} expects Cheeko to remember previous conversations.`, 'memory_expectation');
-  } else if (signals.expectsMemory) {
-    pushStructuredLine('- The child expects Cheeko to remember previous conversations.', 'memory_expectation');
-  }
-
-  if (signals.topics.length > 0) {
-    pushStructuredLine(`- Recent recurring topics include ${formatMemoryList(signals.topics)}.`, 'recurring_topics');
-  }
-
-  const durableExistingLines = parseRollingMemoryBullets(existing)
-    .filter((line) => !isEphemeralRollingLine(line))
-    .filter((line) => !isNarrativeSessionLine(line));
-  durableExistingLines.forEach((line) => {
-    const lineCategory = categorizeRollingMemoryLine(line);
-    if (lineCategory && generatedCategories.has(lineCategory)) return;
-    pushUniqueLine(line);
-  });
-
-  if (lines.length === 1) {
-    pushUniqueLine(`- ${truncateMemoryText(latest, 500)}`);
-  }
-
-  return truncateMemoryText(lines.join('\n'));
-};
-
-/**
- * The child's rolling conversation summary.
- *
- * Scoped by owner key, so it follows the child to a new toy and a sibling on a
- * hand-me-down cannot read it. There is deliberately no fallback to
- * `ai_agent.summary_memory`: that column belongs to the Character, is shared by
- * every device using it, and reading it here is exactly how one child's memory
- * reached the next. A child with no summary yet starts with none.
- */
-const getExistingOverallMemory = async ({ normalizedMac }) => {
-  const ownerKey = await resolveOwnerKey(normalizedMac);
-  const existingDocument = await prisma.device_memory_documents.findFirst({
-    where: {
-      owner_key: ownerKey,
-      document_key: 'summary'
-    },
-    select: { content: true },
-    orderBy: { updated_at: 'desc' }
-  });
-
-  return existingDocument?.content || '';
-};
-
-const saveRollingOverallMemory = async ({
-  macAddress,
-  latestSummary,
-  source,
-  sessionId,
-  metadata = {}
-}) => {
-  const normalizedMac = normalizeMacAddress(macAddress);
-  if (!normalizedMac) throw new Error('Invalid MAC address format');
-  if (latestSummary === undefined || latestSummary === null) throw new Error('latestSummary is required');
-
-  const existingMemory = await getExistingOverallMemory({ normalizedMac });
-  const rollingMemory = buildRollingOverallMemory({
-    existingMemory,
-    latestSummary
-  });
-
-  // ai_agent.summary_memory is no longer written. It is the Character row, shared
-  // by every device on that character, so rolling one child's memory into it both
-  // leaked it to the next child and let two children overwrite each other. The
-  // column stays for the character CRUD and as the rollback path.
-  await saveDeviceMemoryDocument({
-    macAddress: normalizedMac,
-    documentKey: 'summary',
-    memoryType: 'summary',
-    content: rollingMemory,
-    source,
-    sessionId,
-    metadata: {
-      ...metadata,
-      rollingMemory: true,
-      latestSummary: normalizeMemoryText(latestSummary)
-    }
-  });
-
-  return {
-    agent: null,
-    summaryMemory: rollingMemory
-  };
-};
-
-const consolidateDeviceMemoryForSession = async ({ macAddress, sessionId }) => {
-  const normalizedMac = normalizeMacAddress(macAddress);
-  if (!normalizedMac) throw new Error('Invalid MAC address format');
-  if (!sessionId) throw new Error('sessionId is required');
-
-  const [summaryRecord, messages] = await Promise.all([
-    prisma.voice_session_summaries.findUnique({
-      where: { session_id: sessionId },
-      select: {
-        summary: true,
-        model: true,
-        source_message_count: true
-      }
-    }),
-    prisma.voice_session_messages.findMany({
-      where: { session_id: sessionId },
-      select: {
-        sequence: true,
-        role: true,
-        content: true
-      },
-      orderBy: { sequence: 'asc' },
-      take: 40
-    })
-  ]);
-
-  if (!summaryRecord?.summary && (!messages || messages.length === 0)) {
-    return {
-      consolidated: false,
-      reason: 'no_session_memory_inputs',
-      documentKeys: []
-    };
-  }
-
-  const documentKeys = [];
-  if (summaryRecord?.summary) {
-    await saveRollingOverallMemory({
-      macAddress: normalizedMac,
-      latestSummary: summaryRecord.summary,
-      source: 'session_end_consolidation',
-      sessionId,
-      metadata: {
-        model: summaryRecord.model || null,
-        sourceMessageCount: summaryRecord.source_message_count ?? null
-      }
-    });
-    documentKeys.push('summary');
-  }
-
-  const episodeKey = `session:${sessionId}`;
-  const episodeContent = buildSessionEpisodeMemoryContent({
-    summary: summaryRecord?.summary
-  });
-
-  if (episodeContent.trim()) {
-    await saveDeviceMemoryDocument({
-      macAddress: normalizedMac,
-      documentKey: episodeKey,
-      memoryType: 'episode',
-      content: episodeContent,
-      source: 'session_end_consolidation',
-      sessionId,
-      metadata: {
-        messageCount: messages ? messages.length : 0,
-        summaryModel: summaryRecord?.model || null,
-        sourceMessageCount: summaryRecord?.source_message_count ?? null
-      }
-    });
-    documentKeys.push(episodeKey);
-  }
-
-  return {
-    consolidated: documentKeys.length > 0,
-    documentKeys
-  };
-};
-
 const endVoiceSession = async ({ macAddress, sessionId, status = 'ended', endedAt }) => {
   const normalizedMac = normalizeMacAddress(macAddress);
   if (!normalizedMac) throw new Error('Invalid MAC address format');
@@ -917,30 +526,7 @@ const endVoiceSession = async ({ macAddress, sessionId, status = 'ended', endedA
     }
   });
 
-  let memoryConsolidation;
-  try {
-    memoryConsolidation = await consolidateDeviceMemoryForSession({
-      macAddress: normalizedMac,
-      sessionId
-    });
-  } catch (error) {
-    logger.error('Failed to consolidate device memory for ended session:', {
-      error: error.message,
-      mac: normalizedMac,
-      sessionId
-    });
-    memoryConsolidation = {
-      consolidated: false,
-      reason: 'consolidation_failed',
-      error: error.message,
-      documentKeys: []
-    };
-  }
-
-  return {
-    ...session,
-    memoryConsolidation
-  };
+  return session;
 };
 
 const saveVoiceSessionSummary = async ({
@@ -977,6 +563,7 @@ const saveVoiceSessionSummary = async ({
     create: {
       session_id: sessionId,
       mac_address: normalizedMac,
+      kid_id: device.kid_id ?? null,
       summary,
       model: model || null,
       source_message_count: sourceMessageCount ?? null,
@@ -985,6 +572,7 @@ const saveVoiceSessionSummary = async ({
     },
     update: {
       mac_address: normalizedMac,
+      kid_id: device.kid_id ?? null,
       summary,
       model: model || null,
       source_message_count: sourceMessageCount ?? null,
@@ -1004,32 +592,11 @@ const saveVoiceSessionSummary = async ({
   };
   logger.info(`[VOICE-SESSION] Saved session summary record ${JSON.stringify(savedSummaryLog)}`);
 
-  const rollingMemory = await saveRollingOverallMemory({
-    macAddress: normalizedMac,
-    latestSummary: summary,
-    source: 'rolling_session_summary',
-    sessionId,
-    agentId: resolvedAgentId,
-    metadata: {
-      model: model || null,
-      sourceMessageCount: sourceMessageCount ?? null
-    }
-  });
-
-  const rollingSummaryLog = {
-    macAddress: normalizedMac,
-    sessionId,
-    agentId: resolvedAgentId,
-    summaryMemoryChars: rollingMemory?.summaryMemory ? rollingMemory.summaryMemory.length : 0,
-    insertedSummaryMemory: rollingMemory?.summaryMemory || null
-  };
-  logger.info(`[VOICE-SESSION] Updated rolling agent summary memory ${JSON.stringify(rollingSummaryLog)}`);
-
   return {
     sessionId,
     macAddress: normalizedMac,
     agentId: resolvedAgentId,
-    summaryMemory: rollingMemory.summaryMemory
+    summaryMemory: summaryRecord.summary
   };
 };
 
@@ -2114,11 +1681,16 @@ const clearMemoriesByMac = async (mac) => {
 // =============================================
 
 /**
- * Save/update agent summary memory by device MAC
- * Used by LiveKit workers to persist conversation summary
+ * Accepts a summary from a LiveKit worker and stores nothing.
+ *
+ * picoclaw still PUTs every session summary here. The rolling memory document
+ * it used to feed was never read by the prompt (picoclaw reads MEMORY.md), and
+ * the summary is already kept in voice_session_summaries and the workspace
+ * mirror. Kept as an acknowledging endpoint so the worker does not log errors.
+ * ponytail: remove once picoclaw stops calling /agent/saveMemory.
  * @param {string} mac - Device MAC address
- * @param {string} summaryMemory - Summary memory content to save
- * @returns {Promise<Object>} Updated agent info
+ * @param {string} summaryMemory - Ignored
+ * @returns {Promise<Object>} The device's agent id
  */
 const saveMemory = async (mac, summaryMemory) => {
   const normalizedMac = normalizeMacAddress(mac);
@@ -2132,19 +1704,10 @@ const saveMemory = async (mac, summaryMemory) => {
     throw new Error('Device or agent not found');
   }
 
-  const rollingMemory = await saveRollingOverallMemory({
-    macAddress: normalizedMac,
-    latestSummary: summaryMemory,
-    source: 'save_memory',
-    agentId: device.agent_id
-  });
-
-  const agent = rollingMemory.agent;
-
   return {
-    agentId: agent ? agent.id : device.agent_id,
-    agentName: agent ? agent.agent_name : null,
-    summaryMemory: rollingMemory.summaryMemory
+    agentId: device.agent_id,
+    agentName: null,
+    summaryMemory: null
   };
 };
 
@@ -3293,7 +2856,6 @@ module.exports = {
   getDeviceWorkspaceArtifact,
   saveDeviceMemoryDocument,
   listDeviceMemoryDocuments,
-  consolidateDeviceMemoryForSession,
   clearMemoriesByMac,
   // Agent memory and mode methods
   saveMemory,
@@ -3317,10 +2879,4 @@ module.exports = {
   // MCP Access Point methods
   getMcpAddress,
   getMcpTools
-};
-
-module.exports.__testables = {
-  buildRollingOverallMemory,
-  buildSessionEpisodeMemoryContent,
-  normalizeMemoryText
 };
