@@ -57,6 +57,9 @@ class LiveKitBridge extends EventEmitter {
     this.isAudioPlaying = false; // Track if audio is actively playing
     this.audioPlayingStartTime = null; // Track when audio started playing (for stuck detection)
     this.stopAudioForwarding = false; // Flag to stop audio forwarding during mode switch
+    this._ttsTurnActive = false;
+    this._ttsTurnGeneration = 0;
+    this._pendingTtsStopTimer = null;
 
     // Add agent join tracking
     this.agentJoined = false;
@@ -396,6 +399,9 @@ class LiveKitBridge extends EventEmitter {
     // 3. Reset audio playing state
     this.isAudioPlaying = false;
     this.audioPlayingStartTime = null;
+    this.cancelPendingTtsStop();
+    this._ttsTurnActive = false;
+    this._ttsTurnGeneration += 1;
 
     // 4. Set flag to stop any ongoing audio forwarding
     this.stopAudioForwarding = true;
@@ -581,6 +587,10 @@ class LiveKitBridge extends EventEmitter {
                 this.markAgentJoined(participant.identity, "data_event_state_changed");
               }
               console.log(`🔄 [STATE] Agent state changed: ${data.data.old_state} → ${data.data.new_state} (device: ${this.macAddress})`);
+              this.handleTtsAgentStateChange(
+                data.data.old_state,
+                data.data.new_state
+              );
               if (
                 data.data.old_state === "speaking" &&
                 data.data.new_state === "listening"
@@ -591,8 +601,6 @@ class LiveKitBridge extends EventEmitter {
                 this.isAudioPlaying = false;
                 this.audioPlayingStartTime = null;
                 console.log(`🎵 [AUDIO-STOP] TTS stopped, sending tts_stop in 500ms (device: ${this.macAddress})`);
-                this.scheduleTtsStop();
-
                 // If we're in ending phase, send goodbye MQTT message now that TTS finished
                 if (
                   this.connection &&
@@ -762,12 +770,12 @@ class LiveKitBridge extends EventEmitter {
               }
               const { old_state, new_state } = event.data;
               console.log(`🔄 [STATE] Agent state changed: ${old_state} → ${new_state} (device: ${this.macAddress})`);
+              this.handleTtsAgentStateChange(old_state, new_state);
               if (old_state === "speaking" && new_state === "listening") {
                 this.finalizeAgentAudioCapture("agent_stream_speaking_stopped");
                 this.isAudioPlaying = false;
                 this.audioPlayingStartTime = null;
                 console.log(`🎵 [AUDIO-STOP] TTS stopped via stream, sending tts_stop in 500ms (device: ${this.macAddress})`);
-                this.scheduleTtsStop();
                 if (this.connection && this.connection.isEnding && !this.connection.goodbyeSent) {
                   this.connection.goodbyeSent = true;
                   this.connection.sendMqttMessage(JSON.stringify({
@@ -1645,12 +1653,18 @@ class LiveKitBridge extends EventEmitter {
   // start: an interrupted greeting's stop arrived 121ms after the reply's start
   // (dev, 2026-09-18) and the device played none of the reply.
   scheduleTtsStop() {
-    this.cancelPendingTtsStop();
+    if (!this._ttsTurnActive || this._pendingTtsStopTimer) return false;
+
+    const generation = this._ttsTurnGeneration;
     this._pendingTtsStopTimer = setTimeout(() => {
       this._pendingTtsStopTimer = null;
+      if (!this._ttsTurnActive || generation !== this._ttsTurnGeneration) {
+        return;
+      }
       console.log(`📤 [TTS-STOP] Sending tts stop message now (device: ${this.macAddress})`);
       this.sendTtsStopMessage();
     }, 500);
+    return true;
   }
 
   cancelPendingTtsStop() {
@@ -1660,7 +1674,20 @@ class LiveKitBridge extends EventEmitter {
     return true;
   }
 
-  // Send TTS start message to device (with dedup — both DataReceived and text stream fire)
+  handleTtsAgentStateChange(oldState, newState) {
+    if (oldState !== "speaking" && newState === "speaking") {
+      this.isAudioPlaying = true;
+      this.audioPlayingStartTime = Date.now();
+      if (this.connection?.updateActivityTime) {
+        this.connection.updateActivityTime();
+      }
+      this.sendTtsStartMessage();
+    } else if (oldState === "speaking" && newState === "listening") {
+      this.scheduleTtsStop();
+    }
+  }
+
+  // Start one TTS turn. Later speech_created events carry sentence metadata.
   sendTtsStartMessage(text = "") {
     if (!this.connection) return;
 
@@ -1670,19 +1697,15 @@ class LiveKitBridge extends EventEmitter {
     if (this.cancelPendingTtsStop()) {
       console.log(`📤 [TTS-STOP] Flushing pending tts stop before new speech (device: ${this.macAddress})`);
       this.sendTtsStopMessage();
-      this._lastTtsStartTime = null; // the flushed stop ended the old turn; this one needs a real start
     }
 
-    // Within the same speaking turn (chunks < 3s apart), the first chunk is
-    // tts_start (triggers playback); later chunks become per-sentence updates so
-    // the client can show each sentence's emotion. A gap > 3s starts a new turn.
-    const now = Date.now();
-    if (this._lastTtsStartTime && (now - this._lastTtsStartTime) < 3000) {
-      this._lastTtsStartTime = now;
+    if (this._ttsTurnActive) {
       if (text) this.sendTtsSentenceStartMessage(text);
       return;
     }
-    this._lastTtsStartTime = now;
+
+    this._ttsTurnActive = true;
+    this._ttsTurnGeneration += 1;
 
     const message = {
       type: "tts",
@@ -1713,20 +1736,17 @@ class LiveKitBridge extends EventEmitter {
     this.connection.sendMqttMessage(JSON.stringify(message));
   }
 
-  // Send TTS stop message to device (with dedup — both DataReceived and text stream fire)
+  // End the current TTS turn immediately. Agent state changes normally use
+  // scheduleTtsStop so the device has time to drain its playout buffer.
   sendTtsStopMessage() {
+    this.cancelPendingTtsStop();
+    this._ttsTurnActive = false;
+    this._ttsTurnGeneration += 1;
+
     if (!this.connection) {
       console.log(`⚠️ [TTS-STOP] No connection, cannot send tts stop`);
       return;
     }
-
-    // Dedup: don't send tts stop twice within 3 seconds
-    const now = Date.now();
-    if (this._lastTtsStopTime && (now - this._lastTtsStopTime) < 3000) {
-      // console.log(`📝 [TTS-STOP-DEDUP] Skipping duplicate tts stop`);
-      return;
-    }
-    this._lastTtsStopTime = now;
 
     const message = {
       type: "tts",
@@ -2563,6 +2583,9 @@ class LiveKitBridge extends EventEmitter {
   async close() {
     this.finalizeDeviceAudioCapture("connection_close");
     this.finalizeAgentAudioCapture("connection_close");
+    this.cancelPendingTtsStop();
+    this._ttsTurnActive = false;
+    this._ttsTurnGeneration = (this._ttsTurnGeneration || 0) + 1;
 
     if (this.room) {
       console.log("[LiveKitBridge] Disconnecting from LiveKit room");
