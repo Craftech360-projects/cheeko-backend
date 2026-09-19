@@ -1379,6 +1379,115 @@ const updateCardMapping = async (data, _userId) => {
 };
 
 /**
+ * Point many physical cards at one content pack in a single call.
+ *
+ * A UID with no mapping gets one. A UID already mapped to something else (a
+ * different pack, a Q&A pack, an AI card) is moved onto this pack, and the
+ * fields that belonged to its old role are cleared so the lookup can't resolve
+ * it the old way first. Only the UIDs given are touched.
+ *
+ * @param {number|string} contentPackId
+ * @param {string[]} rfidUids - raw UIDs as typed; `7941AE0D`, `79:41:ae:0d` both fine
+ * @returns {Promise<{added: string[], moved: {rfidUid: string, fromContentPackId: string|null, fromName: string|null}[], unchanged: string[], invalid: string[]}>}
+ */
+const assignCardsToContentPack = async (contentPackId, rfidUids) => {
+  const pack = await prisma.rfid_content_pack.findFirst({
+    where: { id: BigInt(contentPackId) },
+    select: { id: true, content_type: true }
+  });
+  if (!pack) {
+    throw new Error('Content pack not found');
+  }
+
+  const invalid = [];
+  const uids = [];
+  for (const raw of rfidUids || []) {
+    const trimmed = String(raw ?? '').trim();
+    if (!trimmed) continue;
+    // Normalising alone would turn "hello" into "E"; refuse anything that
+    // isn't hex plus the usual separators.
+    const uid = /^[0-9a-fA-F:\-\s]+$/.test(trimmed) ? normalizeRfidUid(trimmed) : null;
+    if (!uid || uid.length > 50) {
+      invalid.push(trimmed);
+    } else if (!uids.includes(uid)) {
+      uids.push(uid);
+    }
+  }
+
+  const cardType = pack.content_type === 'sound_quiz' ? 'game' : 'content';
+  const added = [];
+  const moved = [];
+  const unchanged = [];
+
+  if (uids.length > 0) {
+    await prisma.$transaction(async (tx) => {
+      const existing = await tx.rfid_card_mapping.findMany({
+        where: { rfid_uid: { in: uids } },
+        select: {
+          id: true,
+          rfid_uid: true,
+          content_pack_id: true,
+          card_type: true,
+          rfid_content_pack: { select: { name: true } }
+        }
+      });
+      const byUid = new Map(existing.map(m => [m.rfid_uid, m]));
+
+      const toMove = [];
+      for (const uid of uids) {
+        const m = byUid.get(uid);
+        if (!m) {
+          added.push(uid);
+        } else if (m.content_pack_id === pack.id && m.card_type === cardType) {
+          unchanged.push(uid);
+        } else {
+          toMove.push(m.id);
+          moved.push({
+            rfidUid: uid,
+            fromContentPackId: m.content_pack_id != null ? String(m.content_pack_id) : null,
+            fromName: m.rfid_content_pack?.name || null
+          });
+        }
+      }
+
+      if (toMove.length > 0) {
+        await tx.rfid_card_mapping.updateMany({
+          where: { id: { in: toMove } },
+          data: {
+            content_pack_id: pack.id,
+            question_id: null,
+            question_pack_id: null,
+            question_ids: [],
+            card_type: cardType,
+            action_type: cardType,
+            action_data: {},
+            update_date: new Date()
+          }
+        });
+      }
+
+      if (added.length > 0) {
+        await tx.rfid_card_mapping.createMany({
+          data: added.map(uid => ({
+            rfid_uid: uid,
+            content_pack_id: pack.id,
+            question_ids: [],
+            card_type: cardType,
+            action_type: cardType,
+            action_data: {},
+            active: true,
+            status: 1
+          }))
+        });
+      }
+    });
+  }
+
+  logger.info(`[RFID] assign-cards pack=${pack.id}: added=${added.length} moved=${moved.length} unchanged=${unchanged.length} invalid=${invalid.length}`);
+  return { added, moved, unchanged, invalid };
+};
+
+/**
  * Delete card mapping (single)
  * @param {Object} data - Delete criteria (id or rfidUid)
  * @returns {Promise<null>} Returns null for Spring Boot compatibility (Result<Void>)
@@ -5149,6 +5258,7 @@ module.exports = {
   getCardsByQuestionId,
   lookupCardByUid,
   createCardMapping,
+  assignCardsToContentPack,
   updateCardMapping,
   deleteCardMapping,
   deleteCardMappings,

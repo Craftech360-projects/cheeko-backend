@@ -5,7 +5,7 @@ performance for every device the signed-in parent owns.
 
 | Endpoint | Auth | Query params |
 |---|---|---|
-| `GET /toy/api/mobile/progress/quiz` | Firebase ID token (`Authorization: Bearer <idToken>`) | `period`, `mac` (optional) |
+| `GET /toy/api/mobile/progress/quiz` | Firebase ID token (`Authorization: Bearer <idToken>`) | `period`, `mac` (optional), `week_start` (optional) |
 
 Source: [`src/routes/mobile.routes.js`](../src/routes/mobile.routes.js), logic in
 [`src/services/mobile.service.js`](../src/services/mobile.service.js)

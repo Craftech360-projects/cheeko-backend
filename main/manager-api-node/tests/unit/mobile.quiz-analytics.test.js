@@ -184,4 +184,52 @@ describe('mobile quiz analytics', () => {
     await expect(mobileService.getQuizAnalytics('uid', { period: 'fortnight' }))
       .rejects.toThrow(/period must be one of/);
   });
+
+  describe('a week named by week_start', () => {
+    test('reports that Monday-to-Sunday week', async () => {
+      // NOW is Monday 10 August, so 3-9 August is last week, whole.
+      const out = await mobileService.getQuizAnalytics('uid', {
+        period: 'week',
+        week_start: '2026-08-05', // any day of it snaps to its Monday
+        now: NOW,
+      });
+
+      expect(out.start_date).toBe('2026-08-03');
+      expect(out.end_date).toBe('2026-08-09');
+      expect(out.banks.find(b => b.bank === 'quiz').attempted).toBe(4);
+    });
+
+    test('compares a week in progress with the same days of the week before', async () => {
+      answerRows.push(
+        { question_id: 401n, result: 'correct', answered_at: new Date('2026-08-10T09:00:00Z') },
+        // Last Monday: the only day of last week this one-day-old week is set against.
+        { question_id: 402n, result: 'wrong', answered_at: new Date('2026-08-03T09:00:00Z') },
+      );
+      const out = await mobileService.getQuizAnalytics('uid', {
+        period: 'week',
+        week_start: '2026-08-10',
+        now: NOW,
+      });
+      answerRows.length -= 2;
+
+      expect(out.start_date).toBe('2026-08-10');
+      expect(out.end_date).toBe('2026-08-10');
+      expect(out.trend).toMatchObject({ accuracy: 100, previous_accuracy: 0, direction: 'up' });
+    });
+
+    test('a week that has not started yet reads as empty', async () => {
+      const out = await mobileService.getQuizAnalytics('uid', {
+        period: 'week',
+        week_start: '2026-08-17',
+        now: NOW,
+      });
+
+      expect(out.banks).toEqual([]);
+    });
+
+    test('is refused on any period but week', async () => {
+      await expect(mobileService.getQuizAnalytics('uid', { period: 'today', week_start: '2026-08-03', now: NOW }))
+        .rejects.toThrow(/week_start requires period=week/);
+    });
+  });
 });

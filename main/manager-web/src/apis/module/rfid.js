@@ -333,6 +333,24 @@ export default {
             }).send()
     },
 
+    // Assign many card UIDs to one content pack
+    assignCardsToContentPack(contentPackId, rfidUids, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/rfid/content-pack/${contentPackId}/assign-cards`)
+            .method('POST')
+            .data({ rfidUids })
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to assign cards:', err)
+                RequestService.reAjaxFun(() => {
+                    this.assignCardsToContentPack(contentPackId, rfidUids, callback)
+                })
+            }).send()
+    },
+
     // Update card
     updateCard(data, callback) {
         RequestService.sendRequest()
